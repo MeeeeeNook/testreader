@@ -55,6 +55,9 @@ export interface EditableTest {
   createdAt: number;
   updatedAt: number;
   authorId?: string;
+  sourceTestId?: string;
+  sectionIds?: string[];
+  sourceSections?: { testId: string; sectionId: string }[];
 }
 
 export interface TestMeta {
@@ -153,3 +156,4 @@ export interface ContentReport {
   status: 'open' | 'resolved';
   createdAt: number;
 }
+

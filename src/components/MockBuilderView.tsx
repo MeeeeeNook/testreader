@@ -1,4 +1,4 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { TestMeta, EditableTest, EditablePart } from '../types';
 import { firestoreAdapter } from '../services/firestoreAdapter';
 
@@ -26,6 +26,14 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     { testId: published[2]?.id || published[0]?.id || '', partIndex: 2 },
     { testId: published[3]?.id || published[0]?.id || '', partIndex: 3 },
   ]);
+
+  const publishedKey = published.map(t => t.id).join('|');
+  useEffect(() => {
+    setSelections(prev => Array.from({ length: count }, (_, i) => {
+      const selected = prev[i];
+      return published.some(t => t.id === selected?.testId) ? selected : { testId: published[i % (published.length || 1)]?.id || '', partIndex: 0 };
+    }));
+  }, [publishedKey, count]);
 
   const handleTestChange = (sectionIdx: number, testId: string) => {
     setSelections((prev) => {
@@ -67,6 +75,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     try {
       onNotify('Compiling full mock test…');
       const compiledParts: EditablePart[] = [];
+      const sourceSections: { testId: string; sectionId: string }[] = [];
       const usedKeys = new Set<string>();
 
       for (let i = 0; i < count; i++) {
@@ -81,11 +90,12 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
         usedKeys.add(key);
 
         const fullTest = await firestoreAdapter.getTestComplete(sel.testId);
-        const partToCopy = fullTest.parts[sel.partIndex] || fullTest.parts[0];
+        const partToCopy = fullTest.parts[sel.partIndex];
         if (!partToCopy) {
           throw new Error(`Section ${sel.partIndex + 1} not found in test ${fullTest.title}.`);
         }
-        compiledParts.push(JSON.parse(JSON.stringify(partToCopy)));
+        sourceSections.push({ testId: sel.testId, sectionId: partToCopy.id });
+        compiledParts.push({ ...JSON.parse(JSON.stringify(partToCopy)), id: `p${i}` });
       }
 
       // Renumber questions sequentially 1..40 across all selected parts
@@ -130,6 +140,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
         status: 'published',
         duration: skill === 'reading' ? 60 : 30,
         parts: compiledParts,
+        sourceSections,
         createdAt: Date.now(),
         updatedAt: Date.now(),
       };
@@ -257,3 +268,4 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     </div>
   );
 };
+

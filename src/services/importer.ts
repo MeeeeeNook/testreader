@@ -1,5 +1,5 @@
 import JSZip from 'jszip';
-import { ScoreResult, scoreTest } from './scoring';
+
 
 export interface TestSlot {
   id: string;
@@ -41,6 +41,9 @@ export interface EditableTest {
   createdAt: number;
   updatedAt: number;
   authorId?: string;
+  sourceTestId?: string;
+  sectionIds?: string[];
+  sourceSections?: { testId: string; sectionId: string }[];
 }
 
 export interface TestMeta {
@@ -155,6 +158,16 @@ export function repairQuestions(raw: string): DocumentFragment {
   for (const [a, b] of spans.reverse()) {
     raw = raw.slice(0, a) + raw.slice(b);
   }
+  // Some exports insert HTML and unescaped apostrophes inside multiline input
+  // values. Rebuild those detached source inputs before parsing so a malformed
+  // value cannot swallow later choices. The visible .label remains authoritative.
+  const attribute = (value: string) => value.replace(/&/g, '&amp;').replace(/"/g, '&quot;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  raw = raw.replace(/<input[ \t]*\r?\n([\s\S]*?)\r?\n[ \t]*>/gi, (_tag, attributes: string) => {
+    const name = /\bname\s*=\s*(['"])(.*?)\1/i.exec(attributes)?.[2] || '';
+    const value = /\bvalue\s*=\s*(['"])([\s\S]*?)\1(?=[ \t]*(?:\r?\n|$))/i.exec(attributes)?.[2] || '';
+    const correct = /(?:^|\s)is-value(?:\s|=|$)/i.test(attributes);
+    return `<input name="${attribute(name)}" value="${attribute(value)}"${correct ? ' is-value' : ''}>`;
+  });
   raw = raw.replace(/\sstyle\s*=\s*(['"])([\s\S]*?)\1/gi, (match, q, v) => (v.includes('<') ? '' : match));
 
   const template = document.createElement('template');
@@ -185,6 +198,7 @@ export function safeContent(root: Node, assets: Record<string, string> = {}): No
       if (!cached && /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(src) && src.length < 15e6) {
         cached = src;
       }
+      if (!cached && /^https:\/\/firebasestorage\.googleapis\.com\//i.test(src)) cached = src;
       if (!cached) {
         const span = document.createElement('span');
         span.className = 'source-image-missing';
@@ -224,6 +238,7 @@ export function cleanLayout(raw: string): string {
   const template = document.createElement('template');
   template.innerHTML = raw || '';
   const root = template.content;
+  root.querySelectorAll('.result-explain,.true-answer,.collapse-explain,.btn-explain-group').forEach(e => e.remove());
   const placeholders: { token: string; id: string }[] = [];
 
   const slots = Array.from(root.querySelectorAll('[data-slot]'));
@@ -253,7 +268,7 @@ export function extractTitle(source: string, fallback: string): string {
   return fallback.replace(/\.(html?|zip)$/i, '');
 }
 
-export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Partial<EditableTest> = {}): EditableTest {
+export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Partial<EditableTest> = {}, assets: Record<string, string> = {}): EditableTest {
   const rawParts = data.parts;
   const parts: EditablePart[] = [];
   const testId = meta.id || fingerprint(JSON.stringify(rawParts));
@@ -329,6 +344,7 @@ export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Par
     });
 
     let cursor = expected[0] || 1;
+    while (assigned.has(cursor)) cursor++;
     Array.from(q.querySelectorAll('.question')).forEach((wEl) => {
       const w = wEl as HTMLElement;
       const type = [
@@ -373,6 +389,7 @@ export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Par
       } else {
         const old = w.getAttribute('question-number') || txt(w.querySelector('.number')) || String(cursor);
         const n = +old;
+        if (!Number.isInteger(n) || n < 1) throw new Error('A question number could not be read.');
         nums = [n];
         mapping.set(old, n);
       }
@@ -382,6 +399,7 @@ export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Par
         assigned.add(n);
       });
       cursor = Math.max(...nums) + 1;
+      while (assigned.has(cursor)) cursor++;
       widgets.push({ w, type, nums });
 
       if (type === 'true_false' || type === 'yes_no') {
@@ -446,7 +464,7 @@ export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Par
           nums: numberList(el.id),
           options: Array.from(el.querySelectorAll('.answer-item')).map((o, i) => ({
             label: txt(o),
-            value: heading ? txt(o).split(/\s/)[0] : String.fromCharCode(65 + i),
+            value: heading ? txt(o).split(/\s/)[0].replace(/[.)]$/, '') : String.fromCharCode(65 + i),
           })),
         };
       });
@@ -464,32 +482,135 @@ export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Par
     }
 
     const slots: Record<string, TestSlot> = {};
-    const questions: TestQuestion[] = Array.from(keys.entries())
-      .map(([n, k]) => {
-        const container = document.createElement('div');
-        if (k.explanation) container.append(safeContent(k.explanation));
-        return {
-          number: n,
-          kind: k.kind || 'fill_blank',
-          answer: k.answer || '',
-          explanationHtml: container.innerHTML,
-          referenceQuote: '',
-          missing: false,
-        };
-      })
-      .sort((a, b) => a.number - b.number);
-
-    // Layout slots replacement
-    function layout(root: DocumentFragment): string {
-      const el = document.createElement('div');
-      el.append(safeContent(root));
-      // Process input replacements into slot tokens
-      return el.innerHTML;
+    const missing = new Set<number>();
+    function slot(numbers: number[], type: TestSlot['type'], label = '', options: TestSlot['options'] = []) {
+      const id = 's' + Object.keys(slots).length;
+      slots[id] = { id, numbers, type, label, options };
+      const el = document.createElement('span');
+      el.dataset.slot = id;
+      return el;
     }
-
+    for (const { w, type, nums } of widgets) {
+      nums.forEach(n => { keys.get(n)!.kind = type; });
+      const n = nums[0];
+      if (type === 'true_false' || type === 'yes_no') {
+        const options = (type === 'true_false' ? ['TRUE', 'FALSE', 'NOT GIVEN'] : ['YES', 'NO', 'NOT GIVEN'])
+          .map(value => ({ value, label: value }));
+        w.replaceWith(slot(nums, 'select', txt(w.querySelector('.name')), options));
+      } else if (type === 'fill_blank') {
+        w.replaceWith(slot(nums, 'text'));
+      } else if (type === 'matching_features') {
+        const bank = banks.find(b => b.nums.includes(n));
+        w.replaceWith(slot(nums, bank ? 'select' : 'text', '', bank?.options.map(o => ({ value: o.value, label: o.value + ' - ' + o.label })) || []));
+      } else if (type === 'multiple_choice_one' || type === 'multiple_choice_many') {
+        const options = Array.from(w.querySelectorAll('.form-check')).map(opt => {
+          const input = opt.querySelector('input');
+          const value = txt(opt.querySelector('.number-alphabet')).replace(/[.)]$/, '');
+          return { value, label: txt(opt.querySelector('.label')) || input?.value || '' };
+        }).filter(o => o.value);
+        w.replaceWith(slot(nums, type === 'multiple_choice_many' ? 'multi' : 'radio', txt(w.querySelector('.name')), options));
+      } else if (type === 'matching_names') {
+        const block = document.createElement('div');
+        const letters = Array.from(w.querySelectorAll('.number-alphabet')).map(txt);
+        for (const item of Array.from(w.querySelectorAll('.item-question'))) {
+          const num = Number((item as HTMLElement).dataset.assigned);
+          const label = item.querySelector('.label')?.cloneNode(true) as HTMLElement | undefined;
+          label?.querySelectorAll('.number').forEach(e => e.remove());
+          const inputs = Array.from(item.querySelectorAll('input'));
+          const options = (letters.length ? letters : inputs.map(e => e.value)).map(value => ({ value, label: value }));
+          const key = keys.get(num)!;
+          const index = inputs.findIndex(e => e.value === key.answer);
+          if (index >= 0 && letters[index] && key.answer !== letters[index]) key.answer = letters[index] + ' · ' + key.answer;
+          block.append(slot([num], 'select', txt(label || null), options));
+        }
+        w.replaceWith(block);
+      }
+    }
+    // Feedback is private data, never part of the public question layout.
+    for (const root of [topic, q]) {
+      root.querySelectorAll('.result-explain,.true-answer,.collapse-explain,.btn-explain-group').forEach(e => e.remove());
+    }
+    const headingOptions = new Map<number, TestSlot['options']>();
+    for (const bank of banks) {
+      if (!bank.el.parentNode) continue;
+      const box = document.createElement('div');
+      for (const option of bank.options) {
+        const row = document.createElement('div');
+        row.textContent = bank.heading ? option.label : option.value + '  ' + option.label;
+        box.append(row);
+      }
+      if (bank.heading) {
+        for (const h of headings.filter(h => bank.nums.includes(h.n))) headingOptions.set(h.n, bank.options);
+      }
+      bank.el.replaceWith(box);
+    }
+    for (const h of headings) {
+      const node = Array.from(topic.querySelectorAll('[data-q-anchor]')).find(e => (e as HTMLElement).dataset.qAnchor === String(h.n));
+      const options = headingOptions.get(h.n) || [];
+      keys.get(h.n)!.kind = 'heading';
+      node?.append(slot([h.n], options.length ? 'select' : 'text', '', options));
+    }
+    function substitute(root: DocumentFragment) {
+      // Walk recursively instead of interpreting or executing source scripts.
+      const nodes: Text[] = [];
+      const walk = (node: Node) => {
+        if (node.nodeType === Node.TEXT_NODE) nodes.push(node as Text);
+        else Array.from(node.childNodes).forEach(walk);
+      };
+      walk(root);
+      for (const node of nodes) {
+        if (!/\{(?:CAU|DAP_AN)_/.test(node.data)) continue;
+        const fragment = document.createDocumentFragment();
+        const re = /\{CAU_([\d_]+)\}|\{DAP_AN_[\d_]+\}/g;
+        let last = 0, match: RegExpExecArray | null;
+        while ((match = re.exec(node.data))) {
+          fragment.append(document.createTextNode(node.data.slice(last, match.index)));
+          if (match[1]) {
+            const nums = match[1].split('_').map(Number);
+            for (const n of nums) {
+              ensure(n);
+              if (assigned.has(n)) fragment.append(document.createTextNode(` (${n}) `));
+              else if (nums.length === 1) { assigned.add(n); fragment.append(slot([n], 'text')); }
+              else missing.add(n); // A range placeholder contains no recoverable question text.
+            }
+          }
+          last = re.lastIndex;
+        }
+        fragment.append(document.createTextNode(node.data.slice(last)));
+        node.replaceWith(fragment);
+      }
+    }
+    substitute(topic);
+    substitute(q);
+    Array.from(keys.keys()).filter(n => !assigned.has(n)).forEach(n => missing.add(n));
+    for (const n of missing) {
+      const notice = document.createElement('p');
+      notice.textContent = n + '. Question text is missing from the saved file.';
+      q.append(notice);
+    }
+    const questions: TestQuestion[] = Array.from(keys.entries()).map(([n, k]) => {
+      const container = document.createElement('div');
+      if (k.explanation) container.append(safeContent(k.explanation, assets));
+      return { number: n, kind: k.kind || 'fill_blank', answer: k.answer || '',
+        explanationHtml: container.innerHTML, referenceQuote: '', missing: missing.has(n) };
+    }).sort((a, b) => a.number - b.number);
+    function layout(root: DocumentFragment): string {
+      // Keep only our typed placeholders through the HTML allowlist.
+      const placeholders = Array.from(root.querySelectorAll('[data-slot]')).map((e, i) => {
+        const id = (e as HTMLElement).dataset.slot!;
+        const token = 'IELTSSLOT' + i + 'END';
+        e.replaceWith(document.createTextNode(token));
+        return { id, token };
+      });
+      const el = document.createElement('div');
+      el.append(safeContent(root, assets));
+      let html = el.innerHTML;
+      for (const { id, token } of placeholders) html = html.replace(token, '<span data-slot="' + id + '"></span>');
+      return html;
+    }
+    const title = txt(topic.querySelector('h1,h2')) || `Passage ${partIndex + 1}`;
     const passageHtml = layout(topic);
     const questionHtml = layout(q);
-    const title = txt(topic.querySelector('h1,h2')) || `Passage ${partIndex + 1}`;
 
     parts.push({
       id: `p${partIndex}`,
@@ -576,3 +697,4 @@ export async function collectFiles(
 
   return { candidates, images, errors };
 }
+

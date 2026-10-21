@@ -4,6 +4,7 @@
  */
 
 export interface QuestionKey {
+  missing?: boolean;
   answer: string;
   kind?: string;
   explanationHtml?: string;
@@ -46,7 +47,7 @@ export function answerMatches(response: string, key: QuestionKey): boolean {
     .some((variant) => {
       const answer = normalizeAnswer(variant);
       if (['matching_features', 'matching_names', 'heading'].includes(key.kind || '')) {
-        const letter = /^([a-z]|[ivxlcdm]+)(?:\s*[.\-—–•]\s*|\s+|$)/i.exec(answer);
+        const letter = /^([a-z]|[ivxlcdm]+)(?:\s*[.\-—–•·]\s*|\s+|$)/i.exec(answer);
         if (letter && value === letter[1].toLowerCase()) return true;
       }
       return value === answer;
@@ -77,7 +78,7 @@ export function scoreTest(
       const key = getKey(n);
       const response = String(responses[n] || '');
       const status: ScoreRow['status'] =
-        missingSet.has(n) || !key.answer
+        missingSet.has(n) || key.missing || !key.answer
           ? 'ungraded'
           : !normalizeAnswer(response)
           ? 'blank'
@@ -146,3 +147,4 @@ export function estimatedBand(result: ScoreResult): number | null {
   const match = bounds.find(([threshold]) => result.correct >= threshold);
   return match ? match[1] : null;
 }
+

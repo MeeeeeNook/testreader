@@ -50,6 +50,7 @@ export default function App() {
   const [activeTest, setActiveTest] = useState<EditableTest | null>(null);
   const [activeMode, setActiveMode] = useState<'practice' | 'exam'>('practice');
   const [activeDuration, setActiveDuration] = useState(60);
+  const [activePreview, setActivePreview] = useState(false);
 
   // Active test editor state
   const [editingTest, setEditingTest] = useState<EditableTest | null>(null);
@@ -78,14 +79,23 @@ export default function App() {
     toastTimeoutRef.current = setTimeout(() => setToastMessage(null), 5000);
   }, []);
 
+  const previousUser = useRef<string | null>(null);
   // Subscribe to Authentication state
   useEffect(() => {
     const unsubscribe = subscribeAuth((state) => {
+      if (previousUser.current !== (state.user?.uid || null)) {
+        previousUser.current = state.user?.uid || null;
+        setActiveTest(null); setEditingTest(null); setSelectedTestFull(null); setShowTestSetupModal(false);
+        setRoute('library'); setAttempts([]); setVocabulary([]); setReports([]); setLearners([]);
+        document.body.classList.remove('hub-exam');
+      }
       setUser(state.user);
       setUserRole(state.role);
       setSuspended(state.suspended);
       if (state.profile) {
         setProfile(state.profile);
+      } else {
+        setProfile({ id: 'guest', email: '', name: 'Learner', target: 7.5, language: 'en', theme: 'light', fontSize: 16, favorites: [], status: 'active' });
       }
     });
     return unsubscribe;
@@ -103,23 +113,28 @@ export default function App() {
     try {
       // 1. Fetch lightweight test catalog
       const { tests: fetchedTests } = await firestoreAdapter.listTests({ pageSize: 100 });
+      if (previousUser.current !== (user?.uid || null)) return;
       setTests(fetchedTests);
 
       // 2. Fetch attempts
       if (user) {
         const userAttempts = await firestoreAdapter.list('attempts');
+        if (previousUser.current !== user.uid) return;
         setAttempts(userAttempts as AttemptRecord[]);
 
         // 3. Fetch vocabulary
         const userVocab = await firestoreAdapter.list('vocabulary');
+        if (previousUser.current !== user.uid) return;
         setVocabulary(userVocab as VocabularyItem[]);
 
         // 4. If admin, load reports & learners
         if (userRole === 'admin') {
           const reportsList = await firestoreAdapter.list('reports');
+          if (previousUser.current !== user.uid) return;
           setReports(reportsList as ContentReport[]);
 
           const learnersList = await firestoreAdapter.list('users');
+          if (previousUser.current !== user.uid) return;
           setLearners(learnersList as UserProfile[]);
         }
       }
@@ -187,7 +202,8 @@ export default function App() {
   };
 
   // Start Test Workspace Session
-  const handleStartSession = (testToStart: EditableTest, modeToUse: 'practice' | 'exam', durationMinutes: number) => {
+  const handleStartSession = (testToStart: EditableTest, modeToUse: 'practice' | 'exam', durationMinutes: number, preview = false) => {
+    setActivePreview(preview);
     setActiveTest(testToStart);
     setActiveMode(modeToUse);
     setActiveDuration(durationMinutes);
@@ -219,6 +235,8 @@ export default function App() {
     if (setupSection !== 'all') {
       const sectionPart = chosen.parts[setupSection];
       if (sectionPart) {
+        chosen.sourceTestId = selectedTestFull.id;
+        chosen.sectionIds = [sectionPart.id];
         chosen.parts = [sectionPart];
         chosen.id = `${selectedTestFull.id}_part_${setupSection}`;
         chosen.title = `${selectedTestFull.title} — ${sectionPart.title}`;
@@ -337,7 +355,7 @@ export default function App() {
   const handleToggleLearnerStatus = async (targetUserId: string, newStatus: 'active' | 'suspended') => {
     const res = await fetch('/api/admin/user-status', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user?.getIdToken()}` },
       body: JSON.stringify({
         targetUserId,
         newStatus,
@@ -361,6 +379,7 @@ export default function App() {
     let imported = 0;
     let duplicates = 0;
     const errors: string[] = [];
+    const seenIds = new Set<string>();
     const candidates: { test: EditableTest; name: string }[] = [];
 
     try {
@@ -392,13 +411,14 @@ export default function App() {
         const { candidates: htmlCandidates, images, errors: parseErrors } = await collectFiles(nonJsonFiles);
         errors.push(...parseErrors);
 
+        const assets: Record<string, string> = {};
         // Upload any diagrams/images to Firebase Storage
         for (const img of images) {
           try {
-            await firestoreAdapter.uploadMedia(img.blob, `media/${img.name}`);
+            assets[img.name] = await firestoreAdapter.uploadMedia(img.blob, `media/${crypto.randomUUID()}-${img.name}`);
           } catch {
-            // ignore
-          }
+            errors.push(`${img.name}: diagram upload failed.`);
+          } finally { URL.revokeObjectURL(img.url); }
         }
 
         // Parse HTML candidates
@@ -406,7 +426,7 @@ export default function App() {
           try {
             const rawParts = jsonParts(c.source);
             const title = extractTitle(c.source, c.name);
-            const editable = toEditable({ title, parts: rawParts });
+            const editable = toEditable({ title, parts: rawParts }, {}, assets);
             candidates.push({ test: editable, name: c.name });
           } catch (err) {
             errors.push(`${c.name}: ${err instanceof Error ? err.message : String(err)}`);
@@ -418,12 +438,18 @@ export default function App() {
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          const isDuplicate = tests.some((t) => t.id === item.test.id || t.title === item.test.title);
-          if (isDuplicate) {
-            duplicates++;
-            continue;
+          if (seenIds.has(item.test.id)) { duplicates++; continue; }
+          const existing = await firestoreAdapter.get('tests', item.test.id);
+          if (existing) {
+            const full = await firestoreAdapter.getTestComplete(item.test.id);
+            const broken = full.parts.some(p => p.questions.some(q => !q.missing) && !Object.keys(p.slots || {}).length);
+            if (!broken) { seenIds.add(item.test.id); duplicates++; continue; }
+            // Repair the old incomplete importer output, keeping admin catalog settings.
+            item.test = { ...item.test, title: full.title, source: full.source, status: full.status,
+              access: full.access, duration: full.duration, createdAt: full.createdAt };
           }
           await firestoreAdapter.saveTestComplete(item.test);
+          seenIds.add(item.test.id);
           imported++;
         } catch (saveErr) {
           errors.push(`${item.name}: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
@@ -432,7 +458,7 @@ export default function App() {
 
       setUploadReport({ imported, duplicates, errors });
       await loadData();
-      notify(`Import complete: ${imported} added, ${duplicates} duplicates skipped.`);
+      notify(`Import complete: ${imported} imported or repaired, ${duplicates} duplicates skipped.`);
     } catch (topErr) {
       notify('Upload failed: ' + (topErr instanceof Error ? topErr.message : String(topErr)));
     } finally {
@@ -469,10 +495,12 @@ export default function App() {
     return (
       <>
         <TestWorkspace
+          key={`${profile.id}:${activeTest.id}:${activeMode}`}
           test={activeTest}
           mode={activeMode}
           initialDurationMinutes={activeDuration}
           profile={profile}
+          isPreview={activePreview}
           onReturnToLibrary={() => {
             document.body.classList.remove('hub-exam');
             setRoute('library');
@@ -615,7 +643,7 @@ export default function App() {
                 setRoute('admin');
               }}
               onPreview={(testToPreview) => {
-                handleStartSession(testToPreview, 'practice', 0);
+                handleStartSession(testToPreview, 'practice', 0, true);
               }}
               onClose={() => setRoute('admin')}
               onNotify={notify}
@@ -792,7 +820,7 @@ export default function App() {
           {uploadReport && (
             <div>
               <p>
-                <strong>{uploadReport.imported}</strong> tests successfully imported ·{' '}
+                <strong>{uploadReport.imported}</strong> tests imported or repaired ·{' '}
                 <strong>{uploadReport.duplicates}</strong> duplicates skipped.
               </p>
 
@@ -825,3 +853,4 @@ export default function App() {
     </div>
   );
 }
+

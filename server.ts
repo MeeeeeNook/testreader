@@ -3,8 +3,10 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
 import { GoogleGenAI } from '@google/genai';
-import { initializeApp } from 'firebase/app';
-import { getFirestore, doc, getDoc, setDoc } from 'firebase/firestore';
+import { initializeApp, getApps, applicationDefault } from 'firebase-admin/app';
+import { getAuth } from 'firebase-admin/auth';
+import { getFirestore } from 'firebase-admin/firestore';
+import { loadAssessment, markAssessment, AssessmentError, type AssessmentStore } from './server/assessment.ts';
 import firebaseConfig from './firebase-applet-config.json' with { type: 'json' };
 
 dotenv.config();
@@ -17,97 +19,65 @@ const PORT = Number(process.env.PORT) || 3000;
 
 app.use(express.json({ limit: '50mb' }));
 
-// Initialize server-side Firebase instance
-const serverFirebaseApp = initializeApp(firebaseConfig, 'SERVER_INSTANCE');
-const serverDb = getFirestore(serverFirebaseApp, firebaseConfig.firestoreDatabaseId);
-
-// Gemini API instance for dictionary lookup
-const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
+// Server-only credentials use Application Default Credentials. Never expose a service-account key to Vite.
+function backend() {
+  const instance = getApps().find(a => a.name === 'READING_SERVER') || initializeApp({
+    credential: applicationDefault(), projectId: firebaseConfig.projectId,
+  }, 'READING_SERVER');
+  return { auth: getAuth(instance), db: getFirestore(instance, firebaseConfig.firestoreDatabaseId || '(default)') };
+}
+async function caller(req: express.Request) {
+  const token = /^Bearer (.+)$/i.exec(req.headers.authorization || '')?.[1];
+  if (!token) throw new AssessmentError(401, 'Sign in to continue.');
+  const { auth, db } = backend();
+  let identity;
+  try { identity = await auth.verifyIdToken(token); }
+  catch { throw new AssessmentError(401, 'Your sign-in has expired. Please sign in again.'); }
+  const [admin, profile] = await Promise.all([
+    db.doc(`admins/${identity.uid}`).get(), db.doc(`users/${identity.uid}`).get(),
+  ]);
+  if (profile.data()?.status === 'suspended') throw new AssessmentError(403, 'This account is suspended.');
+  const isAdmin = admin.exists || (identity.email === 'manhcuong2006ht@gmail.com' && identity.email_verified === true);
+  return { identity, isAdmin, db, profile };
+}
+function apiError(res: express.Response, error: unknown) {
+  if (error instanceof AssessmentError) return res.status(error.status).json({ error: error.message });
+  console.error('Backend request failed:', error);
+  return res.status(503).json({ error: 'The scoring service is unavailable. Please retry or ask the administrator to check the server Firebase credentials.' });
+}
+function assessmentStore(db: ReturnType<typeof backend>['db']): AssessmentStore {
+  return {
+    test: async id => (await db.doc(`tests/${id}`).get()).data(),
+    keys: async id => (await db.doc(`test_keys/${id}`).get()).data(),
+    sections: async id => (await db.collection(`tests/${id}/sections`).get()).docs.map(d => ({ ...d.data(), id: d.id })),
+  };
+}
 
 // Health check
 app.get('/api/health', (_req, res) => {
   res.json({ status: 'ok', timestamp: Date.now() });
 });
 
-// Auth sync & role determination
+// UID, email, and administrator status come from a verified token, never the request body.
 app.post('/api/auth/sync', async (req, res) => {
   try {
-    const { uid, email, displayName } = req.body;
-    if (!uid || !email) {
-      return res.status(400).json({ error: 'UID and email are required' });
-    }
-
-    const isAdminEmail = email.toLowerCase() === 'manhcuong2006ht@gmail.com';
-
-    // 1. If user is the designated initial administrator, ensure record in /admins/{uid}
-    if (isAdminEmail) {
-      try {
-        await setDoc(
-          doc(serverDb, 'admins', uid),
-          {
-            email,
-            addedBy: 'system',
-            createdAt: new Date().toISOString(),
-          },
-          { merge: true }
-        );
-      } catch (err) {
-        console.warn('Could not auto-provision admin record:', err);
-      }
-    }
-
-    // 2. Check if admin record exists
-    let isAdmin = isAdminEmail;
-    if (!isAdmin) {
-      try {
-        const adminDoc = await getDoc(doc(serverDb, 'admins', uid));
-        isAdmin = adminDoc.exists();
-      } catch {
-        isAdmin = false;
-      }
-    }
-
-    // 3. Ensure user profile exists in /users/{uid}
-    let userStatus = 'active';
-    try {
-      const userRef = doc(serverDb, 'users', uid);
-      const userSnap = await getDoc(userRef);
-      if (userSnap.exists()) {
-        userStatus = userSnap.data().status || 'active';
-      } else {
-        await setDoc(userRef, {
-          id: uid,
-          email,
-          name: displayName || email.split('@')[0],
-          target: 7.5,
-          language: 'en',
-          theme: 'light',
-          fontSize: 16,
-          favorites: [],
-          status: 'active',
-          createdAt: Date.now(),
-          updatedAt: Date.now(),
-        });
-      }
-    } catch (err) {
-      console.warn('Could not sync user profile:', err);
-    }
-
-    res.json({
-      role: isAdmin ? 'admin' : 'student',
-      status: userStatus,
+    const { identity, isAdmin, db, profile } = await caller(req);
+    if (!profile.exists) await db.doc(`users/${identity.uid}`).set({
+      id: identity.uid, email: identity.email || '', name: identity.name || 'Learner', target: 7.5,
+      language: 'en', theme: 'light', fontSize: 16, favorites: [], status: 'active', createdAt: Date.now(), updatedAt: Date.now(),
     });
-  } catch (error) {
-    console.error('Auth sync error:', error);
-    res.status(500).json({ error: 'Internal server error during auth sync' });
-  }
+    res.json({ role: isAdmin ? 'admin' : 'student', status: profile.data()?.status || 'active' });
+  } catch (error) { apiError(res, error); }
 });
 
 // Secure AI Dictionary & Vocabulary Lookup
 app.post('/api/dictionary', async (req, res) => {
   try {
+    await caller(req);
+    if (!process.env.GEMINI_API_KEY) throw new AssessmentError(503, 'Dictionary lookup is not configured.');
+    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
     const { text, context, language = 'en' } = req.body;
-    if (!text || typeof text !== 'string') {
+    if (!text || typeof text !== 'string' || text.length > 500 || (context && (typeof context !== 'string' || context.length > 5000))) {
       return res.status(400).json({ error: 'Text is required for dictionary lookup' });
     }
 
@@ -138,6 +108,7 @@ Fields required:
       example: parsed.example || context || '',
     });
   } catch (error) {
+    if (error instanceof AssessmentError) return apiError(res, error);
     console.error('Dictionary API error:', error);
     // Graceful fallback
     res.json({
@@ -149,98 +120,44 @@ Fields required:
   }
 });
 
-// Authoritative Server-Side Exam Submission & Scoring
-app.post('/api/submit-exam', async (req, res) => {
+// Practice review is explicit; question content and exam setup never receive private keys.
+app.post('/api/test-review', async (req, res) => {
   try {
-    const { testId, responses = {}, userId, mode = 'exam' } = req.body;
-    if (!testId) {
-      return res.status(400).json({ error: 'testId is required' });
-    }
-
-    // Fetch private answer keys from server Firestore
-    const keyDocRef = doc(serverDb, 'test_keys', testId);
-    const keySnap = await getDoc(keyDocRef);
-
-    if (!keySnap.exists()) {
-      return res.status(404).json({ error: 'Private answer keys not found for this test.' });
-    }
-
-    const { keys = {}, multiGroups = [] } = keySnap.data();
-
-    // Import deterministic scoring logic
-    const { scoreTest, estimatedBand } = await import('./src/services/scoring.ts');
-
-    const questionNumbers = Object.keys(keys).map(Number).sort((a, b) => a - b);
-    const scoringPart = {
-      numbers: questionNumbers,
-      keys,
-      multiGroups,
-    };
-
-    const result = scoreTest([scoringPart], responses);
-    const band = estimatedBand(result);
-
-    // Save attempt record if user is identified
-    const attemptId = `att_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
-    if (userId) {
-      try {
-        const attemptDoc = {
-          id: attemptId,
-          owner: userId,
-          testId,
-          mode,
-          createdAt: Date.now(),
-          responses,
-          result,
-          band,
-        };
-        await setDoc(doc(serverDb, `users/${userId}/attempts`, attemptId), attemptDoc);
-      } catch (saveErr) {
-        console.warn('Could not save attempt record on server:', saveErr);
-      }
-    }
-
-    // Now that test is submitted, return the result AND keys for review
-    res.json({
-      attemptId,
-      result,
-      band,
-      keys,
-    });
-  } catch (error) {
-    console.error('Exam submission error:', error);
-    res.status(500).json({ error: 'Failed to score exam submission.' });
-  }
+    const { db, isAdmin } = await caller(req);
+    if (req.body.mode !== 'practice') throw new AssessmentError(403, 'Submit the exam before viewing solutions.');
+    const assessment = await loadAssessment(assessmentStore(db), req.body, isAdmin);
+    res.json({ keys: assessment.keys });
+  } catch (error) { apiError(res, error); }
 });
 
-// Admin learner status management
+app.post('/api/submit-exam', async (req, res) => {
+  try {
+    const { identity, isAdmin, db } = await caller(req);
+    const mode = req.body.mode;
+    if (!['exam', 'practice'].includes(mode)) throw new AssessmentError(400, 'Invalid test mode.');
+    const assessment = await loadAssessment(assessmentStore(db), req.body, isAdmin);
+    const { result, band, responses } = markAssessment(assessment, req.body.responses || {});
+    const attemptRef = db.collection(`users/${identity.uid}/attempts`).doc();
+    await attemptRef.set({ id: attemptRef.id, owner: identity.uid, testId: req.body.testId || 'custom_mock',
+      testTitle: assessment.title, skill: assessment.skill, mode, createdAt: Date.now(), responses, result, band,
+      ...(req.body.sourceSections ? { sourceSections: req.body.sourceSections } : {}),
+      ...(req.body.sectionIds ? { sectionIds: req.body.sectionIds } : {}),
+    });
+    res.json({ attemptId: attemptRef.id, result, band, keys: assessment.keys });
+  } catch (error) { apiError(res, error); }
+});
+
 app.post('/api/admin/user-status', async (req, res) => {
   try {
-    const { targetUserId, newStatus, adminUid } = req.body;
-    if (!targetUserId || !newStatus || !adminUid) {
-      return res.status(400).json({ error: 'Missing parameters' });
+    const { db, isAdmin } = await caller(req);
+    if (!isAdmin) throw new AssessmentError(403, 'Administrator access required.');
+    const { targetUserId, newStatus } = req.body;
+    if (typeof targetUserId !== 'string' || !/^[\w-]{1,128}$/.test(targetUserId) || !['active', 'suspended'].includes(newStatus)) {
+      throw new AssessmentError(400, 'Invalid user or status.');
     }
-
-    // Verify adminUid is an admin
-    const adminDoc = await getDoc(doc(serverDb, 'admins', adminUid));
-    if (!adminDoc.exists()) {
-      return res.status(403).json({ error: 'Forbidden: caller is not an administrator.' });
-    }
-
-    await setDoc(
-      doc(serverDb, 'users', targetUserId),
-      {
-        status: newStatus === 'suspended' ? 'suspended' : 'active',
-        updatedAt: Date.now(),
-      },
-      { merge: true }
-    );
-
+    await db.doc(`users/${targetUserId}`).update({ status: newStatus, updatedAt: Date.now() });
     res.json({ success: true, targetUserId, status: newStatus });
-  } catch (error) {
-    console.error('User status update error:', error);
-    res.status(500).json({ error: 'Failed to update user status.' });
-  }
+  } catch (error) { apiError(res, error); }
 });
 
 // Mount Vite in development, serve static in production
@@ -265,3 +182,4 @@ async function startServer() {
 }
 
 startServer();
+
