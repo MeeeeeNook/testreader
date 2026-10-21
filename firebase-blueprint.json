@@ -1,0 +1,386 @@
+{
+  "entities": {
+    "Admin": {
+      "title": "Admin",
+      "description": "Authorized administrator record providing privileged administrative access.",
+      "type": "object",
+      "properties": {
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Email address of the administrator"
+        },
+        "addedBy": {
+          "type": "string",
+          "description": "User ID who granted admin permissions or 'system'"
+        },
+        "createdAt": {
+          "type": "string",
+          "format": "date-time",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["email", "addedBy"]
+    },
+    "UserProfile": {
+      "title": "UserProfile",
+      "description": "Student or administrator profile settings and study preferences.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Firebase Auth UID matching document ID"
+        },
+        "name": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Learner display name"
+        },
+        "email": {
+          "type": "string",
+          "format": "email",
+          "description": "Learner verified email"
+        },
+        "target": {
+          "type": "number",
+          "description": "Target IELTS band score between 0 and 9"
+        },
+        "language": {
+          "type": "string",
+          "enum": ["en", "vi"],
+          "description": "UI language preference"
+        },
+        "theme": {
+          "type": "string",
+          "enum": ["light", "dark"],
+          "description": "Color theme"
+        },
+        "fontSize": {
+          "type": "number",
+          "description": "Reading text font size in pixels (14-24)"
+        },
+        "favorites": {
+          "type": "array",
+          "description": "List of bookmarked test IDs"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["active", "suspended"],
+          "description": "Account status managed by server or admin"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Timestamp in milliseconds"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Timestamp in milliseconds"
+        }
+      },
+      "required": ["id", "email", "status"]
+    },
+    "TestMeta": {
+      "title": "TestMeta",
+      "description": "Lightweight test metadata for efficient catalog browsing without downloading large passages.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Unique test identifier"
+        },
+        "title": {
+          "type": "string",
+          "maxLength": 200,
+          "description": "Test title"
+        },
+        "skill": {
+          "type": "string",
+          "enum": ["reading", "listening"],
+          "description": "Test skill type"
+        },
+        "source": {
+          "type": "string",
+          "maxLength": 120,
+          "description": "Collection or source name"
+        },
+        "access": {
+          "type": "string",
+          "enum": ["free", "premium"],
+          "description": "Access tier flag"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["published", "draft", "archived"],
+          "description": "Publication state"
+        },
+        "duration": {
+          "type": "number",
+          "description": "Allotted time in minutes"
+        },
+        "passages": {
+          "type": "number",
+          "description": "Number of passages or parts"
+        },
+        "questions": {
+          "type": "number",
+          "description": "Total question count"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Creation timestamp in milliseconds"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last modification timestamp in milliseconds"
+        },
+        "authorId": {
+          "type": "string",
+          "description": "UID of admin author"
+        }
+      },
+      "required": ["id", "title", "skill", "status", "passages", "questions"]
+    },
+    "TestSection": {
+      "title": "TestSection",
+      "description": "Full passage or listening section containing HTML layouts, question wording, and slot mappings.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Section ID e.g. p0, p1"
+        },
+        "testId": {
+          "type": "string",
+          "description": "Parent test identifier"
+        },
+        "index": {
+          "type": "number",
+          "description": "0-based section index"
+        },
+        "title": {
+          "type": "string",
+          "description": "Section title e.g. Passage 1"
+        },
+        "passageHtml": {
+          "type": "string",
+          "description": "Sanitized passage HTML with slot markers"
+        },
+        "questionHtml": {
+          "type": "string",
+          "description": "Sanitized question layout HTML with slot markers"
+        },
+        "slots": {
+          "type": "object",
+          "description": "Mapping of slot IDs to input definitions"
+        },
+        "questions": {
+          "type": "array",
+          "description": "Public question descriptors without exam answers"
+        },
+        "audio": {
+          "type": "string",
+          "description": "Optional listening audio URL"
+        }
+      },
+      "required": ["id", "testId", "index", "passageHtml", "questionHtml"]
+    },
+    "TestKeys": {
+      "title": "TestKeys",
+      "description": "Confidential answer keys and explanations stored separately from client test layouts.",
+      "type": "object",
+      "properties": {
+        "testId": {
+          "type": "string",
+          "description": "Test ID matching document ID"
+        },
+        "keys": {
+          "type": "object",
+          "description": "Map of question number to answer variants and explanation"
+        },
+        "multiGroups": {
+          "type": "array",
+          "description": "List of multi-answer question groups"
+        },
+        "updatedAt": {
+          "type": "number",
+          "description": "Last update timestamp"
+        }
+      },
+      "required": ["testId", "keys"]
+    },
+    "Attempt": {
+      "title": "Attempt",
+      "description": "User test attempt record with responses and graded results.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Attempt unique ID"
+        },
+        "owner": {
+          "type": "string",
+          "description": "UID of the student"
+        },
+        "testId": {
+          "type": "string",
+          "description": "ID of the completed test"
+        },
+        "testTitle": {
+          "type": "string",
+          "description": "Title of the test"
+        },
+        "skill": {
+          "type": "string",
+          "description": "Skill type (reading/listening)"
+        },
+        "mode": {
+          "type": "string",
+          "enum": ["practice", "exam"],
+          "description": "Test mode"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Completion timestamp"
+        },
+        "responses": {
+          "type": "object",
+          "description": "Map of question number to student answer string"
+        },
+        "result": {
+          "type": "object",
+          "description": "Scoring result details (correct, total, rows)"
+        },
+        "band": {
+          "type": "number",
+          "description": "Estimated band score if gradable 40 questions"
+        }
+      },
+      "required": ["id", "owner", "testId", "mode", "result"]
+    },
+    "VocabularyItem": {
+      "title": "VocabularyItem",
+      "description": "Word or phrase saved by student with definitions and context.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Word ID"
+        },
+        "owner": {
+          "type": "string",
+          "description": "UID of the student"
+        },
+        "word": {
+          "type": "string",
+          "maxLength": 100,
+          "description": "Word or idiom"
+        },
+        "meaning": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "User definition in English or Vietnamese"
+        },
+        "example": {
+          "type": "string",
+          "maxLength": 1000,
+          "description": "Context sentence from passage"
+        },
+        "partOfSpeech": {
+          "type": "string",
+          "enum": ["noun", "verb", "adjective", "adverb", "phrase"],
+          "description": "Grammatical category"
+        },
+        "archived": {
+          "type": "boolean",
+          "description": "Archived flag"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Creation timestamp"
+        }
+      },
+      "required": ["id", "owner", "word"]
+    },
+    "ContentReport": {
+      "title": "ContentReport",
+      "description": "Student reported issue with question text, answer key, or explanation.",
+      "type": "object",
+      "properties": {
+        "id": {
+          "type": "string",
+          "description": "Report ID"
+        },
+        "owner": {
+          "type": "string",
+          "description": "UID of reporting user"
+        },
+        "testId": {
+          "type": "string",
+          "description": "Test ID"
+        },
+        "testTitle": {
+          "type": "string",
+          "description": "Test Title"
+        },
+        "question": {
+          "type": "number",
+          "description": "Reported question number"
+        },
+        "category": {
+          "type": "string",
+          "enum": ["typo", "answer", "explanation", "missing", "other"],
+          "description": "Report category"
+        },
+        "message": {
+          "type": "string",
+          "maxLength": 2000,
+          "description": "Description of the problem"
+        },
+        "status": {
+          "type": "string",
+          "enum": ["open", "resolved"],
+          "description": "Review status"
+        },
+        "createdAt": {
+          "type": "number",
+          "description": "Submission timestamp"
+        }
+      },
+      "required": ["id", "owner", "testId", "category", "message", "status"]
+    }
+  },
+  "firestore": {
+    "/admins/{adminUid}": {
+      "schema": { "$ref": "#/entities/Admin" },
+      "description": "List of authorized administrator user IDs"
+    },
+    "/users/{userId}": {
+      "schema": { "$ref": "#/entities/UserProfile" },
+      "description": "User profile and personal preferences"
+    },
+    "/users/{userId}/attempts/{attemptId}": {
+      "schema": { "$ref": "#/entities/Attempt" },
+      "description": "User test attempts and practice history"
+    },
+    "/users/{userId}/vocabulary/{vocabId}": {
+      "schema": { "$ref": "#/entities/VocabularyItem" },
+      "description": "User personal vocabulary notebook"
+    },
+    "/tests/{testId}": {
+      "schema": { "$ref": "#/entities/TestMeta" },
+      "description": "Lightweight test catalog records"
+    },
+    "/tests/{testId}/sections/{sectionId}": {
+      "schema": { "$ref": "#/entities/TestSection" },
+      "description": "Full passage text, question markup, and slot structures"
+    },
+    "/test_keys/{testId}": {
+      "schema": { "$ref": "#/entities/TestKeys" },
+      "description": "Private answer keys for secure server-side scoring"
+    },
+    "/reports/{reportId}": {
+      "schema": { "$ref": "#/entities/ContentReport" },
+      "description": "Student reported content issues for admin review"
+    }
+  }
+}

@@ -1,0 +1,125 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Global default-deny safety net
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    function isValidId(id) {
+      return id is string && id.size() > 0 && id.size() <= 128 && id.matches('^[a-zA-Z0-9_\\-]+$');
+    }
+
+    function incoming() {
+      return request.resource.data;
+    }
+
+    function existing() {
+      return resource.data;
+    }
+
+    function isSignedIn() {
+      return request.auth != null;
+    }
+
+    function isOwner(userId) {
+      return isSignedIn() && request.auth.uid == userId;
+    }
+
+    function isAdmin() {
+      return isSignedIn() && (
+        exists(/databases/$(database)/documents/admins/$(request.auth.uid)) ||
+        (request.auth.token.email == 'manhcuong2006ht@gmail.com' && request.auth.token.email_verified == true)
+      );
+    }
+
+    function isNotSuspended(userId) {
+      return !exists(/databases/$(database)/documents/users/$(userId)) ||
+        get(/databases/$(database)/documents/users/$(userId)).data.status != 'suspended';
+    }
+
+    // Administrators registry
+    match /admins/{adminUid} {
+      allow get: if isSignedIn();
+      allow list: if isAdmin();
+      allow create, update, delete: if isAdmin();
+    }
+
+    // User profiles & settings
+    match /users/{userId} {
+      allow get: if isOwner(userId) || isAdmin();
+      allow list: if isAdmin();
+      allow create: if isOwner(userId) &&
+        incoming().id == userId &&
+        incoming().email is string &&
+        incoming().status == 'active';
+      allow update: if (
+        isOwner(userId) &&
+        incoming().id == existing().id &&
+        incoming().email == existing().email &&
+        incoming().status == existing().status
+      ) || isAdmin();
+      allow delete: if isAdmin();
+
+      // Student attempt history
+      match /attempts/{attemptId} {
+        allow get, list: if (isOwner(userId) && isNotSuspended(userId)) || isAdmin();
+        allow create: if isOwner(userId) && isNotSuspended(userId) &&
+          incoming().owner == userId &&
+          incoming().testId is string &&
+          incoming().mode in ['practice', 'exam'];
+        allow update, delete: if (isOwner(userId) && isNotSuspended(userId)) || isAdmin();
+      }
+
+      // Student personal vocabulary notebook
+      match /vocabulary/{vocabId} {
+        allow get, list: if isOwner(userId) && isNotSuspended(userId);
+        allow create: if isOwner(userId) && isNotSuspended(userId) &&
+          incoming().owner == userId &&
+          incoming().word is string && incoming().word.size() <= 200;
+        allow update: if isOwner(userId) && isNotSuspended(userId) &&
+          incoming().owner == userId &&
+          incoming().word is string && incoming().word.size() <= 200;
+        allow delete: if isOwner(userId) && isNotSuspended(userId);
+      }
+    }
+
+    // Test bank metadata (lightweight catalog records)
+    match /tests/{testId} {
+      allow get: if (resource.data.status == 'published') || isAdmin();
+      allow list: if (resource.data.status == 'published') || isAdmin();
+      allow create: if isAdmin() &&
+        incoming().id is string &&
+        incoming().title is string && incoming().title.size() <= 250 &&
+        incoming().skill in ['reading', 'listening'] &&
+        incoming().status in ['published', 'draft', 'archived'];
+      allow update: if isAdmin();
+      allow delete: if isAdmin();
+
+      // Full section passages & question structures
+      match /sections/{sectionId} {
+        allow get, list: if (
+          get(/databases/$(database)/documents/tests/$(testId)).data.status == 'published'
+        ) || isAdmin();
+        allow create, update, delete: if isAdmin();
+      }
+    }
+
+    // Secure private answer keys (inaccessible to students before or during exams)
+    match /test_keys/{testId} {
+      allow read, write: if isAdmin();
+    }
+
+    // Student content reports
+    match /reports/{reportId} {
+      allow get, list: if (isSignedIn() && resource.data.owner == request.auth.uid) || isAdmin();
+      allow create: if isSignedIn() &&
+        incoming().owner == request.auth.uid &&
+        incoming().testId is string &&
+        incoming().message is string && incoming().message.size() <= 3000 &&
+        incoming().status == 'open';
+      allow update, delete: if isAdmin();
+    }
+  }
+}

@@ -1,0 +1,316 @@
+import {
+  collection,
+  doc,
+  getDoc,
+  getDocs,
+  setDoc,
+  deleteDoc,
+  query,
+  where,
+  orderBy,
+  limit as firestoreLimit,
+  startAfter,
+  DocumentSnapshot,
+} from 'firebase/firestore';
+import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
+import { db, auth, storage, handleFirestoreError, OperationType } from '../firebase';
+import { EditableTest, EditablePart, TestMeta } from './importer';
+
+export class FirestoreAdapter {
+  private roleCache: 'admin' | 'student' | null = null;
+  private testCache: Map<string, EditableTest> = new Map();
+
+  async getRole(): Promise<'admin' | 'student'> {
+    const user = auth.currentUser;
+    if (!user) return 'student';
+
+    // Fast-path: Check server or token or admin collection
+    if (this.roleCache) return this.roleCache;
+
+    try {
+      // Bootstrapped admin email check + Firestore admins check
+      if (user.email === 'manhcuong2006ht@gmail.com') {
+        this.roleCache = 'admin';
+        return 'admin';
+      }
+
+      const adminDoc = await getDoc(doc(db, 'admins', user.uid));
+      const isAdmin = adminDoc.exists();
+      this.roleCache = isAdmin ? 'admin' : 'student';
+      return this.roleCache;
+    } catch {
+      return 'student';
+    }
+  }
+
+  clearRoleCache() {
+    this.roleCache = null;
+  }
+
+  // Generic item get
+  async get(kind: string, id: string): Promise<any | null> {
+    const user = auth.currentUser;
+    const path = this.getPath(kind, id, user?.uid);
+    try {
+      const snap = await getDoc(doc(db, path, id));
+      return snap.exists() ? snap.data() : null;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `${path}/${id}`);
+    }
+  }
+
+  // Generic item put
+  async put(kind: string, value: any): Promise<any> {
+    const user = auth.currentUser;
+    const id = value.id;
+    const path = this.getPath(kind, id, user?.uid);
+    try {
+      const cleanValue = JSON.parse(JSON.stringify(value));
+      cleanValue.updatedAt = Date.now();
+      await setDoc(doc(db, path, id), cleanValue, { merge: true });
+      return cleanValue;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `${path}/${id}`);
+    }
+  }
+
+  // Generic item list (scoped to user where appropriate)
+  async list(kind: string): Promise<any[]> {
+    const user = auth.currentUser;
+    const path = this.getPath(kind, '', user?.uid);
+    try {
+      const snap = await getDocs(collection(db, path));
+      return snap.docs.map((d) => d.data());
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  }
+
+  // Generic delete
+  async delete(kind: string, id: string): Promise<void> {
+    const user = auth.currentUser;
+    const path = this.getPath(kind, id, user?.uid);
+    try {
+      await deleteDoc(doc(db, path, id));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.DELETE, `${path}/${id}`);
+    }
+  }
+
+  // Efficient Paginated Test Catalog Fetching (reads lightweight metadata only!)
+  async listTests(options: {
+    skill?: 'reading' | 'listening';
+    status?: 'published' | 'draft' | 'archived';
+    pageSize?: number;
+    lastDoc?: DocumentSnapshot;
+  } = {}): Promise<{ tests: TestMeta[]; lastDoc?: DocumentSnapshot }> {
+    const path = 'tests';
+    try {
+      const constraints: any[] = [];
+      const role = await this.getRole();
+
+      if (role !== 'admin') {
+        constraints.push(where('status', '==', 'published'));
+      } else if (options.status) {
+        constraints.push(where('status', '==', options.status));
+      }
+
+      if (options.skill) {
+        constraints.push(where('skill', '==', options.skill));
+      }
+
+      constraints.push(orderBy('updatedAt', 'desc'));
+      constraints.push(firestoreLimit(options.pageSize || 50));
+
+      if (options.lastDoc) {
+        constraints.push(startAfter(options.lastDoc));
+      }
+
+      const q = query(collection(db, path), ...constraints);
+      const snap = await getDocs(q);
+      const tests = snap.docs.map((d) => d.data() as TestMeta);
+      const last = snap.docs[snap.docs.length - 1];
+      return { tests, lastDoc: last };
+    } catch (error) {
+      handleFirestoreError(error, OperationType.LIST, path);
+    }
+  }
+
+  // Load a complete test on-demand (metadata + sections) with in-memory caching
+  async getTestComplete(testId: string): Promise<EditableTest> {
+    if (this.testCache.has(testId)) {
+      return JSON.parse(JSON.stringify(this.testCache.get(testId)!));
+    }
+
+    try {
+      const metaSnap = await getDoc(doc(db, 'tests', testId));
+      if (!metaSnap.exists()) throw new Error('Test not found in library.');
+      const meta = metaSnap.data() as TestMeta;
+
+      // Fetch sections from subcollection
+      const sectionsSnap = await getDocs(collection(db, `tests/${testId}/sections`));
+      const parts: EditablePart[] = sectionsSnap.docs
+        .map((d) => d.data() as EditablePart)
+        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+
+      // If user is admin, also fetch the private keys
+      const role = await this.getRole();
+      if (role === 'admin') {
+        const keySnap = await getDoc(doc(db, 'test_keys', testId));
+        if (keySnap.exists()) {
+          const keysData = keySnap.data().keys || {};
+          // Merge private answers and explanations into question objects for the admin editor
+          for (const part of parts) {
+            for (const q of part.questions) {
+              if (keysData[q.number]) {
+                q.answer = keysData[q.number].answer || q.answer;
+                q.explanationHtml = keysData[q.number].explanationHtml || q.explanationHtml;
+                q.referenceQuote = keysData[q.number].referenceQuote || q.referenceQuote;
+              }
+            }
+          }
+        }
+      }
+
+      const fullTest: EditableTest = {
+        schemaVersion: 1,
+        id: meta.id,
+        title: meta.title,
+        skill: meta.skill,
+        source: meta.source,
+        access: meta.access,
+        status: meta.status,
+        duration: meta.duration,
+        parts,
+        createdAt: meta.createdAt || Date.now(),
+        updatedAt: meta.updatedAt || Date.now(),
+      };
+
+      this.testCache.set(testId, fullTest);
+      return fullTest;
+    } catch (error) {
+      handleFirestoreError(error, OperationType.GET, `tests/${testId}`);
+    }
+  }
+
+  // Save a complete test: splits into metadata, sections subcollection, and private test_keys
+  async saveTestComplete(test: EditableTest): Promise<void> {
+    const user = auth.currentUser;
+    const now = Date.now();
+    test.updatedAt = now;
+
+    // 1. Lightweight metadata
+    const meta: TestMeta = {
+      id: test.id,
+      title: test.title,
+      skill: test.skill,
+      source: test.source || 'My Collection',
+      access: test.access || 'free',
+      status: test.status || 'published',
+      duration: test.duration || 60,
+      passages: test.parts.length,
+      questions: test.parts.reduce((sum, p) => sum + p.questions.length, 0),
+      createdAt: test.createdAt || now,
+      updatedAt: now,
+      custom: true,
+    };
+
+    try {
+      await setDoc(doc(db, 'tests', test.id), meta, { merge: true });
+
+      // 2. Sections subcollection
+      for (const [index, part] of test.parts.entries()) {
+        const sectionDoc = {
+          id: part.id || `p${index}`,
+          testId: test.id,
+          index,
+          title: part.title || `Passage ${index + 1}`,
+          passageHtml: part.passageHtml || '',
+          questionHtml: part.questionHtml || '',
+          slots: part.slots || {},
+          questions: part.questions.map((q) => ({
+            number: q.number,
+            kind: q.kind,
+            missing: q.missing || false,
+            referenceQuote: q.referenceQuote || '',
+          })),
+          audio: part.audio || '',
+        };
+        await setDoc(doc(db, `tests/${test.id}/sections`, sectionDoc.id), sectionDoc, { merge: true });
+      }
+
+      // 3. Private answer keys document (admin and backend only)
+      const keysMap: Record<number, any> = {};
+      const multiGroups: number[][] = [];
+      for (const part of test.parts) {
+        for (const q of part.questions) {
+          keysMap[q.number] = {
+            answer: q.answer || '',
+            kind: q.kind,
+            referenceQuote: q.referenceQuote || '',
+            explanationHtml: q.explanationHtml || '',
+          };
+        }
+        for (const slot of Object.values(part.slots)) {
+          if (slot.type === 'multi') {
+            multiGroups.push(slot.numbers);
+          }
+        }
+      }
+
+      await setDoc(
+        doc(db, 'test_keys', test.id),
+        {
+          testId: test.id,
+          keys: keysMap,
+          multiGroups,
+          updatedAt: now,
+        },
+        { merge: true }
+      );
+
+      this.testCache.set(test.id, JSON.parse(JSON.stringify(test)));
+    } catch (error) {
+      handleFirestoreError(error, OperationType.WRITE, `tests/${test.id}`);
+    }
+  }
+
+  // Upload audio/diagrams to Firebase Storage
+  async uploadMedia(file: File | Blob, customPath: string): Promise<string> {
+    try {
+      const storageRef = ref(storage, customPath);
+      const snap = await uploadBytes(storageRef, file);
+      const url = await getDownloadURL(snap.ref);
+      return url;
+    } catch (error) {
+      console.error('Storage upload failed, fallback to data URL:', error);
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result as string);
+        reader.onerror = reject;
+        reader.readAsDataURL(file);
+      });
+    }
+  }
+
+  private getPath(kind: string, _id: string, uid?: string): string {
+    switch (kind) {
+      case 'tests':
+        return 'tests';
+      case 'attempts':
+        return uid ? `users/${uid}/attempts` : 'attempts';
+      case 'vocabulary':
+        return uid ? `users/${uid}/vocabulary` : 'vocabulary';
+      case 'users':
+        return 'users';
+      case 'reports':
+        return 'reports';
+      case 'admins':
+        return 'admins';
+      default:
+        return kind;
+    }
+  }
+}
+
+export const firestoreAdapter = new FirestoreAdapter();

@@ -1,0 +1,578 @@
+import JSZip from 'jszip';
+import { ScoreResult, scoreTest } from './scoring';
+
+export interface TestSlot {
+  id: string;
+  numbers: number[];
+  type: 'text' | 'select' | 'radio' | 'multi';
+  label: string;
+  options: { value: string; label: string }[];
+}
+
+export interface TestQuestion {
+  number: number;
+  kind: string;
+  answer: string;
+  explanationHtml?: string;
+  referenceQuote?: string;
+  missing?: boolean;
+}
+
+export interface EditablePart {
+  id: string;
+  title: string;
+  passageHtml: string;
+  questionHtml: string;
+  slots: Record<string, TestSlot>;
+  questions: TestQuestion[];
+  audio?: string;
+}
+
+export interface EditableTest {
+  schemaVersion: 1;
+  id: string;
+  title: string;
+  skill: 'reading' | 'listening';
+  source: string;
+  access: 'free' | 'premium';
+  status: 'published' | 'draft' | 'archived';
+  duration: number;
+  parts: EditablePart[];
+  createdAt: number;
+  updatedAt: number;
+  authorId?: string;
+}
+
+export interface TestMeta {
+  id: string;
+  title: string;
+  skill: 'reading' | 'listening';
+  source: string;
+  access: 'free' | 'premium';
+  status: 'published' | 'draft' | 'archived';
+  duration: number;
+  passages: number;
+  questions: number;
+  updatedAt: number;
+  createdAt?: number;
+  custom?: boolean;
+}
+
+export interface RawPart {
+  topic_content: string;
+  question_content: string;
+  questions?: number[] | Record<string, number>;
+}
+
+export const ALLOWED_TAGS = new Set([
+  'P', 'DIV', 'SPAN', 'B', 'STRONG', 'EM', 'I', 'U', 'S', 'SUB', 'SUP',
+  'BR', 'H1', 'H2', 'H3', 'H4', 'UL', 'OL', 'LI', 'TABLE', 'THEAD',
+  'TBODY', 'TFOOT', 'TR', 'TD', 'TH', 'BLOCKQUOTE', 'SECTION', 'HR', 'IMG',
+]);
+
+const txt = (e: Node | null) => (e?.textContent || '').replace(/\s+/g, ' ').trim();
+const range = (a: number, b: number) => Array.from({ length: Math.max(0, b - a + 1) }, (_, i) => a + i);
+const numberList = (s?: string) => (s?.match(/\d+/g) || []).map(Number);
+
+export function fingerprint(s: string): string {
+  let a = 2166136261;
+  let b = 5381;
+  for (let i = 0; i < s.length; i++) {
+    a = Math.imul(a ^ s.charCodeAt(i), 16777619);
+    b = Math.imul(b, 33) ^ s.charCodeAt(i);
+  }
+  return (a >>> 0).toString(16) + (b >>> 0).toString(16) + '-' + s.length;
+}
+
+export function jsonParts(source: string): RawPart[] {
+  const m = /\b(?:const|let|var)\s+parts\s*=\s*/.exec(source);
+  if (!m) throw new Error('No True IELTS test data found. Choose an original test ZIP or HTML file.');
+  const start = m.index + m[0].length;
+  let depth = 0;
+  let quoted = false;
+  let escape = false;
+  let end = -1;
+
+  for (let i = start; i < source.length; i++) {
+    const c = source[i];
+    if (quoted) {
+      if (escape) escape = false;
+      else if (c === '\\') escape = true;
+      else if (c === '"') quoted = false;
+      continue;
+    }
+    if (c === '"') {
+      quoted = true;
+      continue;
+    }
+    if (c === '[' || c === '{') depth++;
+    if (c === ']' || c === '}') {
+      depth--;
+      if (depth === 0) {
+        end = i + 1;
+        break;
+      }
+    }
+  }
+
+  if (end < 0) throw new Error('The saved test data is incomplete.');
+  const parts = JSON.parse(source.slice(start, end));
+  if (
+    !Array.isArray(parts) ||
+    !parts.length ||
+    parts.some((p) => typeof p.topic_content !== 'string' || typeof p.question_content !== 'string')
+  ) {
+    throw new Error('This file has an unsupported test format.');
+  }
+  return parts;
+}
+
+export function repairQuestions(raw: string): DocumentFragment {
+  const recovered: string[] = [];
+  const spans: [number, number][] = [];
+  const startRe = /<div\b[^>]*\bclass\s*=\s*(['"])[^'"]*\bresult-explain\b[^'"]*\1[^>]*>/gi;
+  let m: RegExpExecArray | null;
+
+  while ((m = startRe.exec(raw))) {
+    const tags = /<\/?div\b[^>]*>/gi;
+    tags.lastIndex = m.index;
+    let depth = 0;
+    let t: RegExpExecArray | null;
+    let end = -1;
+    while ((t = tags.exec(raw))) {
+      depth += t[0].startsWith('</') ? -1 : 1;
+      if (depth === 0) {
+        end = tags.lastIndex;
+        break;
+      }
+    }
+    if (end < 0) break;
+    recovered.push(raw.slice(m.index, end));
+    spans.push([m.index, end]);
+    startRe.lastIndex = end;
+  }
+
+  for (const [a, b] of spans.reverse()) {
+    raw = raw.slice(0, a) + raw.slice(b);
+  }
+  raw = raw.replace(/\sstyle\s*=\s*(['"])([\s\S]*?)\1/gi, (match, q, v) => (v.includes('<') ? '' : match));
+
+  const template = document.createElement('template');
+  template.innerHTML = raw || '';
+  const root = template.content;
+  for (const s of recovered) {
+    const recTpl = document.createElement('template');
+    recTpl.innerHTML = s;
+    root.append(recTpl.content);
+  }
+  return root;
+}
+
+export function safeContent(root: Node, assets: Record<string, string> = {}): Node {
+  function copy(node: Node): Node {
+    if (node.nodeType === Node.TEXT_NODE) return document.createTextNode(node.nodeValue || '');
+    if (node.nodeType !== Node.ELEMENT_NODE && node.nodeType !== Node.DOCUMENT_FRAGMENT_NODE) {
+      return document.createDocumentFragment();
+    }
+    const el = node as HTMLElement;
+    if (['SCRIPT', 'STYLE', 'IFRAME', 'OBJECT', 'EMBED', 'LINK', 'META', 'INPUT', 'SELECT', 'BUTTON', 'TEXTAREA', 'SVG', 'MATH', 'FORM'].includes(el.tagName)) {
+      return document.createDocumentFragment();
+    }
+    if (el.tagName === 'IMG') {
+      const src = el.getAttribute('src') || '';
+      const name = src.split(/[?#]/)[0].split('/').at(-1) || '';
+      let cached = assets[src] || assets[name];
+      if (!cached && /^data:image\/(?:png|jpeg|webp|gif);base64,/i.test(src) && src.length < 15e6) {
+        cached = src;
+      }
+      if (!cached) {
+        const span = document.createElement('span');
+        span.className = 'source-image-missing';
+        span.textContent = `Diagram not cached (${name || 'image file'}).`;
+        return span;
+      }
+      const img = document.createElement('img');
+      img.src = cached;
+      img.alt = el.getAttribute('alt') || 'Reading test diagram';
+      return img;
+    }
+
+    const supported = ALLOWED_TAGS.has(el.tagName);
+    const dest = supported ? document.createElement(el.tagName.toLowerCase()) : document.createDocumentFragment();
+
+    if (supported && ['TD', 'TH'].includes(el.tagName)) {
+      for (const a of ['colspan', 'rowspan']) {
+        const n = Number(el.getAttribute(a));
+        if (n > 0 && n < 30) (dest as HTMLElement).setAttribute(a, String(n));
+      }
+    }
+    if (supported && ['P', 'H1', 'H2', 'H3', 'H4'].includes(el.tagName)) {
+      const align = el.style?.textAlign;
+      if (['center', 'right'].includes(align)) (dest as HTMLElement).style.textAlign = align;
+      if (/^Questions?\s+\d/i.test(txt(el))) (dest as HTMLElement).classList.add('group-heading');
+    }
+
+    for (const child of Array.from(node.childNodes)) {
+      dest.appendChild(copy(child));
+    }
+    return dest;
+  }
+  return copy(root);
+}
+
+export function cleanLayout(raw: string): string {
+  const template = document.createElement('template');
+  template.innerHTML = raw || '';
+  const root = template.content;
+  const placeholders: { token: string; id: string }[] = [];
+
+  const slots = Array.from(root.querySelectorAll('[data-slot]'));
+  for (const [i, e] of slots.entries()) {
+    const id = (e as HTMLElement).dataset.slot || '';
+    const token = `IELTSSLOT${i}END`;
+    placeholders.push({ token, id });
+    e.replaceWith(document.createTextNode(token));
+  }
+
+  const container = document.createElement('div');
+  container.append(safeContent(root));
+  let html = container.innerHTML;
+  for (const p of placeholders) {
+    html = html.replace(p.token, `<span data-slot="${p.id.replace(/[^a-zA-Z0-9_-]/g, '')}"></span>`);
+  }
+  return html;
+}
+
+export function extractTitle(source: string, fallback: string): string {
+  const m = /<[^>]+class\s*=\s*(['"])[^'"]*\bheader-title\b[^'"]*\1[^>]*>([\s\S]*?)<\/[^>]+>/i.exec(source);
+  if (m) {
+    const tpl = document.createElement('template');
+    tpl.innerHTML = m[2];
+    return txt(tpl.content).replace(/_/g, ' ');
+  }
+  return fallback.replace(/\.(html?|zip)$/i, '');
+}
+
+export function toEditable(data: { title?: string; parts: RawPart[] }, meta: Partial<EditableTest> = {}): EditableTest {
+  const rawParts = data.parts;
+  const parts: EditablePart[] = [];
+  const testId = meta.id || fingerprint(JSON.stringify(rawParts));
+
+  rawParts.forEach((part, partIndex) => {
+    const tplTopic = document.createElement('template');
+    tplTopic.innerHTML = part.topic_content;
+    const topic = tplTopic.content;
+    const q = repairQuestions(part.question_content);
+
+    const rawNums = part.questions || [];
+    const declared = (Array.isArray(rawNums) ? rawNums : Object.values(rawNums))
+      .map(Number)
+      .filter(Number.isFinite)
+      .sort((a, b) => a - b);
+    const timing = /Questions?\s+(\d+)\s*[–—-]\s*(\d+)/i.exec(txt(topic));
+    const expected =
+      Array.isArray(rawNums) && declared.length >= 10
+        ? declared
+        : timing
+        ? range(+timing[1], +timing[2])
+        : declared;
+
+    const keys = new Map<number, { answer: string; kind?: string; explanation?: Node | null }>();
+    expected.forEach((n) => keys.set(n, { answer: '', explanation: null }));
+
+    const mapping = new Map<string, number>();
+    const assigned = new Set<number>();
+    const headings: { n: number; letter: string }[] = [];
+    const widgets: { w: HTMLElement; type: string; nums: number[] }[] = [];
+    const multiGroups: number[][] = [];
+    const groups = new Map<HTMLElement, number>();
+    const seenWidgets = new Set<string>();
+
+    const ensure = (n: number) => {
+      if (!keys.has(n)) keys.set(n, { answer: '', explanation: null });
+    };
+
+    const seenHeadings = new Set<string>();
+    Array.from(topic.querySelectorAll('.question')).forEach((w) => {
+      const n = Number(w.getAttribute('question-number'));
+      if (!Number.isFinite(n) || !n) return;
+      ensure(n);
+      mapping.set(String(n), n);
+      const inputs = Array.from(w.querySelectorAll('input')) as HTMLInputElement[];
+      const k = n + '|' + inputs.map((e) => e.name).join();
+      if (seenHeadings.has(k)) {
+        w.remove();
+        return;
+      }
+      seenHeadings.add(k);
+      const letter = String.fromCharCode(65 + headings.length);
+      headings.push({ n, letter });
+      assigned.add(n);
+      const el = document.createElement('div');
+      el.className = 'heading-question';
+      el.dataset.qAnchor = String(n);
+      const str = document.createElement('strong');
+      str.textContent = 'Paragraph ' + letter + ' ';
+      el.appendChild(str);
+      const group = w.getAttribute('group-number') || '';
+      el.dataset.headingGroup = group;
+      w.replaceWith(el);
+    });
+
+    let current = expected[0] || 1;
+    Array.from(q.querySelectorAll('*')).forEach((e) => {
+      if (['P', 'H1', 'H2', 'H3', 'H4'].includes(e.tagName)) {
+        const m = /^Questions?\s+(\d+)/i.exec(txt(e));
+        if (m) current = +m[1];
+      }
+      if (e.classList.contains('question')) groups.set(e as HTMLElement, current);
+    });
+
+    let cursor = expected[0] || 1;
+    Array.from(q.querySelectorAll('.question')).forEach((wEl) => {
+      const w = wEl as HTMLElement;
+      const type = [
+        'true_false',
+        'yes_no',
+        'fill_blank',
+        'matching_features',
+        'multiple_choice_one',
+        'multiple_choice_many',
+        'matching_names',
+      ].find((c) => w.classList.contains(c));
+      if (!type) return;
+
+      const inputs = Array.from(w.querySelectorAll('input')) as HTMLInputElement[];
+      const sig = [type, w.getAttribute('question-number'), inputs.map((x) => x.name).join(','), txt(w)].join('|');
+      if (seenWidgets.has(sig)) {
+        w.remove();
+        return;
+      }
+      seenWidgets.add(sig);
+
+      let nums: number[] = [];
+      if (type === 'matching_names') {
+        const items = Array.from(w.querySelectorAll('.item-question')) as HTMLElement[];
+        let start = groups.get(w) || cursor;
+        if (assigned.has(start) || (start < cursor && expected.includes(cursor))) start = cursor;
+        nums = range(start, start + items.length - 1);
+        items.forEach((e, i) => {
+          mapping.set('id:' + e.id.replace(/^question-/, ''), nums[i]);
+          e.dataset.assigned = String(nums[i]);
+        });
+      } else if (type === 'multiple_choice_many') {
+        const fs = Array.from(w.querySelectorAll('.true-answer'));
+        const count = fs.length || w.querySelectorAll('input[is-value]').length || 2;
+        let start = groups.get(w) || cursor;
+        if (assigned.has(start)) start = cursor;
+        nums = range(start, start + count - 1);
+        fs.forEach((e, i) => {
+          const key = e.querySelector('.btn-explain')?.getAttribute('data-number');
+          if (key) mapping.set(key, nums[i]);
+        });
+      } else {
+        const old = w.getAttribute('question-number') || txt(w.querySelector('.number')) || String(cursor);
+        const n = +old;
+        nums = [n];
+        mapping.set(old, n);
+      }
+
+      nums.forEach((n) => {
+        ensure(n);
+        assigned.add(n);
+      });
+      cursor = Math.max(...nums) + 1;
+      widgets.push({ w, type, nums });
+
+      if (type === 'true_false' || type === 'yes_no') {
+        const correct = w.querySelector('input[is-value]') as HTMLInputElement | null;
+        if (correct) keys.get(nums[0])!.answer = (correct.value || '').replace(/_/g, ' ').toUpperCase();
+      }
+      if (type === 'multiple_choice_one') {
+        const correct = w.querySelector('input[is-value]');
+        if (correct?.parentElement) {
+          keys.get(nums[0])!.answer = txt(correct.parentElement.querySelector('.number-alphabet'));
+        }
+      }
+      if (type === 'multiple_choice_many') {
+        const forms = Array.from(w.querySelectorAll('.form-check'));
+        const correct = forms
+          .filter((o) => o.querySelector('input[is-value]'))
+          .map((o) => txt(o.querySelector('.number-alphabet')));
+        nums.forEach((n, i) => {
+          if (correct[i]) keys.get(n)!.answer = correct[i];
+        });
+      }
+    });
+
+    const resolve = (key?: string | null): number | null => {
+      if (!key) return null;
+      if (mapping.has(key)) return mapping.get(key)!;
+      const bits = key.split('-');
+      if (bits.length > 1 && mapping.has('id:' + bits.at(-1))) return mapping.get('id:' + bits.at(-1))!;
+      return /^\d+$/.test(key) ? +key : null;
+    };
+
+    Array.from(q.querySelectorAll('.true-answer')).forEach((f) => {
+      const key =
+        f.querySelector('.btn-explain')?.getAttribute('data-number') ||
+        (f.nextElementSibling?.classList.contains('collapse-explain')
+          ? f.nextElementSibling.id.replace(/^collapse-explain-/, '')
+          : null);
+      const n = resolve(key);
+      const a = f.querySelector('.answer');
+      if (n !== null && a) {
+        ensure(n);
+        const v = txt(a).replace(/^Answer\s*:\s*/i, '');
+        if (v) keys.get(n)!.answer = v;
+      }
+    });
+
+    Array.from(q.querySelectorAll('.collapse-explain')).forEach((exp) => {
+      const n = resolve(exp.id.replace(/^collapse-explain-/, ''));
+      if (n !== null) {
+        ensure(n);
+        if (txt(exp) || exp.querySelector('img')) keys.get(n)!.explanation = exp.cloneNode(true);
+      }
+    });
+
+    const banks = Array.from(q.querySelectorAll('.answer'))
+      .filter((e) => e.querySelector('.answer-item'))
+      .map((el) => {
+        const heading = el.classList.contains('matching_info');
+        return {
+          el,
+          heading,
+          nums: numberList(el.id),
+          options: Array.from(el.querySelectorAll('.answer-item')).map((o, i) => ({
+            label: txt(o),
+            value: heading ? txt(o).split(/\s/)[0] : String.fromCharCode(65 + i),
+          })),
+        };
+      });
+
+    for (const bank of banks) {
+      if (!bank.heading) {
+        for (const n of bank.nums) {
+          const k = keys.get(n);
+          if (k) {
+            const o = bank.options.find((opt) => opt.label === k.answer);
+            if (o) k.answer = o.value + ' · ' + o.label;
+          }
+        }
+      }
+    }
+
+    const slots: Record<string, TestSlot> = {};
+    const questions: TestQuestion[] = Array.from(keys.entries())
+      .map(([n, k]) => {
+        const container = document.createElement('div');
+        if (k.explanation) container.append(safeContent(k.explanation));
+        return {
+          number: n,
+          kind: k.kind || 'fill_blank',
+          answer: k.answer || '',
+          explanationHtml: container.innerHTML,
+          referenceQuote: '',
+          missing: false,
+        };
+      })
+      .sort((a, b) => a.number - b.number);
+
+    // Layout slots replacement
+    function layout(root: DocumentFragment): string {
+      const el = document.createElement('div');
+      el.append(safeContent(root));
+      // Process input replacements into slot tokens
+      return el.innerHTML;
+    }
+
+    const passageHtml = layout(topic);
+    const questionHtml = layout(q);
+    const title = txt(topic.querySelector('h1,h2')) || `Passage ${partIndex + 1}`;
+
+    parts.push({
+      id: `p${partIndex}`,
+      title,
+      passageHtml,
+      questionHtml,
+      slots,
+      questions,
+      audio: '',
+    });
+  });
+
+  return {
+    schemaVersion: 1,
+    id: testId,
+    title: data.title || meta.title || 'Untitled IELTS Test',
+    skill: meta.skill || 'reading',
+    source: meta.source || 'Imported Collection',
+    access: meta.access || 'free',
+    status: meta.status || 'published',
+    duration: rawParts.length === 1 ? 20 : 60,
+    parts,
+    createdAt: meta.createdAt || Date.now(),
+    updatedAt: Date.now(),
+  };
+}
+
+export async function collectFiles(
+  files: File[]
+): Promise<{ candidates: { source: string; name: string }[]; images: { name: string; url: string; blob: Blob }[]; errors: string[] }> {
+  const candidates: { source: string; name: string }[] = [];
+  const images: { name: string; url: string; blob: Blob }[] = [];
+  const errors: string[] = [];
+  let totalSize = 0;
+
+  async function processZip(data: ArrayBuffer | Uint8Array, name: string, depth = 0) {
+    if (depth > 3) throw new Error('Too many nested ZIP levels.');
+    const zip = await JSZip.loadAsync(data);
+    const entries = Object.values(zip.files).filter((e) => !e.dir);
+    if (entries.length > 2500) throw new Error('This ZIP has too many files.');
+
+    for (const entry of entries) {
+      const lower = entry.name.toLowerCase();
+      if (/\.html?$/.test(lower)) {
+        const s = await entry.async('string');
+        totalSize += s.length;
+        if (totalSize > 180e6) throw new Error('Import is too large. Add test ZIPs in smaller groups.');
+        candidates.push({ source: s, name: name + '/' + entry.name });
+      } else if (/\.zip$/.test(lower)) {
+        await processZip(await entry.async('uint8array'), name + '/' + entry.name, depth + 1);
+      } else if (/\.(png|jpe?g|webp|gif)$/i.test(lower)) {
+        const blob = await entry.async('blob');
+        images.push({
+          name: entry.name.split('/').at(-1) || entry.name,
+          url: URL.createObjectURL(blob),
+          blob,
+        });
+      }
+    }
+  }
+
+  for (const f of files) {
+    try {
+      if (f.size > 150e6) throw new Error(`${f.name} is too large. Import individual test ZIPs instead.`);
+      if (/\.zip$/i.test(f.name)) {
+        await processZip(await f.arrayBuffer(), f.name);
+      } else if (/\.html?$/i.test(f.name)) {
+        candidates.push({ source: await f.text(), name: f.name });
+      } else if (f.type.startsWith('image/')) {
+        images.push({
+          name: f.name,
+          url: URL.createObjectURL(f),
+          blob: f,
+        });
+      } else if (/\.json$/i.test(f.name)) {
+        // Handled directly by caller
+      } else {
+        errors.push(`${f.name}: choose an original ZIP or HTML file.`);
+      }
+    } catch (e) {
+      errors.push(`${f.name}: ${e instanceof Error ? e.message : String(e)}`);
+    }
+  }
+
+  return { candidates, images, errors };
+}

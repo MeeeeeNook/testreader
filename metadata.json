@@ -1,0 +1,6 @@
+{
+  "name": "Reading Studio — IELTS Library & Admin",
+  "description": "Comprehensive IELTS Reading & Listening practice hub with real-time test player, authoring admin studio, server-side grading, vocabulary notebook, and Firebase sync.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
