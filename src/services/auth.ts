@@ -53,6 +53,7 @@ export async function logout(): Promise<void> {
 }
 
 async function handleUserSync(user: User | null) {
+  firestoreAdapter.clearRoleCache();
   if (!user) {
     currentState = {
       user: null,
@@ -69,7 +70,7 @@ async function handleUserSync(user: User | null) {
     // Sync with backend server
     const res = await fetch('/api/auth/sync', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
       body: JSON.stringify({
         uid: user.uid,
         email: user.email,
@@ -150,3 +151,4 @@ export function subscribeAuth(callback: AuthCallback): () => void {
 onAuthStateChanged(auth, async (user) => {
   await handleUserSync(user);
 });
+

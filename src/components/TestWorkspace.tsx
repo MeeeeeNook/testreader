@@ -1,13 +1,17 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { EditableTest, ScoreResult, ScoreRow, UserProfile, StudyNote, StudyHighlight } from '../types';
-import { scoreTest, estimatedBand } from '../services/scoring';
+import React, { useState, useEffect, useRef } from 'react';
+import { EditableTest, EditablePart, TestSlot, ScoreResult, ScoreRow, UserProfile, StudyNote, StudyHighlight } from '../types';
+import { AnswerControl, QuestionLayout } from './QuestionLayout';
+import { cleanLayout } from '../services/importer';
+import { auth } from '../firebase';
 import { firestoreAdapter } from '../services/firestoreAdapter';
+import { scoreTest, estimatedBand } from '../services/scoring';
 
 interface TestWorkspaceProps {
   test: EditableTest;
   mode: 'practice' | 'exam';
   initialDurationMinutes: number;
   profile: UserProfile;
+  isPreview?: boolean;
   onReturnToLibrary: () => void;
   onSaveVocabulary: (item: { word: string; meaning: string; example: string; partOfSpeech: string }) => Promise<void>;
   onNotify: (msg: string) => void;
@@ -18,19 +22,28 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   mode,
   initialDurationMinutes,
   profile,
+  isPreview = false,
   onReturnToLibrary,
   onSaveVocabulary,
   onNotify,
 }) => {
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
-  const [responses, setResponses] = useState<Record<string | number, string>>({});
-  const [flags, setFlags] = useState<number[]>([]);
-  const [notes, setNotes] = useState<StudyNote[]>([]);
-  const [highlights, setHighlights] = useState<StudyHighlight[]>([]);
+  const sessionKey = `reading-room:v2:${profile.id}:${test.id}:${mode}${isPreview ? ':preview' : ''}`;
+  const [savedSession] = useState(() => {
+    try {
+      const saved = mode === 'practice' ? JSON.parse(localStorage.getItem(sessionKey) || '{}') : {};
+      return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
+    }
+    catch { return {}; }
+  });
+  const [responses, setResponses] = useState<Record<string | number, string>>(savedSession.responses || {});
+  const [flags, setFlags] = useState<number[]>(savedSession.flags || []);
+  const [notes, setNotes] = useState<StudyNote[]>(savedSession.notes || []);
+  const [highlights, setHighlights] = useState<StudyHighlight[]>(savedSession.highlights || []);
   const [showAnswers, setShowAnswers] = useState(false);
   const [showExplanations, setShowExplanations] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(
-    initialDurationMinutes > 0 ? initialDurationMinutes * 60 : test.duration * 60
+    mode === 'practice' && Number.isFinite(savedSession.remaining) ? savedSession.remaining : Math.max(0, initialDurationMinutes) * 60
   );
   const [timerRunning, setTimerRunning] = useState(mode === 'exam' || initialDurationMinutes > 0);
   const [scored, setScored] = useState(false);
@@ -59,31 +72,16 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const passageRef = useRef<HTMLDivElement>(null);
   const questionsRef = useRef<HTMLDivElement>(null);
 
-  const part = test.parts[currentPartIndex] || test.parts[0];
+  const [reviewKeys, setReviewKeys] = useState<Record<number, any>>({});
+  const [submitting, setSubmitting] = useState(false);
+  const submissionRef = useRef(false);
+  const originalPart = test.parts[currentPartIndex] || test.parts[0];
+  const part: EditablePart = { ...originalPart, questions: originalPart.questions.map(q => ({ ...q, ...reviewKeys[q.number] })) };
   const allQuestions = test.parts.flatMap((p) => p.questions);
   const allQuestionNumbers = allQuestions.map((q) => q.number).sort((a, b) => a - b);
   const currentPartNumbers = part.questions.map((q) => q.number);
 
-  // Restore saved session from local storage or user record on mount
-  useEffect(() => {
-    try {
-      const saved = localStorage.getItem(`reading-room:${test.id}`);
-      if (saved) {
-        const parsed = JSON.parse(saved);
-        if (parsed.responses) setResponses(parsed.responses);
-        if (parsed.flags) setFlags(parsed.flags);
-        if (parsed.notes) setNotes(parsed.notes);
-        if (parsed.highlights) setHighlights(parsed.highlights);
-        if (parsed.remaining !== undefined && mode === 'practice') {
-          setTimerRemaining(parsed.remaining);
-        }
-      }
-    } catch {
-      // ignore
-    }
-  }, [test.id, mode]);
-
-  // Persist session to local storage (and debounced to Firestore)
+  // Persist the current account's session to local storage.
   useEffect(() => {
     const sessionData = {
       responses,
@@ -93,32 +91,27 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       remaining: timerRemaining,
     };
     try {
-      localStorage.setItem(`reading-room:${test.id}`, JSON.stringify(sessionData));
+      localStorage.setItem(sessionKey, JSON.stringify(sessionData));
     } catch {
       // ignore
     }
-  }, [test.id, responses, flags, notes, highlights, timerRemaining]);
+  }, [sessionKey, responses, flags, notes, highlights, timerRemaining]);
 
-  // Timer countdown
+  // Timer updaters are pure; expiry submission happens once in an effect.
+  const submitLatest = useRef<() => Promise<void>>(async () => {});
+  const expired = useRef(false);
   useEffect(() => {
-    if (!timerRunning || timerRemaining <= 0) return;
-    const interval = setInterval(() => {
-      setTimerRemaining((prev) => {
-        if (prev <= 1) {
-          clearInterval(interval);
-          setTimerRunning(false);
-          if (mode === 'exam' && !scored) {
-            handleSubmit();
-          } else {
-            onNotify('Time is up. You can continue practising.');
-          }
-          return 0;
-        }
-        return prev - 1;
-      });
-    }, 1000);
+    if (!timerRunning) return;
+    const interval = setInterval(() => setTimerRemaining(prev => Math.max(0, prev - 1)), 1000);
     return () => clearInterval(interval);
-  }, [timerRunning, timerRemaining, mode, scored]);
+  }, [timerRunning]);
+  useEffect(() => {
+    if (!timerRunning || timerRemaining > 0 || expired.current) return;
+    expired.current = true;
+    setTimerRunning(false);
+    if (mode === 'exam' && !scored) void submitLatest.current();
+    else onNotify('Time is up. You can continue practising.');
+  }, [timerRemaining, timerRunning, mode, scored, onNotify]);
 
   // Handle Response Changes
   const handleInputChange = (questionNumber: number, value: string) => {
@@ -129,12 +122,16 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   };
 
   const handleMultiChoiceChange = (groupNumbers: number[], value: string, isChecked: boolean) => {
+    const selected = groupNumbers.map(n => responses[n]).filter(Boolean);
+    if (isChecked && !selected.includes(value) && selected.length >= groupNumbers.length) {
+      onNotify(`Please choose at most ${groupNumbers.length} options.`);
+      return;
+    }
     setResponses((prev) => {
       const currentValues = groupNumbers.map((n) => prev[n]).filter(Boolean);
       let nextValues = [...currentValues];
       if (isChecked) {
         if (nextValues.length >= groupNumbers.length) {
-          onNotify(`Please choose at most ${groupNumbers.length} options.`);
           return prev;
         }
         if (!nextValues.includes(value)) nextValues.push(value);
@@ -158,8 +155,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     }
 
     setTimeout(() => {
-      const el = document.querySelector(`[data-q-anchor="${qNum}"]`) as HTMLElement;
+      const el = Array.from(document.querySelectorAll<HTMLElement>('[data-q-anchor]')).find(e => e.dataset.qAnchor?.split(',').includes(String(qNum)));
       if (el) {
+        setMobileTab(passageRef.current?.contains(el) ? 'passage' : 'questions');
         el.scrollIntoView({ behavior: 'smooth', block: 'center' });
         el.classList.add('q-focus');
         setTimeout(() => el.classList.remove('q-focus'), 2500);
@@ -205,88 +203,77 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     }
   };
 
-  // Scoring submission (Server-Side for Exam Mode, Client Deterministic for Practice)
+  function submissionPayload() {
+    return { testId: test.sourceTestId || test.id, responses, mode, sectionIds: test.sectionIds,
+      sourceSections: test.sourceSections, testTitle: test.title };
+  }
+  // Both modes use private server keys. Never turn a failed request into an ungraded score.
   const handleSubmit = async () => {
+    if (mode === 'exam' && scored) { setShowResultsModal(true); return; }
+    if (submissionRef.current) return;
+    submissionRef.current = true;
+    setSubmitting(true);
     setTimerRunning(false);
-    onNotify('Grading responses…');
-
-    if (mode === 'exam') {
-      try {
-        const res = await fetch('/api/submit-exam', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            testId: test.id,
-            responses,
-            userId: profile.id,
-            mode: 'exam',
-          }),
-        });
-
-        if (res.ok) {
-          const data = await res.json();
-          setScoreResult(data.result);
-          setApproxBand(data.band);
-          setScored(true);
-          setShowResultsModal(true);
-          setShowAnswers(true);
-          setShowExplanations(true);
-          return;
-        }
-      } catch (err) {
-        console.warn('Server scoring failed, fallback to local scoring:', err);
-      }
-    }
-
-    // Practice mode or fallback: Deterministic local scoring
-    const scoringParts = test.parts.map((p) => {
-      const keysMap: Record<number, any> = {};
-      const multiGroups: number[][] = [];
-      p.questions.forEach((q) => {
-        keysMap[q.number] = {
-          answer: q.answer,
-          kind: q.kind,
-          explanationHtml: q.explanationHtml,
-        };
-      });
-      Object.values(p.slots).forEach((s) => {
-        if (s.type === 'multi') multiGroups.push(s.numbers);
-      });
-      return {
-        numbers: p.questions.map((q) => q.number),
-        keys: keysMap,
-        missing: p.questions.filter((q) => q.missing).map((q) => q.number),
-        multiGroups,
-      };
-    });
-
-    const result = scoreTest(scoringParts, responses);
-    const band = estimatedBand(result);
-
-    setScoreResult(result);
-    setApproxBand(band);
-    setScored(true);
-    setShowResultsModal(true);
-
-    // Save attempt to student's Firestore history
     try {
-      const attemptId = `att_${Date.now()}`;
-      await firestoreAdapter.put('attempts', {
-        id: attemptId,
-        owner: profile.id,
-        testId: test.id,
-        testTitle: test.title,
-        skill: test.skill,
-        mode,
-        createdAt: Date.now(),
-        responses,
-        result,
-        band,
+      // Unsaved editor previews use their own local keys and never create an attempt.
+      if (isPreview) {
+        const result = scoreTest(test.parts.map(p => ({
+          numbers: p.questions.map(q => q.number), keys: Object.fromEntries(p.questions.map(q => [q.number, q])),
+          missing: p.questions.filter(q => q.missing).map(q => q.number),
+          multiGroups: Object.values(p.slots).filter(s => s.type === 'multi').map(s => s.numbers),
+        })), responses);
+        setScoreResult(result); setApproxBand(estimatedBand(result)); setScored(true); setShowResultsModal(true);
+        return;
+      }
+      const user = auth.currentUser;
+      if (!user) throw new Error('Sign in to submit and score your answers.');
+      const response = await fetch('/api/submit-exam', {
+        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+        body: JSON.stringify(submissionPayload()),
       });
-    } catch (saveErr) {
-      console.warn('Could not save attempt history to Firestore:', saveErr);
+      const data = await response.json();
+      if (!response.ok) throw new Error(data.error || 'Could not score this test. Please retry.');
+      setReviewKeys(data.keys || {});
+      setScoreResult(data.result);
+      setApproxBand(data.band);
+      setScored(true);
+      setShowResultsModal(true);
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : 'Could not score this test. Please retry.');
+    } finally {
+      submissionRef.current = false;
+      setSubmitting(false);
     }
   };
+  submitLatest.current = handleSubmit;
+
+  const toggleReview = async (kind: 'answers' | 'explanations') => {
+    const shown = kind === 'answers' ? showAnswers : showExplanations;
+    if (!shown && !isPreview && mode === 'practice' && Object.keys(reviewKeys).length === 0) {
+      try {
+        const user = auth.currentUser;
+        if (!user) throw new Error('Sign in to view solutions.');
+        const response = await fetch('/api/test-review', {
+          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+          body: JSON.stringify(submissionPayload()),
+        });
+        const data = await response.json();
+        if (!response.ok) throw new Error(data.error || 'Could not load solutions.');
+        setReviewKeys(data.keys || {});
+      } catch (error) { onNotify(error instanceof Error ? error.message : 'Could not load solutions.'); return; }
+    }
+    if (kind === 'answers') setShowAnswers(!shown);
+    else setShowExplanations(!shown);
+  };
+  const renderSlot = (id: string) => {
+    const slot = part.slots[id];
+    return slot ? <AnswerControl slot={slot} part={part} responses={responses} showAnswers={showAnswers}
+      disabled={mode === 'exam' && (scored || submitting)} onChange={handleInputChange} onMultiChange={handleMultiChoiceChange} /> :
+      <span role="alert">Question slot missing. Please report this test.</span>;
+  };
+  const isLegacyBroken = part.questions.some(q => !q.missing) && Object.keys(part.slots || {}).length === 0;
+  const orphanSlots = Object.values<TestSlot>(part.slots || {}).filter(slot =>
+    ![part.passageHtml, part.questionHtml].some(html => html.includes(`data-slot="${slot.id}"`) || html.includes(`data-slot='${slot.id}'`)));
 
   // Text selection handler for floating tools
   const handleMouseUp = () => {
@@ -368,7 +355,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     try {
       const res = await fetch('/api/dictionary', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await auth.currentUser?.getIdToken()}` },
         body: JSON.stringify({
           text: selectionBox.text,
           context: selectionBox.context,
@@ -501,7 +488,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 <button
                   className="toggle"
                   aria-pressed={showAnswers}
-                  onClick={() => setShowAnswers(!showAnswers)}
+                  onClick={() => void toggleReview('answers')}
                 >
                   <span className="switch" />
                   Answers
@@ -509,7 +496,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 <button
                   className="toggle"
                   aria-pressed={showExplanations}
-                  onClick={() => setShowExplanations(!showExplanations)}
+                  onClick={() => void toggleReview('explanations')}
                 >
                   <span className="switch" />
                   Explanations
@@ -558,10 +545,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               {part.title || `Passage ${currentPartIndex + 1}`}
             </div>
 
-            <div
-              className="reading-content"
-              dangerouslySetInnerHTML={{ __html: part.passageHtml }}
-            />
+            <div className="reading-content"><QuestionLayout html={part.passageHtml} renderSlot={renderSlot} /></div>
           </article>
 
           {/* Right Pane: Questions Content */}
@@ -575,141 +559,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
             {/* Render Questions */}
             <div className="questions-content">
-              {/* Question instructions */}
-              <div dangerouslySetInnerHTML={{ __html: part.questionHtml }} />
-
-              {/* Render question inputs from slots */}
-              <div style={{ marginTop: '20px' }}>
-                {Object.values(part.slots).map((slot) => {
-                  const nums = slot.numbers;
-                  const firstNum = nums[0];
-                  const qItem = part.questions.find((q) => q.number === firstNum);
-
-                  if (slot.type === 'text') {
-                    return (
-                      <div key={slot.id} className="question-row" data-q-anchor={firstNum}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span className="q-number">{firstNum}</span>
-                          {slot.label && <span>{slot.label}</span>}
-                          <input
-                            type="text"
-                            className="fill-input"
-                            value={responses[firstNum] || ''}
-                            onChange={(e) => handleInputChange(firstNum, e.target.value)}
-                            placeholder="Your answer"
-                          />
-                          {showAnswers && qItem && (
-                            <span className="answer-tag" style={{ display: 'inline-block' }}>
-                              Answer: {qItem.answer ? qItem.answer.split('||').join(' / ') : '—'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (slot.type === 'select') {
-                    return (
-                      <div key={slot.id} className="question-row" data-q-anchor={firstNum}>
-                        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
-                          <span className="q-number">{firstNum}</span>
-                          {slot.label && <span>{slot.label}</span>}
-                          <select
-                            className="question-select"
-                            value={responses[firstNum] || ''}
-                            onChange={(e) => handleInputChange(firstNum, e.target.value)}
-                          >
-                            <option value="">Choose…</option>
-                            {slot.options.map((opt) => (
-                              <option key={opt.value} value={opt.value}>
-                                {opt.value} — {opt.label}
-                              </option>
-                            ))}
-                          </select>
-                          {showAnswers && qItem && (
-                            <span className="answer-tag" style={{ display: 'inline-block' }}>
-                              Answer: {qItem.answer ? qItem.answer.split('||').join(' / ') : '—'}
-                            </span>
-                          )}
-                        </div>
-                      </div>
-                    );
-                  }
-
-                  if (slot.type === 'radio') {
-                    return (
-                      <fieldset key={slot.id} className="question-row" data-q-anchor={firstNum}>
-                        <legend>
-                          <span className="q-number">{firstNum}</span>
-                          {slot.label}
-                        </legend>
-                        <div className="options">
-                          {slot.options.map((opt) => (
-                            <label key={opt.value} className="option-row">
-                              <input
-                                type="radio"
-                                name={`slot-${slot.id}`}
-                                value={opt.value}
-                                checked={responses[firstNum] === opt.value}
-                                onChange={() => handleInputChange(firstNum, opt.value)}
-                              />
-                              <span className="option-letter">{opt.value}</span>
-                              <span>{opt.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                        {showAnswers && qItem && (
-                          <div className="answer-tag" style={{ display: 'inline-block', marginTop: '6px' }}>
-                            Answer: {qItem.answer ? qItem.answer.split('||').join(' / ') : '—'}
-                          </div>
-                        )}
-                      </fieldset>
-                    );
-                  }
-
-                  if (slot.type === 'multi') {
-                    const selectedVals = nums.map((n) => responses[n]).filter(Boolean);
-                    return (
-                      <fieldset key={slot.id} className="question-row" data-q-anchor={nums.join(',')}>
-                        <legend>
-                          <span className="q-number">{nums.join('–')}</span>
-                          {slot.label || `Choose ${nums.length} options:`}
-                        </legend>
-                        <div className="options">
-                          {slot.options.map((opt) => (
-                            <label key={opt.value} className="option-row">
-                              <input
-                                type="checkbox"
-                                value={opt.value}
-                                checked={selectedVals.includes(opt.value)}
-                                onChange={(e) =>
-                                  handleMultiChoiceChange(nums, opt.value, e.target.checked)
-                                }
-                              />
-                              <span className="option-letter">{opt.value}</span>
-                              <span>{opt.label}</span>
-                            </label>
-                          ))}
-                        </div>
-                        {showAnswers && (
-                          <div className="answer-tag" style={{ display: 'inline-block', marginTop: '6px' }}>
-                            Answers:{' '}
-                            {nums
-                              .map((n) => part.questions.find((q) => q.number === n)?.answer)
-                              .filter(Boolean)
-                              .join(' / ')}
-                          </div>
-                        )}
-                      </fieldset>
-                    );
-                  }
-
-                  return null;
-                })}
-              </div>
+              {isLegacyBroken ? <p role="alert" className="studio-callout">
+                This test was imported without answer controls. An administrator must re-upload its original ZIP or HTML file to repair it.
+              </p> : <QuestionLayout html={part.questionHtml} renderSlot={renderSlot} />}
+              {orphanSlots.map(slot => <div key={slot.id}>{renderSlot(slot.id)}</div>)}
 
               {/* Explanations Section */}
-              <div className="explanation-section">
+              <div className="explanation-section" hidden={!showExplanations}>
                 <h2>Explanations</h2>
                 {part.questions.filter((q) => q.explanationHtml).length === 0 ? (
                   <p>No explanations stored for this section.</p>
@@ -730,7 +586,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                             </button>
                           )}
                         </div>
-                        <div dangerouslySetInnerHTML={{ __html: q.explanationHtml }} />
+                        <div dangerouslySetInnerHTML={{ __html: cleanLayout(q.explanationHtml || '') }} />
                       </article>
                     );
                   })
@@ -760,7 +616,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             <div style={{ display: 'flex', gap: '8px', alignItems: 'center' }}>
               <button
                 className="studio-primary"
-                onClick={handleSubmit}
+                disabled={submitting || isLegacyBroken} onClick={() => void handleSubmit()}
                 style={{ padding: '8px 16px', fontSize: '12px' }}
               >
                 {scored ? 'Review Score' : 'Submit & Review'}
@@ -1146,3 +1002,4 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     </div>
   );
 };
+

@@ -4,6 +4,7 @@ import {
   getDoc,
   getDocs,
   setDoc,
+  writeBatch,
   deleteDoc,
   query,
   where,
@@ -14,14 +15,16 @@ import {
 } from 'firebase/firestore';
 import { ref, uploadBytes, getDownloadURL } from 'firebase/storage';
 import { db, auth, storage, handleFirestoreError, OperationType } from '../firebase';
-import { EditableTest, EditablePart, TestMeta } from './importer';
+import { EditableTest, EditablePart, TestMeta, cleanLayout } from './importer';
 
 export class FirestoreAdapter {
+  private cacheUserId: string | null = null;
   private roleCache: 'admin' | 'student' | null = null;
   private testCache: Map<string, EditableTest> = new Map();
 
   async getRole(): Promise<'admin' | 'student'> {
     const user = auth.currentUser;
+    if (this.cacheUserId !== (user?.uid || null)) { this.clearRoleCache(); this.cacheUserId = user?.uid || null; }
     if (!user) return 'student';
 
     // Fast-path: Check server or token or admin collection
@@ -29,7 +32,7 @@ export class FirestoreAdapter {
 
     try {
       // Bootstrapped admin email check + Firestore admins check
-      if (user.email === 'manhcuong2006ht@gmail.com') {
+      if (user.email === 'manhcuong2006ht@gmail.com' && user.emailVerified) {
         this.roleCache = 'admin';
         return 'admin';
       }
@@ -45,6 +48,7 @@ export class FirestoreAdapter {
 
   clearRoleCache() {
     this.roleCache = null;
+    this.testCache.clear();
   }
 
   // Generic item get
@@ -138,6 +142,8 @@ export class FirestoreAdapter {
 
   // Load a complete test on-demand (metadata + sections) with in-memory caching
   async getTestComplete(testId: string): Promise<EditableTest> {
+    const requestUserId = auth.currentUser?.uid || null;
+    await this.getRole();
     if (this.testCache.has(testId)) {
       return JSON.parse(JSON.stringify(this.testCache.get(testId)!));
     }
@@ -150,8 +156,8 @@ export class FirestoreAdapter {
       // Fetch sections from subcollection
       const sectionsSnap = await getDocs(collection(db, `tests/${testId}/sections`));
       const parts: EditablePart[] = sectionsSnap.docs
-        .map((d) => d.data() as EditablePart)
-        .sort((a, b) => a.id.localeCompare(b.id, undefined, { numeric: true }));
+        .map((d) => d.data() as EditablePart & { index?: number })
+        .sort((a, b) => (a.index ?? 0) - (b.index ?? 0) || a.id.localeCompare(b.id, undefined, { numeric: true }));
 
       // If user is admin, also fetch the private keys
       const role = await this.getRole();
@@ -186,6 +192,7 @@ export class FirestoreAdapter {
         updatedAt: meta.updatedAt || Date.now(),
       };
 
+      if (requestUserId !== (auth.currentUser?.uid || null)) throw new Error('Account changed while loading this test. Please open it again.');
       this.testCache.set(testId, fullTest);
       return fullTest;
     } catch (error) {
@@ -196,6 +203,7 @@ export class FirestoreAdapter {
   // Save a complete test: splits into metadata, sections subcollection, and private test_keys
   async saveTestComplete(test: EditableTest): Promise<void> {
     const user = auth.currentUser;
+    if (!user || await this.getRole() !== 'admin') throw new Error('Administrator access required.');
     const now = Date.now();
     test.updatedAt = now;
 
@@ -216,7 +224,12 @@ export class FirestoreAdapter {
     };
 
     try {
-      await setDoc(doc(db, 'tests', test.id), meta, { merge: true });
+      const batch = writeBatch(db);
+      const previous = await getDocs(collection(db, `tests/${test.id}/sections`));
+      const ids = new Set(test.parts.map((p, index) => p.id || `p${index}`));
+      if (ids.size !== test.parts.length) throw new Error('Section IDs must be unique.');
+      previous.docs.filter(d => !ids.has(d.id)).forEach(d => batch.delete(d.ref));
+      batch.set(doc(db, 'tests', test.id), meta);
 
       // 2. Sections subcollection
       for (const [index, part] of test.parts.entries()) {
@@ -225,18 +238,17 @@ export class FirestoreAdapter {
           testId: test.id,
           index,
           title: part.title || `Passage ${index + 1}`,
-          passageHtml: part.passageHtml || '',
-          questionHtml: part.questionHtml || '',
+          passageHtml: cleanLayout(part.passageHtml || ''),
+          questionHtml: cleanLayout(part.questionHtml || ''),
           slots: part.slots || {},
           questions: part.questions.map((q) => ({
             number: q.number,
             kind: q.kind,
             missing: q.missing || false,
-            referenceQuote: q.referenceQuote || '',
           })),
           audio: part.audio || '',
         };
-        await setDoc(doc(db, `tests/${test.id}/sections`, sectionDoc.id), sectionDoc, { merge: true });
+        batch.set(doc(db, `tests/${test.id}/sections`, sectionDoc.id), sectionDoc);
       }
 
       // 3. Private answer keys document (admin and backend only)
@@ -246,6 +258,7 @@ export class FirestoreAdapter {
         for (const q of part.questions) {
           keysMap[q.number] = {
             answer: q.answer || '',
+            missing: Boolean(q.missing),
             kind: q.kind,
             referenceQuote: q.referenceQuote || '',
             explanationHtml: q.explanationHtml || '',
@@ -258,16 +271,16 @@ export class FirestoreAdapter {
         }
       }
 
-      await setDoc(
+      batch.set(
         doc(db, 'test_keys', test.id),
         {
           testId: test.id,
           keys: keysMap,
           multiGroups,
           updatedAt: now,
-        },
-        { merge: true }
+        }
       );
+      await batch.commit();
 
       this.testCache.set(test.id, JSON.parse(JSON.stringify(test)));
     } catch (error) {
@@ -314,3 +327,4 @@ export class FirestoreAdapter {
 }
 
 export const firestoreAdapter = new FirestoreAdapter();
+
