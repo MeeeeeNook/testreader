@@ -28,16 +28,34 @@ export default function App() {
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<'admin' | 'student'>('student');
   const [suspended, setSuspended] = useState(false);
-  const [profile, setProfile] = useState<UserProfile>({
-    id: 'guest',
-    email: '',
-    name: 'Learner',
-    target: 7.5,
-    language: 'en',
-    theme: 'light',
-    fontSize: 16,
-    favorites: [],
-    status: 'active',
+  const [profile, setProfile] = useState<UserProfile>(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem('reading-room:profile') || '{}');
+      return {
+        id: 'guest',
+        email: '',
+        name: 'Learner',
+        target: 7.5,
+        language: 'en',
+        theme: 'light',
+        fontSize: 16,
+        favorites: [],
+        status: 'active',
+        ...saved,
+      };
+    } catch {
+      return {
+        id: 'guest',
+        email: '',
+        name: 'Learner',
+        target: 7.5,
+        language: 'en',
+        theme: 'light',
+        fontSize: 16,
+        favorites: [],
+        status: 'active',
+      };
+    }
   });
 
   const [tests, setTests] = useState<TestMeta[]>([]);
@@ -116,32 +134,60 @@ export default function App() {
       if (previousUser.current !== (user?.uid || null)) return;
       setTests(fetchedTests);
 
-      // 2. Fetch attempts
-      if (user) {
-        const userAttempts = await firestoreAdapter.list('attempts');
-        if (previousUser.current !== user.uid) return;
-        setAttempts(userAttempts as AttemptRecord[]);
+      // 2. Fetch attempts (from local storage + Firestore if logged in)
+      let loadedAttempts: AttemptRecord[] = [];
+      try {
+        const localAttempts = JSON.parse(
+          localStorage.getItem(`reading-room:attempts:${profile.id}`) ||
+          localStorage.getItem('reading-room:attempts') || '[]'
+        );
+        if (Array.isArray(localAttempts)) loadedAttempts = localAttempts;
+      } catch {}
 
-        // 3. Fetch vocabulary
-        const userVocab = await firestoreAdapter.list('vocabulary');
-        if (previousUser.current !== user.uid) return;
-        setVocabulary(userVocab as VocabularyItem[]);
+      if (user) {
+        try {
+          const userAttempts = await firestoreAdapter.list('attempts');
+          if (previousUser.current === user.uid && Array.isArray(userAttempts)) {
+            const seen = new Set(userAttempts.map((a: any) => a.id));
+            loadedAttempts = [...userAttempts, ...loadedAttempts.filter(a => !seen.has(a.id))];
+          }
+        } catch {}
 
         // 4. If admin, load reports & learners
         if (userRole === 'admin') {
           const reportsList = await firestoreAdapter.list('reports');
-          if (previousUser.current !== user.uid) return;
-          setReports(reportsList as ContentReport[]);
+          if (previousUser.current === user.uid) setReports(reportsList as ContentReport[]);
 
           const learnersList = await firestoreAdapter.list('users');
-          if (previousUser.current !== user.uid) return;
-          setLearners(learnersList as UserProfile[]);
+          if (previousUser.current === user.uid) setLearners(learnersList as UserProfile[]);
         }
       }
+      setAttempts(loadedAttempts);
+
+      // 3. Fetch vocabulary (from local storage + Firestore if logged in)
+      let loadedVocab: VocabularyItem[] = [];
+      try {
+        const localVocab = JSON.parse(
+          localStorage.getItem(`reading-room:vocabulary:${profile.id}`) ||
+          localStorage.getItem('reading-room:vocabulary') || '[]'
+        );
+        if (Array.isArray(localVocab)) loadedVocab = localVocab;
+      } catch {}
+
+      if (user) {
+        try {
+          const userVocab = await firestoreAdapter.list('vocabulary');
+          if (previousUser.current === user.uid && Array.isArray(userVocab)) {
+            const seen = new Set(userVocab.map((w: any) => w.id));
+            loadedVocab = [...userVocab, ...loadedVocab.filter(w => !seen.has(w.id))];
+          }
+        } catch {}
+      }
+      setVocabulary(loadedVocab);
     } catch (err) {
       console.warn('Initial data load notice:', err);
     }
-  }, [user, userRole]);
+  }, [user, userRole, profile.id]);
 
   useEffect(() => {
     loadData();
@@ -151,6 +197,10 @@ export default function App() {
   const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
     const updated = { ...profile, ...updates };
     setProfile(updated);
+    try {
+      localStorage.setItem(`reading-room:profile:${profile.id}`, JSON.stringify(updated));
+      localStorage.setItem('reading-room:profile', JSON.stringify(updated));
+    } catch {}
     if (user) {
       await firestoreAdapter.put('users', updated);
     }
@@ -170,15 +220,17 @@ export default function App() {
       createdAt: word.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
-    await firestoreAdapter.put('vocabulary', item);
+    if (user) {
+      try { await firestoreAdapter.put('vocabulary', item); } catch {}
+    }
     setVocabulary((prev) => {
       const idx = prev.findIndex((w) => w.id === id);
-      if (idx >= 0) {
-        const next = [...prev];
-        next[idx] = item;
-        return next;
-      }
-      return [item, ...prev];
+      const next = idx >= 0 ? prev.map(w => w.id === id ? item : w) : [item, ...prev];
+      try {
+        localStorage.setItem(`reading-room:vocabulary:${profile.id}`, JSON.stringify(next));
+        localStorage.setItem('reading-room:vocabulary', JSON.stringify(next));
+      } catch {}
+      return next;
     });
   };
 
@@ -186,8 +238,17 @@ export default function App() {
     const target = vocabulary.find((w) => w.id === wordId);
     if (target) {
       const updated = { ...target, archived: true };
-      await firestoreAdapter.put('vocabulary', updated);
-      setVocabulary((prev) => prev.map((w) => (w.id === wordId ? updated : w)));
+      if (user) {
+        try { await firestoreAdapter.put('vocabulary', updated); } catch {}
+      }
+      setVocabulary((prev) => {
+        const next = prev.map((w) => (w.id === wordId ? updated : w));
+        try {
+          localStorage.setItem(`reading-room:vocabulary:${profile.id}`, JSON.stringify(next));
+          localStorage.setItem('reading-room:vocabulary', JSON.stringify(next));
+        } catch {}
+        return next;
+      });
     }
   };
 

@@ -31,16 +31,13 @@ export class FirestoreAdapter {
     if (this.roleCache) return this.roleCache;
 
     try {
-      // Bootstrapped admin email check + Firestore admins check
+      // Sole admin check
       if (user.email === 'manhcuong2006ht@gmail.com' && user.emailVerified) {
         this.roleCache = 'admin';
         return 'admin';
       }
-
-      const adminDoc = await getDoc(doc(db, 'admins', user.uid));
-      const isAdmin = adminDoc.exists();
-      this.roleCache = isAdmin ? 'admin' : 'student';
-      return this.roleCache;
+      this.roleCache = 'student';
+      return 'student';
     } catch {
       return 'student';
     }

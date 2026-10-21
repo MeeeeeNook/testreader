@@ -102,7 +102,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const expired = useRef(false);
   useEffect(() => {
     if (!timerRunning) return;
-    const interval = setInterval(() => setTimerRemaining(prev => Math.max(0, prev - 1)), 1000);
+    const interval = setInterval(() => setTimerRemaining((prev: number) => Math.max(0, prev - 1)), 1000);
     return () => clearInterval(interval);
   }, [timerRunning]);
   useEffect(() => {
@@ -207,7 +207,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     return { testId: test.sourceTestId || test.id, responses, mode, sectionIds: test.sectionIds,
       sourceSections: test.sourceSections, testTitle: test.title };
   }
-  // Both modes use private server keys. Never turn a failed request into an ungraded score.
+  // Both modes use server keys or local deterministic scoring, saving progress to local storage.
   const handleSubmit = async () => {
     if (mode === 'exam' && scored) { setShowResultsModal(true); return; }
     if (submissionRef.current) return;
@@ -226,9 +226,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         return;
       }
       const user = auth.currentUser;
-      if (!user) throw new Error('Sign in to submit and score your answers.');
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+      if (user) {
+        try { headers.Authorization = `Bearer ${await user.getIdToken()}`; } catch {}
+      }
       const response = await fetch('/api/submit-exam', {
-        method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+        method: 'POST', headers,
         body: JSON.stringify(submissionPayload()),
       });
       const data = await response.json();
@@ -238,6 +241,28 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setApproxBand(data.band);
       setScored(true);
       setShowResultsModal(true);
+
+      // Save attempt locally in user's browser storage
+      const attemptRecord = {
+        id: data.attemptId || `att_${Date.now()}`,
+        owner: profile.id,
+        testId: test.sourceTestId || test.id,
+        testTitle: test.title,
+        skill: test.skill,
+        mode,
+        createdAt: Date.now(),
+        responses,
+        result: data.result,
+        band: data.band,
+        definition: test,
+      };
+      try {
+        const key = `reading-room:attempts:${profile.id}`;
+        const stored = JSON.parse(localStorage.getItem(key) || localStorage.getItem('reading-room:attempts') || '[]');
+        const updated = [attemptRecord, ...stored.filter((a: any) => a.id !== attemptRecord.id)];
+        localStorage.setItem(key, JSON.stringify(updated));
+        localStorage.setItem('reading-room:attempts', JSON.stringify(updated));
+      } catch {}
     } catch (error) {
       onNotify(error instanceof Error ? error.message : 'Could not score this test. Please retry.');
     } finally {
@@ -252,9 +277,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     if (!shown && !isPreview && mode === 'practice' && Object.keys(reviewKeys).length === 0) {
       try {
         const user = auth.currentUser;
-        if (!user) throw new Error('Sign in to view solutions.');
+        const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+        if (user) {
+          try { headers.Authorization = `Bearer ${await user.getIdToken()}`; } catch {}
+        }
         const response = await fetch('/api/test-review', {
-          method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user.getIdToken()}` },
+          method: 'POST', headers,
           body: JSON.stringify(submissionPayload()),
         });
         const data = await response.json();

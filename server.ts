@@ -33,12 +33,27 @@ async function caller(req: express.Request) {
   let identity;
   try { identity = await auth.verifyIdToken(token); }
   catch { throw new AssessmentError(401, 'Your sign-in has expired. Please sign in again.'); }
-  const [admin, profile] = await Promise.all([
-    db.doc(`admins/${identity.uid}`).get(), db.doc(`users/${identity.uid}`).get(),
-  ]);
+  const profile = await db.doc(`users/${identity.uid}`).get();
   if (profile.data()?.status === 'suspended') throw new AssessmentError(403, 'This account is suspended.');
-  const isAdmin = admin.exists || (identity.email === 'manhcuong2006ht@gmail.com' && identity.email_verified === true);
+  const isAdmin = identity.email === 'manhcuong2006ht@gmail.com' && identity.email_verified === true;
   return { identity, isAdmin, db, profile };
+}
+async function optionalCaller(req: express.Request) {
+  const token = /^Bearer (.+)$/i.exec(req.headers.authorization || '')?.[1];
+  const { auth, db } = backend();
+  if (!token) {
+    return { identity: null, isAdmin: false, db };
+  }
+  try {
+    const identity = await auth.verifyIdToken(token);
+    const profile = await db.doc(`users/${identity.uid}`).get();
+    if (profile.data()?.status === 'suspended') throw new AssessmentError(403, 'This account is suspended.');
+    const isAdmin = identity.email === 'manhcuong2006ht@gmail.com' && identity.email_verified === true;
+    return { identity, isAdmin, db };
+  } catch (error) {
+    if (error instanceof AssessmentError) throw error;
+    return { identity: null, isAdmin: false, db };
+  }
 }
 function apiError(res: express.Response, error: unknown) {
   if (error instanceof AssessmentError) return res.status(error.status).json({ error: error.message });
@@ -123,7 +138,7 @@ Fields required:
 // Practice review is explicit; question content and exam setup never receive private keys.
 app.post('/api/test-review', async (req, res) => {
   try {
-    const { db, isAdmin } = await caller(req);
+    const { db, isAdmin } = await optionalCaller(req);
     if (req.body.mode !== 'practice') throw new AssessmentError(403, 'Submit the exam before viewing solutions.');
     const assessment = await loadAssessment(assessmentStore(db), req.body, isAdmin);
     res.json({ keys: assessment.keys });
@@ -132,18 +147,31 @@ app.post('/api/test-review', async (req, res) => {
 
 app.post('/api/submit-exam', async (req, res) => {
   try {
-    const { identity, isAdmin, db } = await caller(req);
+    const { identity, isAdmin, db } = await optionalCaller(req);
     const mode = req.body.mode;
     if (!['exam', 'practice'].includes(mode)) throw new AssessmentError(400, 'Invalid test mode.');
     const assessment = await loadAssessment(assessmentStore(db), req.body, isAdmin);
     const { result, band, responses } = markAssessment(assessment, req.body.responses || {});
-    const attemptRef = db.collection(`users/${identity.uid}/attempts`).doc();
-    await attemptRef.set({ id: attemptRef.id, owner: identity.uid, testId: req.body.testId || 'custom_mock',
-      testTitle: assessment.title, skill: assessment.skill, mode, createdAt: Date.now(), responses, result, band,
-      ...(req.body.sourceSections ? { sourceSections: req.body.sourceSections } : {}),
-      ...(req.body.sectionIds ? { sectionIds: req.body.sectionIds } : {}),
-    });
-    res.json({ attemptId: attemptRef.id, result, band, keys: assessment.keys });
+    let attemptId = `att_${Date.now()}`;
+    if (identity) {
+      const attemptRef = db.collection(`users/${identity.uid}/attempts`).doc();
+      attemptId = attemptRef.id;
+      await attemptRef.set({
+        id: attemptRef.id,
+        owner: identity.uid,
+        testId: req.body.testId || 'custom_mock',
+        testTitle: assessment.title,
+        skill: assessment.skill,
+        mode,
+        createdAt: Date.now(),
+        responses,
+        result,
+        band,
+        ...(req.body.sourceSections ? { sourceSections: req.body.sourceSections } : {}),
+        ...(req.body.sectionIds ? { sectionIds: req.body.sectionIds } : {}),
+      });
+    }
+    res.json({ attemptId, result, band, keys: assessment.keys });
   } catch (error) { apiError(res, error); }
 });
 
