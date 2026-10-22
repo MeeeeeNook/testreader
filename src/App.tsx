@@ -1,3 +1,9 @@
+import { PortalHeader } from "./components/PortalHeader";
+import { HomeView } from "./components/HomeView";
+import { PracticeCatalog } from "./components/PracticeCatalog";
+import { KnowledgeView, ForumView, ContributionView, LoginNotice } from "./components/CommunityViews";
+import { sectionSummaries } from "./services/portal";
+const ContentAdminView = React.lazy(() => import("./components/ContentAdminView").then(m => ({default:m.ContentAdminView})));
 import { createId } from "./services/ids";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { User } from "firebase/auth";
@@ -20,9 +26,6 @@ import {
   fingerprint,
 } from "./services/importer";
 
-import { Navigation } from "./components/Navigation";
-import { TopHeader } from "./components/TopHeader";
-import { LibraryView } from "./components/LibraryView";
 import { MockBuilderView } from "./components/MockBuilderView";
 import { ProgressView } from "./components/ProgressView";
 import { VocabularyView } from "./components/VocabularyView";
@@ -80,7 +83,7 @@ export default function App() {
       return {
         name: "Learner",
         target: 7.5,
-        language: "en",
+        language: "vi",
         theme: "light",
         fontSize: 16,
         favorites: [],
@@ -95,7 +98,7 @@ export default function App() {
         email: "",
         name: "Learner",
         target: 7.5,
-        language: "en",
+        language: "vi",
         theme: "light",
         fontSize: 16,
         favorites: [],
@@ -160,7 +163,7 @@ export default function App() {
         setEditingTest(null);
         setSelectedTestFull(null);
         setGuard(false);
-        setRoute("library");
+        if (/\/take\//.test(window.location.pathname)) setRoute("practice");
         setAttempts([]);
         setVocabulary([]);
         setReports([]);
@@ -190,7 +193,7 @@ export default function App() {
         setProfile({
           name: "Learner",
           target: 7.5,
-          language: "en",
+          language: "vi",
           theme: "light",
           fontSize: 16,
           favorites: [],
@@ -337,7 +340,10 @@ export default function App() {
           setSelectedTestFull(test);
           setSetupMode("practice");
           setSetupTime(test.duration || 60);
-          setSetupSection("all");
+          const sectionIndex = page.section ? test.parts.findIndex(p => p.id === page.section) : -1;
+          if (page.section && sectionIndex < 0) throw new Error("This passage is unavailable.");
+          setSetupSection(sectionIndex >= 0 ? sectionIndex : "all");
+          if (sectionIndex >= 0) setSetupTime(test.skill === "reading" ? 20 : 10);
         } else if (
           page.name === "workspace" &&
           page.session &&
@@ -408,7 +414,7 @@ export default function App() {
     };
   }, [location, authReady, profile.id, userRole]);
   useEffect(() => {
-    document.title = `${route === "test" ? "Test details" : getCrumb()} · Reading Studio`;
+    document.title = `${route === "test" ? "Test details" : getCrumb()} · IELTS Studio`;
     if (route !== "workspace") setGuard(false);
   }, [location, setGuard]);
   useEffect(() => {
@@ -438,6 +444,7 @@ export default function App() {
 
   // Vocabulary handlers
   const handleSaveWord = async (word: Partial<VocabularyItem>) => {
+    if (!user) { notify(profile.language === "vi" ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
     const id = word.id || `voc_${Date.now()}`;
     const item: VocabularyItem = {
       id,
@@ -881,6 +888,14 @@ export default function App() {
   // Breadcrumb generation
   const getCrumb = () => {
     switch (route) {
+      case "home": return profile.language === "vi" ? "Trang chủ" : "Home";
+      case "practice": return "Practice Test";
+      case "full": return "Full Test";
+      case "knowledge": return profile.language === "vi" ? "Chia sẻ kiến thức" : "Learning guides";
+      case "forum": return "Forum";
+      case "contribute": return profile.language === "vi" ? "Đóng góp" : "Contribute";
+      case "content-admin": return "Quản lý bài viết";
+      case "contributions-admin": return "Duyệt đóng góp";
       case "library":
         return profile.language === "vi" ? "Thư viện đề thi" : "Test library";
       case "mock":
@@ -910,6 +925,7 @@ export default function App() {
   if (route === "workspace" && activeTest && page.session === sessionId) {
     return (
       <>
+        {activeMode === "practice" && <PortalHeader route="practice" user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />}
         {pendingNavigation && (
           <LeaveTestDialog
             onStay={cancelNavigation}
@@ -948,30 +964,8 @@ export default function App() {
         />
       )}
       {/* Sidebar Navigation */}
-      <Navigation
-        route={route}
-        onNavigate={(newRoute) => {
-          if (newRoute === "admin" && userRole !== "admin") {
-            notify("Administrator access required.");
-            return;
-          }
-          setRoute(newRoute as any);
-        }}
-        isAdmin={userRole === "admin"}
-        profile={profile}
-        storageConnected={Boolean(user)}
-      />
-
-      {/* Main Content Area */}
       <div className="studio-main">
-        <TopHeader
-          crumb={getCrumb()}
-          user={user}
-          profile={profile}
-          role={userRole}
-          onUpdateProfile={handleUpdateProfile}
-          onOpenProfileModal={() => setShowProfileModal(true)}
-        />
+        <PortalHeader route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
 
         {/* Account Suspension Alert */}
         {suspended && (
@@ -999,10 +993,10 @@ export default function App() {
                 Connecting your account… You can browse as a guest.
               </div>
             )}
-            {authReady && (
+            {authReady && user && ["progress", "settings"].includes(route) && (
               <div className="history-sync" role="status">
                 {syncStatus === "local"
-                  ? "Saved on this device · Sign in to sync your results."
+                  ? "Sign in before submitting to save your results."
                   : syncStatus === "syncing"
                     ? "Syncing your history…"
                     : syncStatus === "synced"
@@ -1018,7 +1012,7 @@ export default function App() {
                 )}
               </div>
             )}
-            {catalogError && route === "library" && (
+            {catalogError && ["library", "practice", "full"].includes(route) && (
               <div className="studio-callout" role="alert">
                 Library unavailable: {catalogError}{" "}
                 <button
@@ -1037,9 +1031,7 @@ export default function App() {
             {(pageError ||
               route === "notfound" ||
               (authReady &&
-                (route === "admin" ||
-                  route === "editor" ||
-                  route === "students") &&
+                (["admin", "editor", "students", "content-admin", "contributions-admin"].includes(route)) &&
                 userRole !== "admin")) && (
               <div className="studio-panel">
                 <h1>Page unavailable</h1>
@@ -1068,18 +1060,13 @@ export default function App() {
                   </button>
                 </div>
               )}
-            {route === "library" && (
-              <LibraryView
-                isAdmin={userRole === "admin"}
-                tests={tests}
-                attempts={attempts}
-                profile={profile}
-                onSelectTest={handleSelectTest}
-                onToggleFavorite={handleToggleFavorite}
-                onNavigateToMock={() => setRoute("mock")}
-                onNavigateToAdmin={() => setRoute("admin")}
-              />
-            )}
+            {route === "home" && <HomeView tests={tests} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
+            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={tests} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} />}
+            {route === "knowledge" && <KnowledgeView profile={profile} location={location} onNavigate={navigate} />}
+            {route === "forum" && <ForumView profile={profile} />}
+            {route === "contribute" && <ContributionView profile={profile} />}
+            {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
+            {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={profile.language === "vi"} text={profile.language === "vi" ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
             {route === "mock" && (
               <MockBuilderView
@@ -1089,11 +1076,11 @@ export default function App() {
               />
             )}
 
-            {route === "progress" && (
+            {route === "progress" && user && (
               <ProgressView
                 attempts={attempts}
                 profile={profile}
-                onOpenProfileModal={() => setShowProfileModal(true)}
+                onOpenProfileModal={() => setRoute("settings")}
                 selectedAttemptId={page.id}
                 onSelectAttempt={(id) =>
                   navigate(`/history/${encodeURIComponent(id)}`)
@@ -1105,7 +1092,7 @@ export default function App() {
               />
             )}
 
-            {route === "vocabulary" && (
+            {route === "vocabulary" && user && (
               <VocabularyView
                 vocabulary={vocabulary}
                 profile={profile}
@@ -1154,6 +1141,7 @@ export default function App() {
                     const full = await firestoreAdapter.getTestComplete(id);
                     await handleTestMeta([id], {
                       passageTitles: full.parts.map(p => p.title),
+                      sectionSummaries: sectionSummaries(full),
                       ...(full.parts.length === 1 ? {title: full.parts[0].title} : {}),
                     });
                   }
@@ -1204,8 +1192,7 @@ export default function App() {
                 </div>
 
                 <p>
-                  Configure your practice session. Your results are saved on
-                  this device. Sign in to sync your history across devices.
+                  Configure your session. All tests are free. Sign in and submit at least 50% of the questions to save an attempt to your history.
                 </p>
 
                 <label className="studio-field">
@@ -1215,8 +1202,7 @@ export default function App() {
                     onChange={(e) => setSetupMode(e.target.value as any)}
                   >
                     <option value="practice">
-                      Practice Mode — Flexible timing & independent answer
-                      toggles
+                      Practice Mode — Flexible timing, solutions after submission
                     </option>
                     <option value="exam">
                       Official Exam Mode — Timed, solutions hidden until

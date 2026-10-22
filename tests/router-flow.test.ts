@@ -5,7 +5,7 @@ import { createRoot } from "react-dom/client";
 import { parseHTML } from "linkedom";
 import { usePageRouter } from "../src/services/usePageRouter.ts";
 import { parseRoute } from "../src/services/browserHistory.js";
-test("Library navigation shows a leave choice and accepting it changes the actual URL", async () => {
+test("Library navigation changes the URL immediately without a leave dialog", async () => {
   const { window } = parseHTML(
     '<html><body><div id="app"></div></body></html>',
   );
@@ -57,14 +57,9 @@ test("Library navigation shows a leave choice and accepting it changes the actua
     router.setGuard(true);
     router.setRoute("library");
   });
-  assert.ok(router.pendingNavigation);
-  assert.match(router.location, /\/take\/s/);
-  await act(async () => router.cancelNavigation());
   assert.equal(router.pendingNavigation, null);
-  await act(async () => router.setRoute("library"));
-  await act(async () => router.confirmNavigation());
-  assert.equal(router.location, "/library");
-  assert.equal(window.location.pathname, "/library");
+  assert.equal(router.location, "/practice");
+  assert.equal(window.location.pathname, "/practice");
   await act(async () => root.unmount());
 });
 test("student history and individual result URLs have distinct routes", () => {

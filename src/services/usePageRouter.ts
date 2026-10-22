@@ -29,14 +29,10 @@ export function usePageRouter() {
   }, []);
   const navigate = useCallback((path: string, replace = false) => {
     if (path === window.location.pathname + window.location.search) return true;
-    if (guarded.current) {
-      setPendingNavigation({ path, replace });
-      return false;
-    }
     return controller.current?.navigate(path, replace) ?? false;
   }, []);
   const setGuard = useCallback((active: boolean) => {
-    guarded.current = active;
+    guarded.current = false;
     controller.current?.guard(active);
   }, []);
   const confirmNavigation = useCallback(() => {

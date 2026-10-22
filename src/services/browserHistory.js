@@ -4,7 +4,18 @@ export function parseRoute(input) {
   try {
     const url = new URL(input, "https://reading.local");
     const p = url.pathname.replace(/\/+$/, "") || "/";
-    if (p === "/" || p === "/library") return { name: "library" };
+    if (p === "/") return { name: "home" };
+    if (p === "/library") return { name: "library" };
+    if (p === "/practice") return {name:"practice"};
+    if (p === "/full-tests") return {name:"full"};
+    if (p.startsWith("/full-tests/")) return {name:"full",category:p.split("/")[2]};
+    if (p === "/knowledge") return {name:"knowledge"};
+    if (p === "/forum") return {name:"forum"};
+    if (p === "/contribute") return {name:"contribute"};
+    if (p === "/admin/content") return {name:"content-admin"};
+    if (p === "/admin/contributions") return {name:"contributions-admin"};
+    let sectionMatch = /^\/tests\/([^/]+)\/sections\/([^/]+)$/.exec(p);
+    if (sectionMatch) return {name:"test",id:decodeURIComponent(sectionMatch[1]),section:decodeURIComponent(sectionMatch[2])};
     const simple = {
       "/mock": "mock",
       "/history": "progress",
@@ -44,7 +55,9 @@ export function parseRoute(input) {
 export function routePath(name) {
   return (
     {
-      library: "/library",
+      home:"/", practice:"/practice", full:"/full-tests", knowledge:"/knowledge", forum:"/forum", contribute:"/contribute",
+      "content-admin":"/admin/content", "contributions-admin":"/admin/contributions",
+      library: "/practice",
       mock: "/mock",
       progress: "/history",
       vocabulary: "/vocabulary",
@@ -55,74 +68,24 @@ export function routePath(name) {
   );
 }
 export function createBrowserHistory(win, changed) {
-  let index = Number.isInteger(win.history.state?.studioIndex)
-    ? win.history.state.studioIndex
-    : 0;
-  let current = win.location.pathname + win.location.search,
-    guarded = false,
-    restoring = false;
-  win.history.replaceState(
-    { ...win.history.state, studioIndex: index },
-    "",
-    current,
-  );
-  const unload = (event) => {
-    if (guarded) {
-      event.preventDefault();
-      event.returnValue = true;
-    }
-  };
-  function guard(value) {
-    guarded = Boolean(value);
-    win.removeEventListener("beforeunload", unload);
-    if (guarded) win.addEventListener("beforeunload", unload);
-  }
-  function pop(event) {
-    if (restoring) {
-      restoring = false;
-      return;
-    }
+  let current = win.location.pathname + win.location.search;
+  const pop = () => {
     const next = win.location.pathname + win.location.search;
-    if (next === current) return;
-    const nextIndex = Number.isInteger(event.state?.studioIndex)
-      ? event.state.studioIndex
-      : null;
-    if (guarded && !win.confirm(LEAVE_MESSAGE)) {
-      if (nextIndex !== null && nextIndex !== index) {
-        restoring = true;
-        win.history.go(index - nextIndex);
-      } else win.history.pushState({ studioIndex: index }, "", current);
-      return;
-    }
-    index = nextIndex ?? index;
-    current = next;
-    guard(false);
-    changed(current);
-  }
+    if (next !== current) {current = next; changed(next);}
+  };
   win.addEventListener("popstate", pop);
   return {
-    guard,
+    guard(_value) {}, // Drafts persist automatically; navigation never asks for confirmation.
     navigate(path, replace = false) {
       const url = new URL(path, win.location.href);
-      if (url.origin !== win.location.origin)
-        throw new Error("Only local page navigation is supported.");
+      if (url.origin !== win.location.origin) throw new Error("Only local page navigation is supported.");
       const next = url.pathname + url.search;
       if (next === current) return true;
-      if (guarded && !win.confirm(LEAVE_MESSAGE)) return false;
-      guard(false);
-      if (!replace) index++;
-      win.history[replace ? "replaceState" : "pushState"](
-        { studioIndex: index },
-        "",
-        next,
-      );
+      win.history[replace ? "replaceState" : "pushState"]({}, "", next);
       current = next;
-      changed(current);
+      changed(next);
       return true;
     },
-    destroy() {
-      guard(false);
-      win.removeEventListener("popstate", pop);
-    },
+    destroy() {win.removeEventListener("popstate", pop);},
   };
 }

@@ -101,7 +101,7 @@ export async function syncHistoryRecords(
     if (!isCurrent()) throw new Error("Account changed.");
   };
   check();
-  claimGuestAttempts(storage, owner);
+  // Guests may practise, but only signed-in submissions count in account history.
   const cloud = await remote.list();
   check();
   const records = mergeAttempts(

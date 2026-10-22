@@ -1,3 +1,4 @@
+import { sectionSummaries } from "./portal";
 import { passageTitle } from "./passageTitle";
 import { buildPrivateKeys } from "./privateKeys";
 import {
@@ -123,6 +124,8 @@ export class FirestoreAdapter {
       "source",
       "title",
       "passageTitles",
+      "sectionSummaries",
+      "access",
       "status",
       "deletedAt",
       "restoreStatus",
@@ -294,6 +297,7 @@ export class FirestoreAdapter {
       duration: test.duration || 60,
       passages: test.parts.length,
       passageTitles: test.parts.map((p, i) => passageTitle(p.passageHtml, p.title, i)),
+      sectionSummaries: sectionSummaries({...test, parts:test.parts.map((p,i)=>({...p,title:passageTitle(p.passageHtml,p.title,i)}))}),
       questions: test.parts.reduce((sum, p) => sum + p.questions.length, 0),
       createdAt: test.createdAt || now,
       updatedAt: now,
@@ -319,6 +323,7 @@ export class FirestoreAdapter {
           id: part.id || `p${index}`,
           testId: test.id,
           index,
+          position: part.position || index + 1,
           title: passageTitle(part.passageHtml, part.title, index),
           passageHtml: cleanLayout(part.passageHtml || ""),
           questionHtml: cleanLayout(part.questionHtml || ""),
