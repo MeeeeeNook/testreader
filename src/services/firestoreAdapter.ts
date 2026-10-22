@@ -1,3 +1,4 @@
+import { passageTitle } from "./passageTitle";
 import { buildPrivateKeys } from "./privateKeys";
 import {
   collection,
@@ -120,6 +121,8 @@ export class FirestoreAdapter {
     const allowed: any = { updatedAt: Date.now() };
     for (const key of [
       "source",
+      "title",
+      "passageTitles",
       "status",
       "deletedAt",
       "restoreStatus",
@@ -224,6 +227,8 @@ export class FirestoreAdapter {
             a.id.localeCompare(b.id, undefined, { numeric: true }),
         );
 
+      parts.forEach((part, index) => { part.title = passageTitle(part.passageHtml, part.title, index); });
+
       // If user is admin, also fetch the private keys
       const role = await this.getRole();
       if (role === "admin") {
@@ -281,13 +286,14 @@ export class FirestoreAdapter {
     // 1. Lightweight metadata
     const meta: TestMeta = {
       id: test.id,
-      title: test.title,
+      title: test.parts.length === 1 ? passageTitle(test.parts[0].passageHtml, test.parts[0].title, 0) : test.title,
       skill: test.skill,
       source: test.source || "My Collection",
       access: "free",
       status: test.status || "published",
       duration: test.duration || 60,
       passages: test.parts.length,
+      passageTitles: test.parts.map((p, i) => passageTitle(p.passageHtml, p.title, i)),
       questions: test.parts.reduce((sum, p) => sum + p.questions.length, 0),
       createdAt: test.createdAt || now,
       updatedAt: now,
@@ -313,7 +319,7 @@ export class FirestoreAdapter {
           id: part.id || `p${index}`,
           testId: test.id,
           index,
-          title: part.title || `Passage ${index + 1}`,
+          title: passageTitle(part.passageHtml, part.title, index),
           passageHtml: cleanLayout(part.passageHtml || ""),
           questionHtml: cleanLayout(part.questionHtml || ""),
           slots: part.slots || {},
@@ -379,4 +385,3 @@ export class FirestoreAdapter {
 }
 
 export const firestoreAdapter = new FirestoreAdapter();
-

@@ -1,3 +1,4 @@
+import { passageTitle } from "./passageTitle";
 import JSZip from "jszip";
 import JSON5 from "json5";
 
@@ -55,6 +56,7 @@ export interface TestMeta {
   status: "published" | "draft" | "archived";
   duration: number;
   passages: number;
+  passageTitles?: string[];
   questions: number;
   updatedAt: number;
   createdAt?: number;
@@ -847,9 +849,8 @@ export function toEditable(
         html = html.replace(token, '<span data-slot="' + id + '"></span>');
       return html;
     }
-    const title =
-      txt(topic.querySelector("h1,h2")) || `Passage ${partIndex + 1}`;
     const passageHtml = layout(topic);
+    const title = passageTitle(part.topic_content, "", partIndex);
     const questionHtml = layout(q);
 
     parts.push({
@@ -866,7 +867,7 @@ export function toEditable(
   return {
     schemaVersion: 1,
     id: testId,
-    title: data.title || meta.title || "Untitled IELTS Test",
+    title: parts.length === 1 && parts[0].title !== "Passage 1" ? parts[0].title : data.title || meta.title || "Untitled IELTS Test",
     skill: meta.skill || "reading",
     source: meta.source || "Imported Collection",
     access: meta.access || "free",
@@ -1035,7 +1036,7 @@ export function importJsonTests(
       parts: item.parts.map((part: any, index: number) => ({
         ...part,
         id: part.id || "p" + index,
-        title: part.title || "Passage " + (index + 1),
+        title: passageTitle(part.passageHtml, part.title, index),
         slots: part.slots || {},
         audio: part.audio || "",
         questions: part.questions.map((q: any) => ({

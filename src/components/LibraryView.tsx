@@ -1,3 +1,5 @@
+import { FolderBrowser } from "./FolderBrowser";
+import { compareTests, inFolder, sortOptions, latestAttempt, allFolderPaths } from "../services/catalog";
 import React, { useMemo, useState } from "react";
 import {
   BookOpen,
@@ -36,12 +38,12 @@ export const LibraryView: React.FC<Props> = ({
     [scope, setScope] = useState("all"),
     [sort, setSort] = useState("new"),
     [page, setPage] = useState(0);
+  const [completion, setCompletion] = useState("all");
+  const [recursive, setRecursive] = useState(true);
   const published = tests.filter(
     (t) => t.status === "published" && t.skill === skill,
   );
-  const sources = [
-    ...new Set(published.map((t) => t.source || "Other collection")),
-  ].sort();
+  const sources = allFolderPaths(published);
   const filtered = useMemo(
     () =>
       tests
@@ -49,9 +51,10 @@ export const LibraryView: React.FC<Props> = ({
           (t) =>
             t.status === "published" &&
             t.skill === skill &&
-            (!source || (t.source || "Other collection") === source) &&
+            inFolder(t.source || "Unfiled", source, recursive) &&
+            (completion === "all" || (completion === "done" ? attempts.some(a => a.testId === t.id) : !attempts.some(a => a.testId === t.id))) &&
             (!search ||
-              `${t.title} ${t.source}`
+              `${t.title} ${t.source} ${(t.passageTitles || []).join(" ")}`
                 .toLowerCase()
                 .includes(search.toLowerCase())) &&
             (scope !== "full" || t.passages > 1) &&
@@ -59,11 +62,9 @@ export const LibraryView: React.FC<Props> = ({
             (scope !== "favorites" || profile.favorites.includes(t.id)),
         )
         .sort((a, b) =>
-          sort === "title"
-            ? a.title.localeCompare(b.title, undefined, { numeric: true })
-            : b.updatedAt - a.updatedAt,
+          sort === "attempted" ? latestAttempt(attempts, b.id) - latestAttempt(attempts, a.id) || compareTests(a, b, "title") : compareTests(a, b, sort),
         ),
-    [tests, skill, source, search, scope, sort, profile.favorites],
+    [tests, skill, source, search, scope, sort, profile.favorites, completion, recursive, attempts],
   );
   const pages = Math.max(1, Math.ceil(filtered.length / 12)),
     current = Math.min(page, pages - 1);
@@ -197,6 +198,7 @@ export const LibraryView: React.FC<Props> = ({
             </button>
           ))}
         </div>
+        <FolderBrowser tests={published} value={source} onChange={path => { setSource(path); setPage(0); }} />
         <div className="catalog-tools">
           <label className="catalog-search">
             <Search size={18} />
@@ -228,9 +230,13 @@ export const LibraryView: React.FC<Props> = ({
             value={sort}
             onChange={(e) => setSort(e.target.value)}
           >
-            <option value="new">Recently added</option>
-            <option value="title">Title A–Z</option>
+            {sortOptions.map(([id,label]) => <option key={id} value={id}>{label}</option>)}
+            <option value="attempted">Recently attempted</option>
           </select>
+        </div>
+        <div className="catalog-tools">
+          <select aria-label="Attempt status" value={completion} onChange={e => {setCompletion(e.target.value);setPage(0);}}><option value="all">All attempt statuses</option><option value="done">Attempted</option><option value="new">Not attempted</option></select>
+          <label><input type="checkbox" checked={recursive} onChange={e => {setRecursive(e.target.checked);setPage(0);}} /> Include subfolders</label>
         </div>
         <div className="catalog-scopes">
           {[
@@ -290,6 +296,7 @@ export const LibraryView: React.FC<Props> = ({
                     {test.title}
                   </a>
                 </h3>
+                {test.passageTitles?.length ? <ol className="passage-titles">{test.passageTitles.map((title, index) => <li key={index}>{title}</li>)}</ol> : null}
                 <div className="card-details">
                   <span>
                     {test.passages}{" "}

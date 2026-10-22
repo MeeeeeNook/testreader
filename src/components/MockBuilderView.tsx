@@ -35,6 +35,20 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     }));
   }, [publishedKey, count]);
 
+  const [passageNames, setPassageNames] = useState<Record<string, string[]>>({});
+  const selectedIds = [...new Set(selections.map(s => s.testId).filter(Boolean))].sort().join('|');
+  useEffect(() => {
+    let cancelled = false;
+    const ids = selectedIds.split('|').filter(Boolean);
+    void Promise.all(ids.map(async id => {
+      try {
+        const full = await firestoreAdapter.getTestComplete(id);
+        if (!cancelled) setPassageNames(previous => ({...previous, [id]: full.parts.map(p => p.title)}));
+      } catch { /* Compilation reports unavailable tests when the learner starts. */ }
+    }));
+    return () => { cancelled = true; };
+  }, [selectedIds]);
+
   const handleTestChange = (sectionIdx: number, testId: string) => {
     setSelections((prev) => {
       const next = [...prev];
@@ -236,7 +250,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
                     >
                       {Array.from({ length: passageCount }).map((_, pIdx) => (
                         <option key={pIdx} value={pIdx}>
-                          Passage / Section {pIdx + 1}
+                          {pIdx + 1}. {passageNames[currentSel.testId]?.[pIdx] || currentTest?.passageTitles?.[pIdx] || `Passage ${pIdx + 1}`}
                         </option>
                       ))}
                     </select>
@@ -268,4 +282,5 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     </div>
   );
 };
+
 
