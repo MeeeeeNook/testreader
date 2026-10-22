@@ -73,6 +73,8 @@ export interface TestMeta {
   updatedAt: number;
   createdAt?: number;
   custom?: boolean;
+  deletedAt?: number | null;
+  restoreStatus?: 'draft' | 'published' | 'archived';
 }
 
 export interface UserProfile {

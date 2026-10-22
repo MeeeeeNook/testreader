@@ -66,3 +66,13 @@ firebase deploy --only firestore --project gen-lang-client-0464915880
 ```
 
 `firebase.json` targets the existing named Firestore database; it does not create a different database or hosting site.
+
+## Teacher tools and submission recovery
+
+- **Students** in the sidebar, **Settings → Teacher workspace**, and **Admin Studio → View student attempts** open `/admin/students`. Open a learner to view synced scores and question-by-question answers. Histories load in pages of 30, with older results loaded on demand. Guest/device-only results cannot be viewed by a teacher until the learner signs in and syncs.
+- In Admin Studio, select tests to move them to an existing or new collection, publish them, or save them as drafts. Sort by title, collection, recent update, or question count. **Delete** moves content to **Trash**, where it can be restored. No test content is permanently erased by this action.
+- Upload ZIP, original True IELTS HTML, or Reading Studio JSON exports through file selection, drag/drop, or folder import. JSON files inside ZIPs are supported. A broken nested archive reports its own error while other entries continue. All file errors remain visible in the import report. Source scripts are never executed.
+- The Library button uses an in-page leave dialog, which also works in embedded previews that suppress native `confirm()`. Browser Back/Forward and close/refresh retain their native guards.
+- Submission/review refresh an expired Firebase ID token once. Server/database failures report a service/configuration error instead of falsely saying the user's sign-in expired. Results from successful submissions already contain review keys and do not need a second review request.
+- A verified owner can use existing protected Firestore reads to mark/review their own tests if the API returns 503. Student and guest marking still require the backend's Firebase credentials. Configure Application Default Credentials on Google hosting, or the server-only `FIREBASE_SERVICE_ACCOUNT_JSON` secret on another host. This does not broaden student access to answer keys.
+- Question text, choices, inputs, and passages use the Aa size selector; sessions start at a comfortable 18px minimum.

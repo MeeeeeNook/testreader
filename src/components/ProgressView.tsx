@@ -9,6 +9,8 @@ import {
 import type { AttemptRecord, UserProfile } from "../types";
 interface Props {
   attempts: AttemptRecord[];
+  readOnly?: boolean;
+  getAttemptPath?: (id: string) => string;
   profile: UserProfile;
   selectedAttemptId?: string;
   onSelectAttempt: (id: string) => void;
@@ -23,6 +25,8 @@ const date = (time: number) =>
   });
 export const ProgressView: React.FC<Props> = ({
   attempts,
+  readOnly = false,
+  getAttemptPath,
   profile,
   selectedAttemptId,
   onSelectAttempt,
@@ -156,8 +160,13 @@ export const ProgressView: React.FC<Props> = ({
             next focus.
           </p>
         </div>
-        <button className="studio-secondary" onClick={onOpenProfileModal}>
-          Set your target <ArrowUpRight size={16} />
+        <button
+          className="studio-secondary"
+          disabled={readOnly}
+          onClick={onOpenProfileModal}
+        >
+          {readOnly ? "Student target" : "Set your target"}{" "}
+          <ArrowUpRight size={16} />
         </button>
       </div>
       <div className="library-metrics">
@@ -229,7 +238,11 @@ export const ProgressView: React.FC<Props> = ({
           <a
             key={a.id}
             className="history-card"
-            href={`/history/${encodeURIComponent(a.id)}`}
+            href={
+              getAttemptPath
+                ? getAttemptPath(a.id)
+                : `/history/${encodeURIComponent(a.id)}`
+            }
             onClick={(e) => open(e, a.id)}
           >
             <span className="history-icon">

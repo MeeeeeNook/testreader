@@ -1690,3 +1690,131 @@ textarea:focus-visible {
 .studio-dark .reading-content {
   color: #e4e0eb;
 }
+
+/* Test text follows the selected reading size instead of hard-coded 12–14px rules. */
+.questions-content,
+.reading-content {
+  font-size: var(--study-font-size, 18px);
+  line-height: 1.85;
+}
+.questions-content h1,
+.questions-content h2,
+.questions-content h3,
+.questions-content .question-row legend,
+.questions-content .option-row,
+.questions-content .option-row span,
+.questions-content .fill-field,
+.questions-content .fill-field label,
+.reading-content table,
+.questions-content table {
+  font-size: inherit;
+  line-height: inherit;
+}
+.questions-content .fill-input,
+.questions-content .question-select,
+.reading-content .fill-input,
+.reading-content .question-select {
+  font-size: var(--study-font-size, 18px);
+  min-height: 42px;
+  padding: 8px 11px;
+  max-width: 100%;
+}
+.option-row {
+  min-height: 42px;
+  align-items: baseline;
+  gap: 10px;
+}
+.option-row input {
+  width: 18px;
+  height: 18px;
+  flex-shrink: 0;
+}
+.leave-test-dialog {
+  position: fixed;
+  inset: 0;
+  margin: auto;
+  max-width: 460px;
+  width: calc(100vw - 32px);
+  padding: 28px;
+  z-index: 500;
+}
+.leave-test-dialog::backdrop {
+  background: #16152b80;
+}
+.leave-test-dialog p {
+  line-height: 1.7;
+  margin: 16px 0 24px;
+}
+.admin-filters,
+.admin-bulk {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: end;
+  gap: 12px;
+  margin: 18px 0;
+}
+.admin-filters label,
+.admin-bulk label {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  font-size: 12px;
+}
+.admin-filters select,
+.admin-bulk input {
+  padding: 10px;
+  border: 1px solid var(--studio-border);
+  border-radius: 8px;
+  background: var(--studio-white);
+  color: var(--studio-ink);
+  max-width: 240px;
+}
+.admin-bulk {
+  background: var(--studio-soft);
+  padding: 16px;
+  border-radius: 12px;
+}
+.admin-bulk strong {
+  font-size: 12px;
+  align-self: center;
+}
+.admin-dropzone {
+  padding: 26px;
+  border: 1px dashed #b5a6da;
+  background: var(--studio-soft);
+  border-radius: 14px;
+  margin-bottom: 24px;
+  text-align: center;
+  font-size: 13px;
+}
+.admin-dropzone p {
+  font-size: 12px;
+  color: var(--studio-muted);
+  line-height: 1.7;
+  margin: 10px 0 16px;
+}
+.student-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 18px;
+}
+.student-grid h2 {
+  margin: 18px 0 8px;
+}
+.student-grid p {
+  font-size: 12px;
+  overflow-wrap: anywhere;
+  color: var(--studio-muted);
+}
+.student-grid small {
+  display: block;
+  font-size: 11px;
+  margin: 15px 0 20px;
+}
+.studio-table-wrap {
+  overflow-x: auto;
+}
+.studio-table input[type="checkbox"] {
+  width: 18px;
+  height: 18px;
+}

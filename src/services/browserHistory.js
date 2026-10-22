@@ -14,6 +14,15 @@ export function parseRoute(input) {
     };
     if (simple[p]) return { name: simple[p] };
     let m;
+    if (p === "/admin/students") return { name: "students" };
+    if ((m = /^\/admin\/students\/([^/]+)\/attempts\/([^/]+)$/.exec(p)))
+      return {
+        name: "students",
+        id: decodeURIComponent(m[1]),
+        attempt: decodeURIComponent(m[2]),
+      };
+    if ((m = /^\/admin\/students\/([^/]+)$/.exec(p)))
+      return { name: "students", id: decodeURIComponent(m[1]) };
     if ((m = /^\/history\/([^/]+)$/.exec(p)))
       return { name: "progress", id: decodeURIComponent(m[1]) };
     if (p === "/admin/new") return { name: "editor", id: "new" };
@@ -41,6 +50,7 @@ export function routePath(name) {
       vocabulary: "/vocabulary",
       settings: "/settings",
       admin: "/admin",
+      students: "/admin/students",
     }[name] || "/library"
   );
 }

@@ -1,3 +1,4 @@
+import { assessmentRequest } from "../services/assessmentClient";
 import React, { useState, useEffect, useRef } from "react";
 import {
   EditableTest,
@@ -49,6 +50,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
+  const [textSize, setTextSize] = useState(Math.max(18, profile.fontSize || 18));
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const sessionKey = `reading-room:v3:${profile.id}:${sessionId}:${mode}${isPreview ? ":preview" : ""}`;
   const [savedSession] = useState(() => {
@@ -370,24 +372,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         setShowResultsModal(true);
         return;
       }
-      const user = auth.currentUser;
-      const headers: Record<string, string> = {
-        "Content-Type": "application/json",
-      };
-      if (user) {
-        headers.Authorization = `Bearer ${await user.getIdToken()}`;
-      }
-      const response = await fetch("/api/submit-exam", {
-        method: "POST",
-        headers,
-        body: JSON.stringify({ ...submissionPayload(), attemptId }),
-      });
-      const data = await response.json();
-      if (!response.ok)
-        throw new Error(
-          data.error || "Could not score this test. Please retry.",
-        );
+      const data = await assessmentRequest('/api/submit-exam', { ...submissionPayload(), attemptId });
       setReviewKeys(data.keys || {});
+      setReviewLoaded(true);
       setScoreResult(data.result);
       setApproxBand(data.band);
       setScored(true);
@@ -444,21 +431,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       !reviewLoaded
     ) {
       try {
-        const user = auth.currentUser;
-        const headers: Record<string, string> = {
-          "Content-Type": "application/json",
-        };
-        if (user) {
-          headers.Authorization = `Bearer ${await user.getIdToken()}`;
-        }
-        const response = await fetch("/api/test-review", {
-          method: "POST",
-          headers,
-          body: JSON.stringify({ ...submissionPayload(), mode: "practice" }),
-        });
-        const data = await response.json();
-        if (!response.ok)
-          throw new Error(data.error || "Could not load solutions.");
+        const data = await assessmentRequest('/api/test-review', { ...submissionPayload(), mode: 'practice' });
         setReviewKeys(data.keys || {});
         setReviewLoaded(true);
       } catch (error) {
@@ -645,6 +618,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   return (
     <div
       className={`app ${mode === "exam" ? "exam-mode" : ""} ${scored ? "exam-finished" : ""}`}
+      style={{'--study-font-size':`${textSize}px`} as React.CSSProperties}
       onMouseUp={handleMouseUp}
     >
       <main className="main">
@@ -1350,19 +1324,15 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           <label className="studio-field">
             Font Size
             <select
-              value={profile.fontSize}
+              value={textSize}
               onChange={(e) => {
-                const size = Number(e.target.value);
-                document.documentElement.style.setProperty(
-                  "--study-font-size",
-                  `${size}px`,
-                );
+                setTextSize(Number(e.target.value));
               }}
             >
-              <option value={14}>Small (14px)</option>
-              <option value={16}>Default (16px)</option>
-              <option value={18}>Large (18px)</option>
-              <option value={20}>Extra Large (20px)</option>
+              <option value={14}>Compact (14px)</option>
+              <option value={16}>Small (16px)</option>
+              <option value={18}>Comfortable (18px)</option>
+              <option value={20}>Large (20px)</option><option value={22}>Extra large (22px)</option><option value={24}>Maximum (24px)</option>
             </select>
           </label>
 
