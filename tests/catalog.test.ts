@@ -50,3 +50,21 @@ test('renaming a folder preserves descendants and excludes similarly named folde
   assert.deepEqual([...planFolderMove(tests,'Forecast/Q3','Archive/2026/Q3')], [['Archive / 2026 / Q3',['1']],['Archive / 2026 / Q3 / Week 1',['2']]]);
   assert.throws(()=>planFolderMove(tests,'Forecast',' / '), /destination/);
 });
+
+
+test('legacy names are repaired from plain paragraph titles, without treating instructions as titles', async () => {
+ const {isGenericPassageTitle}=await import('../src/services/passageTitle.ts');
+ const {needsCatalogRepair}=await import('../src/services/catalogRepair.ts');
+ for(const title of ['Passage 1','READING PASSAGE 2','Passage / Part 3','Section IV','']) assert.ok(isGenericPassageTitle(title),title);
+ assert.equal(passageTitle('<p>READING PASSAGE 2</p><p>You should spend 20 minutes on Questions 14–26.</p><p>The future of cities</p><p>Urban life is changing.</p>','Passage 2'),'The future of cities');
+ assert.ok(needsCatalogRepair(meta('1','Forecast')));
+ assert.equal(needsCatalogRepair(meta('1','Forecast',{passages:1,sectionSummaries:[{id:'p0',index:0,title:'The future of cities',questions:13,kinds:[]}]})),false);
+});
+
+test('content audit finds duplicate numbering, missing keys and missing response controls',async()=>{
+ const {auditTest}=await import('../src/services/testAudit.ts');
+ const item=toEditable({title:'Source',parts:[{topic_content:'<h2>The future of cities</h2><p>A passage.</p>',question_content:'',questions:[1]}]});
+ item.parts[0].slots={};item.parts[0].questions=[{number:1,kind:'text',answer:''},{number:1,kind:'text',answer:'yes'}];
+ const issues=auditTest(item).join(' ');
+ assert.match(issues,/duplicate number/);assert.match(issues,/answer key is empty/);assert.match(issues,/answer control is missing/);
+});

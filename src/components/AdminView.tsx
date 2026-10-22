@@ -1,7 +1,8 @@
+import {catalogIssues} from "../services/testAudit";
 import { FolderBrowser } from "./FolderBrowser";
 import { compareTests, inFolder, folderPath, sortOptions, allFolderPaths, planFolderMove } from "../services/catalog";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { TestMeta, ContentReport, UserProfile } from "../types";
 
 interface AdminViewProps {
@@ -14,6 +15,9 @@ interface AdminViewProps {
   onDeleteTest: (id: string) => Promise<void>;
   onRestoreTest: (id: string) => Promise<void>;
   onSetCollection: (ids: string[], collection: string) => Promise<void>;
+  onRenameTest?: (id:string,title:string) => Promise<void>;
+  onDuplicateTest?: (id:string) => Promise<void>;
+  onExportSelected?: (ids:string[]) => Promise<void>;
   onRefreshTitles?: (ids: string[]) => Promise<void>;
   onSetStatus: (ids: string[], status: "published" | "draft") => Promise<void>;
   onViewStudents: () => void;
@@ -41,6 +45,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onRestoreTest,
   onSetCollection,
   onRefreshTitles,
+  onRenameTest, onDuplicateTest, onExportSelected,
   onSetStatus,
   onViewStudents,
   onEditTest,
@@ -67,6 +72,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [skillFilter,setSkillFilter]=useState('');
+  const [statusFilter,setStatusFilter]=useState('');
+  const [qualityFilter,setQualityFilter]=useState(false);
+  const [page,setPage]=useState(0);
+  const [renameTest,setRenameTest]=useState<TestMeta|null>(null);
+  const [newTitle,setNewTitle]=useState('');
+  useEffect(()=>{setPage(0);setSelected([]);},[tab,search,collectionFilter,skillFilter,statusFilter,qualityFilter]);
   const [renamePath, setRenamePath] = useState("");
   const [recursive, setRecursive] = useState(true);
   const run = async (action: () => Promise<void>) => {
@@ -96,6 +108,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
         : activeTests
   )
     .filter((t) => {
+      if (skillFilter && t.skill !== skillFilter) return false;
+      if (statusFilter && t.status !== statusFilter) return false;
+      if (qualityFilter && !catalogIssues(t).length) return false;
       if (!inFolder(t.source || "Unfiled", collectionFilter, recursive)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
@@ -106,6 +121,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
     })
     .sort((a, b) => compareTests(a, b, sort));
 
+  const pages=Math.max(1,Math.ceil(filteredTests.length/25));
+  const currentPage=Math.min(page,pages-1);
+  const visibleTests=filteredTests.slice(currentPage*25,currentPage*25+25);
+
   const filteredReports = reports.filter((r) => {
     if (reportFilter === "all") return true;
     return r.status === reportFilter;
@@ -113,6 +132,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   return (
     <div style={{ paddingBottom: "40px" }}>
+      {renameTest && <dialog open className="studio-modal admin-rename-dialog" aria-label="Rename test"><form onSubmit={e=>{e.preventDefault();if(!newTitle.trim()||!onRenameTest)return;const id=renameTest.id;void run(async()=>{await onRenameTest(id,newTitle.trim());setRenameTest(null);});}}><h2>Rename test</h2><input aria-label="New test title" value={newTitle} onChange={e=>setNewTitle(e.target.value)} required maxLength={250}/><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setRenameTest(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save title</button></div></form></dialog>}
       {deleteIds.length > 0 && (
         <ConfirmActionDialog
           title="Move tests to Trash?"
@@ -186,6 +206,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           }}
         />
       </section>
+      <div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
       {/* Tabs */}
       <div className="studio-chips">
         {[
@@ -230,6 +251,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
           <FolderBrowser tests={tab === "trash" ? trashedTests : tab === "archive" ? archivedTests : activeTests} value={collectionFilter} onChange={path => {setCollectionFilter(path);setRenamePath(path);setSelected([]);}} />
           <div className="admin-filters">
+            <label>Skill<select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></select></label>
+            <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
+            <label><input type="checkbox" checked={qualityFilter} onChange={e=>setQualityFilter(e.target.checked)}/> Needs content review</label>
             <label>
               Sort tests
               <select value={sort} onChange={(e) => setSort(e.target.value)}>
@@ -276,6 +300,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           {selected.length > 0 && (
             <div className="admin-bulk">
               <strong>{selected.length} selected</strong>
+              {onExportSelected&&<button className="studio-secondary" disabled={busy} onClick={()=>void run(()=>onExportSelected(selected))}>Export selected</button>}
               <label>
                 Collection
                 <input
@@ -346,6 +371,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               )}
             </div>
           )}
+          <div className="admin-page-bar"><span>{filteredTests.length} tests · page {currentPage+1} / {pages}</span><button disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>← Previous</button><button disabled={currentPage>=pages-1} onClick={()=>setPage(currentPage+1)}>Next →</button></div>
           {filteredTests.length === 0 ? (
             <div className="studio-empty">
               {tab === "archive"
@@ -363,13 +389,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         aria-label="Select all visible tests"
                         checked={
                           filteredTests.length > 0 &&
-                          filteredTests.every((t) => selected.includes(t.id))
+                          visibleTests.every((t) => selected.includes(t.id))
                         }
                         onChange={(e) =>
                           setSelected(
                             e.target.checked
-                              ? filteredTests.map((t) => t.id)
-                              : [],
+                              ? [...new Set([...selected,...visibleTests.map(t=>t.id)])]
+                              : selected.filter(id=>!visibleTests.some(t=>t.id===id)),
                           )
                         }
                       />
@@ -382,7 +408,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   </tr>
                 </thead>
                 <tbody>
-                  {filteredTests.map((t) => (
+                  {visibleTests.map((t) => (
                     <tr key={t.id}>
                       <td>
                         <input
@@ -400,6 +426,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </td>
                       <td>
                         <strong>{t.title}</strong>
+                        {t.passageTitles?.length ? <ul className="admin-passage-list">{t.passageTitles.map((title,i)=><li key={i}>{title}</li>)}</ul>:null}
+                        {catalogIssues(t).map(issue=><span className="admin-quality-tag" key={issue}>{issue}</span>)}
                         <br />
                         <span className="studio-small">
                           {t.source || "General"}
@@ -426,6 +454,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           >
                             Edit
                           </button>
+                          {onRenameTest&&!t.deletedAt&&<button className="studio-quiet" disabled={busy} onClick={()=>{setRenameTest(t);setNewTitle(t.title);}}>Rename</button>}
+                          {onDuplicateTest&&!t.deletedAt&&<button className="studio-quiet" disabled={busy} onClick={()=>void run(()=>onDuplicateTest(t.id))}>Duplicate draft</button>}
                           <button
                             className="studio-quiet"
                             onClick={() => onExportTest(t.id)}

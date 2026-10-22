@@ -278,6 +278,31 @@ export class FirestoreAdapter {
     }
   }
 
+  // Lightweight title repair never reads answer keys. Cache by test revision.
+  private summaryRequests = new Map<string, Promise<Partial<TestMeta>>>();
+  getCatalogSummary(test: TestMeta): Promise<Partial<TestMeta>> {
+    const key = `${auth.currentUser?.uid || "guest"}:${test.id}:${test.updatedAt}`;
+    if (this.summaryRequests.has(key)) return this.summaryRequests.get(key)!;
+    const task = (async () => {
+      const cached = (() => {try {return JSON.parse(localStorage.getItem(`reading-room:summary:${test.id}`) || "null");} catch {return null;}})();
+      let patch: Partial<TestMeta>;
+      if (cached?.version === 2 && cached.updatedAt === test.updatedAt && Array.isArray(cached.patch?.sectionSummaries) && Array.isArray(cached.patch?.passageTitles)) patch = {sectionSummaries:cached.patch.sectionSummaries,passageTitles:cached.patch.passageTitles,...(typeof cached.patch.title === "string" ? {title:cached.patch.title} : {})};
+      else {
+        const snap = await getDocs(collection(db, `tests/${test.id}/sections`));
+        const parts = snap.docs.map(d => ({...d.data(), id:d.id} as EditablePart & {index?:number})).sort((a,b) => (a.index || 0) - (b.index || 0));
+        if (!parts.length) throw new Error("This test has no sections.");
+        parts.forEach((p,i) => {p.title = passageTitle(p.passageHtml,p.title,i);});
+        patch = {passageTitles:parts.map(p=>p.title),sectionSummaries:sectionSummaries({...test,schemaVersion:1,createdAt:test.createdAt||test.updatedAt,parts}),...(parts.length===1 ? {title:parts[0].title} : {})};
+        try {localStorage.setItem(`reading-room:summary:${test.id}`,JSON.stringify({version:2,updatedAt:test.updatedAt,patch}));} catch {}
+      }
+      if ((await this.getRole()) === "admin") await this.updateTestMeta(test.id,patch);
+      return patch;
+    })();
+    this.summaryRequests.set(key,task);
+    void task.catch(()=>this.summaryRequests.delete(key));
+    return task;
+  }
+
   // Save a complete test: splits into metadata, sections subcollection, and private test_keys
   async saveTestComplete(test: EditableTest): Promise<void> {
     const user = auth.currentUser;
