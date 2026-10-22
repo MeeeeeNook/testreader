@@ -85,8 +85,10 @@ async function handleUserSync(user: User | null) {
   currentState = { user, profile: fallbackProfile, role, loading: false, suspended: false };
   notify();
   try {
-    // Sync with backend server
-    const res = await fetch("/api/auth/sync", {
+    // Optional server sync must never prevent loading the owner's saved folders.
+    let status = "active";
+    try {
+      const res = await fetch("/api/auth/sync", {
       method: "POST",
       signal: AbortSignal.timeout(8000),
       headers: {
@@ -100,11 +102,12 @@ async function handleUserSync(user: User | null) {
       }),
     });
 
-    let status = "active";
-
-    if (res.ok) {
-      const data = await res.json();
-      status = data.status || "active";
+      if (res.ok) {
+        const data = await res.json();
+        status = data.status || "active";
+      }
+    } catch {
+      console.warn("Server account sync is unavailable; loading saved profile directly.");
     }
 
     if (!isCurrent()) return;

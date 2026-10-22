@@ -1,5 +1,5 @@
 import {contentHash} from "./importIdentity";
-import type {LibraryFolder} from "./folders";
+import {organizationPatch,type LibraryFolder,type MenuFolder} from "./folders";
 import { sectionSummaries } from "./portal";
 import { passageTitle } from "./passageTitle";
 import { buildPrivateKeys } from "./privateKeys";
@@ -148,10 +148,21 @@ export class FirestoreAdapter {
       "restoreStatus",
       "folderId",
       "folderPath",
+      "fullTestMenuFolders",
     ] as const)
       if (changes[key] !== undefined) allowed[key] = changes[key];
     await setDoc(doc(db, "tests", id), allowed, { merge: true });
     this.testCache.delete(id);
+  }
+
+  async updateTestOrganizations(patches:({id:string;folderId:string|null;folderPath:string;fullTestMenuFolders:MenuFolder[]})[]):Promise<void>{
+    if((await this.getRole())!=="admin")throw new Error("Administrator access required.");
+    // Write metadata only, in bounded batches; never touch questions or answer keys.
+    for(let offset=0;offset<patches.length;offset+=400){
+      const batch=writeBatch(db),items=patches.slice(offset,offset+400);
+      for(const {id,...patch}of items)batch.update(doc(db,"tests",id),patch);
+      await batch.commit();for(const item of items)this.testCache.delete(item.id);
+    }
   }
 
   async getStudentAttempt(uid: string, id: string) {
@@ -324,7 +335,7 @@ export class FirestoreAdapter {
   }
 
   // Save a complete test: splits into metadata, sections subcollection, and private test_keys
-  async saveTestComplete(test: EditableTest): Promise<void> {
+  async saveTestComplete(test: EditableTest,folders:LibraryFolder[]=[]): Promise<void> {
     const user = auth.currentUser;
     if (!user || (await this.getRole()) !== "admin")
       throw new Error("Administrator access required.");
@@ -347,7 +358,7 @@ export class FirestoreAdapter {
       createdAt: test.createdAt || now,
       updatedAt: now,
       custom: true,
-      folderId:test.folderId||null,folderPath:test.folderPath||"",
+      ...organizationPatch(test as unknown as TestMeta,folders),
       contentHash:test.contentHash||await contentHash(test),
     };
 

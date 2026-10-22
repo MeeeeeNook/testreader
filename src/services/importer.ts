@@ -52,6 +52,7 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  fullTestMenuFolders?: import('./folders').MenuFolder[];
   folderId?: string|null;
   folderPath?: string;
   contentHash?: string;

@@ -65,6 +65,7 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  fullTestMenuFolders?: import('./services/folders').MenuFolder[];
   originSource?:string;
   folderId?: string|null;
   folderPath?: string;
