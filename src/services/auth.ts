@@ -7,6 +7,7 @@ import {
 import { auth, googleProvider } from "../firebase";
 import { firestoreAdapter } from "./firestoreAdapter";
 import { UserProfile } from "../types";
+import { roleForIdentity } from "./access";
 
 export interface AuthState {
   user: User | null;
@@ -35,7 +36,6 @@ function notify() {
 
 export async function loginWithGoogle(): Promise<User> {
   const result = await signInWithPopup(auth, googleProvider);
-  await handleUserSync(result.user);
   return result.user;
 }
 
@@ -71,10 +71,19 @@ async function handleUserSync(user: User | null) {
     return;
   }
 
+  const role = roleForIdentity(user);
+  const fallbackProfile: UserProfile = {
+    id: user.uid, email: user.email || '', name: user.displayName || 'Learner',
+    target: 7.5, language: 'en', theme: 'light', fontSize: 16, favorites: [], status: 'active',
+  };
+  // Make the owner portal available immediately, even if optional profile sync is offline.
+  currentState = { user, profile: fallbackProfile, role, loading: false, suspended: false };
+  notify();
   try {
     // Sync with backend server
     const res = await fetch("/api/auth/sync", {
       method: "POST",
+      signal: AbortSignal.timeout(8000),
       headers: {
         "Content-Type": "application/json",
         Authorization: `Bearer ${await user.getIdToken()}`,
@@ -86,16 +95,11 @@ async function handleUserSync(user: User | null) {
       }),
     });
 
-    let role: "admin" | "student" = "student";
     let status = "active";
 
     if (res.ok) {
       const data = await res.json();
-      role = data.role === "admin" ? "admin" : "student";
       status = data.status || "active";
-    } else {
-      // Fallback check
-      role = await firestoreAdapter.getRole();
     }
 
     if (!isCurrent()) return;
@@ -143,7 +147,7 @@ async function handleUserSync(user: User | null) {
         favorites: [],
         status: "active",
       },
-      role: "student",
+      role,
       loading: false,
       suspended: false,
     };
