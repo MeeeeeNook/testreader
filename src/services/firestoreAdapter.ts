@@ -1,3 +1,4 @@
+import { buildPrivateKeys } from "./privateKeys";
 import {
   collection,
   doc,
@@ -329,32 +330,8 @@ export class FirestoreAdapter {
         );
       }
 
-      // 3. Private answer keys document (admin and backend only)
-      const keysMap: Record<number, any> = {};
-      const multiGroups: number[][] = [];
-      for (const part of test.parts) {
-        for (const q of part.questions) {
-          keysMap[q.number] = {
-            answer: q.answer || "",
-            missing: Boolean(q.missing),
-            kind: q.kind,
-            referenceQuote: q.referenceQuote || "",
-            explanationHtml: q.explanationHtml || "",
-          };
-        }
-        for (const slot of Object.values(part.slots)) {
-          if (slot.type === "multi") {
-            multiGroups.push(slot.numbers);
-          }
-        }
-      }
-
-      batch.set(doc(db, "test_keys", test.id), {
-        testId: test.id,
-        keys: keysMap,
-        multiGroups,
-        updatedAt: now,
-      });
+      // 3. Private keys use Firestore-compatible group objects, never nested arrays.
+      batch.set(doc(db, "test_keys", test.id), buildPrivateKeys(test, now));
       await batch.commit();
 
       this.testCache.set(test.id, JSON.parse(JSON.stringify(test)));
@@ -402,3 +379,4 @@ export class FirestoreAdapter {
 }
 
 export const firestoreAdapter = new FirestoreAdapter();
+

@@ -91,6 +91,13 @@ function apiError(res: express.Response, error: unknown) {
   if (error instanceof AssessmentError)
     return res.status(error.status).json({ error: error.message });
   console.error("Backend request failed:", error);
+  const backendCode = (error as { code?: number | string })?.code;
+  if (backendCode === 7 || backendCode === "permission-denied" || backendCode === "PERMISSION_DENIED") {
+    return res.status(503).json({
+      code: "FIREBASE_SERVER_PERMISSION_DENIED",
+      error: "The scoring server does not have permission to access the Firebase database. Grant its runtime service account the Cloud Datastore User role in the Firebase project, then retry. Changing Firestore Rules will not fix this server permission.",
+    });
+  }
   return res.status(503).json({
     error:
       "The scoring service is unavailable. Please retry or ask the administrator to check the server Firebase credentials.",
@@ -196,7 +203,7 @@ Fields required:
       partOfSpeech: "phrase",
       meaning:
         req.body.language === "vi"
-          ? "Không thể tra từ tự động lúc này."
+          ? "Kh�ng th? tra t? t? d?ng l�c n�y."
           : "Automatic lookup unavailable.",
       example: req.body.context || "",
     });
@@ -272,6 +279,9 @@ app.post("/api/admin/user-status", async (req, res) => {
   }
 });
 
+// Unknown API requests must never be served the frontend HTML with status 200.
+app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found. Check that the Express backend is deployed.", code: "API_ROUTE_NOT_FOUND" }));
+
 // Mount Vite in development, serve static in production
 async function startServer() {
   if (process.env.NODE_ENV !== "production") {
@@ -294,3 +304,4 @@ async function startServer() {
 }
 
 startServer();
+

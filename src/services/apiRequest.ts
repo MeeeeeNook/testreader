@@ -36,9 +36,11 @@ export async function requestJson<T = any>(
     error.status = response.status;
     throw error;
   }
-  if (!data)
-    throw new Error(
-      "The server returned an unreadable response. Your answers are saved.",
-    );
+  if (!data || typeof data !== "object" || Array.isArray(data)) {
+    const error = new Error("The scoring API did not return JSON. The deployed server or /api route needs checking. Your answers are saved.") as Error & { status: number };
+    error.status = 502;
+    throw error;
+  }
   return data as T;
 }
+

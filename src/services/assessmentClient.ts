@@ -13,7 +13,7 @@ export async function assessmentRequest(
     // A verified owner can read their own private keys through existing Firestore rules.
     // This fallback never grants keys to a student or guest.
     if (
-      (error as any)?.status !== 503 ||
+      ![404, 405, 502, 503].includes((error as any)?.status) ||
       roleForIdentity(auth.currentUser) !== "admin"
     )
       throw error;
@@ -36,3 +36,4 @@ export async function assessmentRequest(
         };
   }
 }
+
