@@ -7,8 +7,7 @@ import { collectFiles, importJsonTests, jsonParts, toEditable, extractTitle } fr
 import type { UserProfile } from '../types';
 export const portalRequest=(url:string,payload:unknown={})=>requestJson(url,payload,()=>auth.currentUser);
 export function LoginNotice({text,vi=false}:{text:string;vi?:boolean}) {
- const [error,setError]=useState(''),[busy,setBusy]=useState(false);
- return <div className="portal-login-notice"><BookOpen size={32}/><h2>{vi?'Lưu hành trình học của mình':'Make your progress count'}</h2><p>{text}</p><button className="studio-primary" disabled={busy} onClick={async()=>{setBusy(true);try{await loginWithGoogle();}catch(e){setError((e as Error).message);}finally{setBusy(false);}}}>{busy?'…':vi?'Đăng nhập với Google':'Sign in with Google'}</button>{error&&<p role="alert">{error}</p>}</div>;
+ return <section className="guest-study-card"><span className="path-icon"><BookOpen size={28}/></span><h1>Keep track of your practice.</h1><p>{text}</p><ul><li>Review past attempts and scores</li><li>Keep your history across devices</li><li>Build a personal vocabulary list</li></ul><a className="studio-primary" href={'/sign-in?next='+encodeURIComponent(typeof window!=="undefined"?window.location.pathname:"/history")}>Sign in or create an account <ArrowUpRight size={16}/></a><a className="auth-guest" href="/practice">Keep practising as a guest</a></section>;
 }
 export function KnowledgeView({profile,location,onNavigate}:{profile:UserProfile;location:string;onNavigate:(path:string)=>void}) {
  const [items,setItems]=useState<any[]>([]),[error,setError]=useState(''),[busy,setBusy]=useState(true);

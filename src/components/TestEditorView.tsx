@@ -1,3 +1,6 @@
+import {createId} from "../services/ids";
+import {RichEditor} from "./RichEditor";
+import {Select} from "./Select";
 import {FolderPicker} from "./FolderPicker";
 import {folderLocation,type LibraryFolder} from "../services/folders";
 import {auditTest} from "../services/testAudit";
@@ -29,6 +32,8 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
   const [newQuestionType, setNewQuestionType] = useState<'text' | 'select' | 'radio' | 'multi'>('text');
   const [newQuestionLabel, setNewQuestionLabel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [openQuestions,setOpenQuestions]=useState<number[]>([]);
+  const uploadEditorImage=(file:File)=>firestoreAdapter.uploadMedia(file,`tests/${test.id}/images/${Date.now()}-${file.name}`);
 
   const part = test.parts[currentPartIndex] || test.parts[0];
   const issues = auditTest(test);
@@ -46,7 +51,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
   const handleAddSection = () => {
     const newIdx = test.parts.length + 1;
     const newPart: EditablePart = {
-      id: `p${test.parts.length}`,
+      id: `p_${createId()}`,
       title: `Passage ${newIdx}`,
       passageHtml: `<h2>Passage ${newIdx}</h2><p>Write your reading passage or transcript text here.</p>`,
       questionHtml: `<h3>Questions</h3><p>Write instructions, then add question fields below.</p>`,
@@ -204,8 +209,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           <div className="studio-eyebrow">CREATE & REFINE</div>
           <h1 className="studio-heading">Test Editor</h1>
           <p className="studio-lead">
-            Author and edit passages, questions, accepted answer variants, and explanations.
-            Content is saved directly to Cloud Firestore.
+            Edit passages, questions, answers and explanations.
           </p>
         </div>
 
@@ -254,13 +258,13 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
 
           <label className="studio-field">
             Skill
-            <select
+            <Select
               value={test.skill}
               onChange={(e) => setTest({ ...test, skill: e.target.value as any })}
             >
               <option value="reading">Academic Reading</option>
               <option value="listening">Listening</option>
-            </select>
+            </Select>
           </label>
 
           <label className="studio-field">
@@ -297,12 +301,12 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             Passage / Section Title
             <input
               value={part.title}
-              onChange={(e) => updatePart((p) => { p.title = e.target.value; })}
+              onChange={(e) => {const title=e.target.value;updatePart(p=>{const root=document.createElement('div');root.innerHTML=p.passageHtml;const heading=Array.from(root.querySelectorAll('h1,h2,h3,h4')).find(h=>h.textContent?.trim()===p.title.trim());if(heading){heading.textContent=title;p.passageHtml=root.innerHTML;}p.title=title;});}}
             />
           </label>
 
           <label className="studio-field" style={{margin:"0 15px"}}>Passage / Section number
-            <select value={part.position || currentPartIndex + 1} onChange={e=>updatePart(p=>{p.position=Number(e.target.value);})}>{Array.from({length:test.skill==='reading'?3:4},(_,i)=><option key={i} value={i+1}>{i+1}</option>)}</select>
+            <Select value={part.position || currentPartIndex + 1} onChange={e=>updatePart(p=>{p.position=Number(e.target.value);})}>{Array.from({length:test.skill==='reading'?3:4},(_,i)=><option key={i} value={i+1}>{i+1}</option>)}</Select>
           </label>
           <button className="studio-secondary" onClick={()=>updatePart(p=>{p.title=passageTitle(p.passageHtml,'',currentPartIndex);})}>Detect title</button>
           <button
@@ -349,16 +353,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             </div>
           </div>
 
-          <div
-            className="rich-editor"
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={(e) => {
-              const html = e.currentTarget.innerHTML;
-              updatePart((p) => { p.passageHtml = html; });
-            }}
-            dangerouslySetInnerHTML={{ __html: part.passageHtml }}
-          />
+          <RichEditor documentId={part.id+':passage'} label="Reading passage" value={part.passageHtml} slots={part.slots} onUploadImage={uploadEditorImage} onChange={html=>updatePart(p=>{p.passageHtml=html;})}/>
         </div>
 
         {/* Question Layout Editor */}
@@ -366,20 +361,11 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           <div className="studio-heading-line" style={{ marginBottom: '8px' }}>
             <h4 style={{ margin: 0 }}>Question Instructions & Layout</h4>
             <span className="studio-small">
-              Question inputs are represented by &lt;span data-slot="..."&gt; tags.
+              Answer fields appear as question chips.
             </span>
           </div>
 
-          <div
-            className="rich-editor"
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={(e) => {
-              const html = e.currentTarget.innerHTML;
-              updatePart((p) => { p.questionHtml = html; });
-            }}
-            dangerouslySetInnerHTML={{ __html: part.questionHtml }}
-          />
+          <RichEditor documentId={part.id+':questions'} label="Questions" value={part.questionHtml} slots={part.slots} onUploadImage={uploadEditorImage} onChange={html=>updatePart(p=>{p.questionHtml=html;})}/>
         </div>
       </div>
 
@@ -401,7 +387,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             {part.questions.map((q) => {
               const slot = Object.values(part.slots).find((s) => s.numbers.includes(q.number));
               return (
-                <details key={q.number} className="editor-question">
+                <details key={q.number} className="editor-question" onToggle={e=>{const open=e.currentTarget.open;setOpenQuestions(items=>open?[...new Set([...items,q.number])]:items.filter(n=>n!==q.number));}}>
                   <summary>
                     <strong>Question {q.number}</strong>
                     <span style={{ marginLeft: '12px', color: 'var(--teal)', fontSize: '12px' }}>
@@ -419,7 +405,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
                       <div className="studio-form-grid" style={{ marginBottom: '12px' }}>
                         <label className="studio-field">
                           Input Type
-                          <select
+                          <Select
                             value={slot.type}
                             onChange={(e) => {
                               const newType = e.target.value as any;
@@ -435,7 +421,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
                             <option value="select">Dropdown Matching</option>
                             <option value="radio">Multiple Choice (Single answer)</option>
                             <option value="multi">Multiple Choice (Choose multiple)</option>
-                          </select>
+                          </Select>
                         </label>
 
                         {slot.type !== 'text' && (
@@ -496,19 +482,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
 
                     <label className="studio-field">
                       Explanation (optional, displayed in review and practice mode)
-                      <div
-                        className="rich-editor explanation-editor"
-                        contentEditable
-                        suppressContentEditableWarning
-                        onBlur={(e) => {
-                          const val = e.currentTarget.innerHTML;
-                          updatePart((p) => {
-                            const targetQ = p.questions.find((x) => x.number === q.number);
-                            if (targetQ) targetQ.explanationHtml = val;
-                          });
-                        }}
-                        dangerouslySetInnerHTML={{ __html: q.explanationHtml || '' }}
-                      />
+                      {openQuestions.includes(q.number)&&<RichEditor documentId={part.id+':explanation:'+q.number} label={'Explanation '+q.number} value={q.explanationHtml||''} onUploadImage={uploadEditorImage} onChange={html=>updatePart(p=>{const question=p.questions.find(item=>item.number===q.number);if(question)question.explanationHtml=html;})}/>} 
                     </label>
 
                     <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '14px' }}>
@@ -558,7 +532,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
 
           <label className="studio-field">
             Question Type
-            <select
+            <Select
               value={newQuestionType}
               onChange={(e) => setNewQuestionType(e.target.value as any)}
             >
@@ -566,7 +540,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
               <option value="select">Matching / Headings dropdown</option>
               <option value="radio">Multiple Choice (Single answer)</option>
               <option value="multi">Multiple Choice (Choose Two)</option>
-            </select>
+            </Select>
           </label>
 
           <label className="studio-field">

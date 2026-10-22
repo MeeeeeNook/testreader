@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import { FolderBrowser } from "./FolderBrowser";
 import { compareTests, inFolder, sortOptions, latestAttempt, allFolderPaths } from "../services/catalog";
 import React, { useMemo, useState } from "react";
@@ -212,7 +213,7 @@ export const LibraryView: React.FC<Props> = ({
               }}
             />
           </label>
-          <select
+          <Select
             aria-label="Collection"
             value={source}
             onChange={(e) => {
@@ -224,18 +225,18 @@ export const LibraryView: React.FC<Props> = ({
             {sources.map((s) => (
               <option key={s}>{s}</option>
             ))}
-          </select>
-          <select
+          </Select>
+          <Select
             aria-label="Sort tests"
             value={sort}
             onChange={(e) => setSort(e.target.value)}
           >
             {sortOptions.map(([id,label]) => <option key={id} value={id}>{label}</option>)}
             <option value="attempted">Recently attempted</option>
-          </select>
+          </Select>
         </div>
         <div className="catalog-tools">
-          <select aria-label="Attempt status" value={completion} onChange={e => {setCompletion(e.target.value);setPage(0);}}><option value="all">All attempt statuses</option><option value="done">Attempted</option><option value="new">Not attempted</option></select>
+          <Select aria-label="Attempt status" value={completion} onChange={e => {setCompletion(e.target.value);setPage(0);}}><option value="all">All attempt statuses</option><option value="done">Attempted</option><option value="new">Not attempted</option></Select>
           <label><input type="checkbox" checked={recursive} onChange={e => {setRecursive(e.target.checked);setPage(0);}} /> Include subfolders</label>
         </div>
         <div className="catalog-scopes">
@@ -368,3 +369,4 @@ export const LibraryView: React.FC<Props> = ({
     </div>
   );
 };
+

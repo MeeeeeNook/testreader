@@ -1,0 +1,8 @@
+import React,{useState} from 'react';
+import {BookOpen,ArrowRight,Check,LoaderCircle} from 'lucide-react';
+import {loginWithGoogle} from '../services/auth';
+export function SignInView({location,onNavigate}:{location:string;onNavigate:(path:string)=>void}){
+ const [busy,setBusy]=useState(false),[error,setError]=useState('');
+ const signIn=async()=>{setBusy(true);setError('');try{await loginWithGoogle();const next=new URL(location,'https://studio.local').searchParams.get('next');onNavigate(next?.startsWith('/')&&!next.startsWith('//')?next:'/history');}catch(e){setError((e as Error).message);}finally{setBusy(false);}};
+ return <section className="auth-page"><div className="mesh-backdrop" aria-hidden="true"><i/><i/><i/></div><div className="auth-card"><span className="auth-brand"><BookOpen size={25}/> IELTS studio</span><h1>Welcome back.</h1><p>Keep your practice in one place.</p><div className="social-auth-buttons"><button className="social-auth-button google" disabled={busy} onClick={()=>void signIn()}>{busy?<LoaderCircle className="spin" size={20}/>:<span className="google-letter" aria-hidden="true">G</span>}<span>{busy?'Connecting…':'Continue with Google'}</span></button></div>{error&&<p className="auth-provider-error" role="alert">{error}</p>}<div className="auth-benefits"><p><Check size={15}/> View past scores and answers</p><p><Check size={15}/> Sync your history across devices</p><p><Check size={15}/> Save words to your vocabulary</p></div><small>New here? Your account is created when you sign in.</small><button className="auth-guest" onClick={()=>onNavigate('/practice')}>Continue without an account <ArrowRight size={15}/></button></div></section>;
+}

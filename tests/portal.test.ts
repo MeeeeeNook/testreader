@@ -27,7 +27,7 @@ test('home statistics come from the catalog and guests do not receive an exam-da
  const html=renderToStaticMarkup(React.createElement(HomeView,{tests:[meta],profile,attempts:[],onNavigate:()=>{},onUpdateProfile:async()=>{}}));assert.match(html,/Every test is free./);assert.doesNotMatch(html,/type="date"/);
 });
 test('new routes distinguish homepage, practice, full categories, contribution and section setup',()=>{
- assert.equal(parseRoute('/').name,'home');assert.equal(parseRoute('/practice?part=1').name,'practice');assert.deepEqual(parseRoute('/full-tests/cambridge'),{name:'full',category:'cambridge'});assert.deepEqual(parseRoute('/tests/t/sections/p2'),{name:'test',id:'t',section:'p2'});assert.equal(parseRoute('/admin/content').name,'content-admin');assert.equal(parseRoute('/contribute').name,'contribute');
+ assert.equal(parseRoute('/').name,'home');assert.equal(parseRoute('/practice?part=1').name,'practice');assert.deepEqual(parseRoute('/full-tests/cambridge'),{name:'full',category:'cambridge'});assert.deepEqual(parseRoute('/tests/t/sections/p2'),{name:'test',id:'t',section:'p2'});assert.equal(parseRoute('/admin/content').name,'content-admin');assert.equal(parseRoute('/contribute').name,'practice');assert.equal(parseRoute('/knowledge').name,'practice');
 });
 test('only manual signed-in submissions with at least half the real question numbers count as attempts',()=>{
  const numbers=Array.from({length:13},(_,i)=>i+14),responses=Object.fromEntries(numbers.slice(0,7).map(n=>[n,'answer']));
