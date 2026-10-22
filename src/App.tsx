@@ -82,11 +82,10 @@ export default function App() {
       return {
         name: "Learner",
         target: 7.5,
-        language: "vi",
-        theme: "light",
         fontSize: 16,
         favorites: [],
         ...saved,
+        language: "en", theme: "light",
         id: "guest",
         email: "",
         status: "active",
@@ -97,7 +96,7 @@ export default function App() {
         email: "",
         name: "Learner",
         target: 7.5,
-        language: "vi",
+        language: "en",
         theme: "light",
         fontSize: 16,
         favorites: [],
@@ -187,7 +186,7 @@ export default function App() {
       );
       setSuspended(state.suspended);
       if (state.profile) {
-        setProfile(state.profile);
+        setProfile({...state.profile,language:"en",theme:"light"});
       } else {
         let prefs = {};
         try {
@@ -198,11 +197,10 @@ export default function App() {
         setProfile({
           name: "Learner",
           target: 7.5,
-          language: "vi",
-          theme: "light",
           fontSize: 16,
           favorites: [],
           ...prefs,
+          language: "en", theme: "light",
           id: "guest",
           email: "",
           status: "active",
@@ -214,12 +212,13 @@ export default function App() {
 
   // Sync theme, font size, language with document root
   useEffect(() => {
-    document.body.classList.toggle("studio-dark", profile.theme === "dark");
+    document.body.classList.remove("studio-dark");
     document.documentElement.style.setProperty(
       "--study-font-size",
       `${profile.fontSize}px`,
     );
-    document.documentElement.lang = profile.language;
+    document.documentElement.lang = "en";
+    document.documentElement.style.colorScheme = "light";
   }, [profile.theme, profile.fontSize, profile.language]);
 
   const runHistorySync = useCallback(async () => {
@@ -434,7 +433,7 @@ export default function App() {
 
   // Profile update handler
   const handleUpdateProfile = async (updates: Partial<UserProfile>) => {
-    const updated = { ...profile, ...updates };
+    const updated = { ...profile, ...updates, language: "en" as const, theme: "light" as const };
     setProfile(updated);
     try {
       localStorage.setItem(
@@ -449,7 +448,7 @@ export default function App() {
 
   // Vocabulary handlers
   const handleSaveWord = async (word: Partial<VocabularyItem>) => {
-    if (!user) { notify(profile.language === "vi" ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
+    if (!user) { notify(false ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
     const id = word.id || `voc_${Date.now()}`;
     const item: VocabularyItem = {
       id,
@@ -757,7 +756,7 @@ export default function App() {
   const handleUploadFiles = async (files: File[]) => {
     if (!files.length || userRole !== "admin" || preparingImport.current || importing.current) return;
     preparingImport.current=true;
-    setUploadProgress("Đang đọc file để xem trước…");setUploadReport(null);
+    setUploadProgress("Preparing local preview…");setUploadReport(null);
     try {
       const plan=await prepareImport(files);
       closeImportPreview();importPlanRef.current=plan;setImportPlan(plan);
@@ -767,7 +766,7 @@ export default function App() {
   const confirmImport=async (items:ImportCandidate[])=>{
     const plan=importPlanRef.current;
     if(!plan||userRole!=="admin"||importing.current||!items.length)return;
-    importing.current=true;setImportPlan(null);setUploadProgress("Đang tải hình ảnh…");
+    importing.current=true;setImportPlan(null);setUploadProgress("Uploading images…");
     let imported=0,duplicates=0,completed=false;
     const errors=[...plan.errors],seenIds=new Set<string>();
     try {
@@ -840,28 +839,28 @@ export default function App() {
   // Breadcrumb generation
   const getCrumb = () => {
     switch (route) {
-      case "home": return profile.language === "vi" ? "Trang chủ" : "Home";
+      case "home": return false ? "Trang chủ" : "Home";
       case "practice": return "Practice Test";
       case "full": return "Full Test";
-      case "knowledge": return profile.language === "vi" ? "Chia sẻ kiến thức" : "Learning guides";
+      case "knowledge": return false ? "Chia sẻ kiến thức" : "Learning guides";
       case "forum": return "Forum";
-      case "contribute": return profile.language === "vi" ? "Đóng góp" : "Contribute";
-      case "content-admin": return "Quản lý bài viết";
-      case "contributions-admin": return "Duyệt đóng góp";
+      case "contribute": return false ? "Contributions" : "Contribute";
+      case "content-admin": return "Manage articles";
+      case "contributions-admin": return "Review contributions";
       case "library":
-        return profile.language === "vi" ? "Thư viện đề thi" : "Test library";
+        return false ? "Thư viện đề thi" : "Test library";
       case "mock":
-        return profile.language === "vi" ? "Thi thử đầy đủ" : "Full mock test";
+        return false ? "Thi thử đầy đủ" : "Full mock test";
       case "progress":
-        return profile.language === "vi" ? "Tiến độ của tôi" : "My progress";
+        return false ? "Tiến độ của tôi" : "My progress";
       case "vocabulary":
-        return profile.language === "vi" ? "Sổ từ vựng" : "Vocabulary notebook";
+        return false ? "Sổ từ vựng" : "Vocabulary notebook";
       case "settings":
-        return profile.language === "vi"
+        return false
           ? "Cài đặt & dữ liệu"
           : "Settings & data";
       case "admin":
-        return profile.language === "vi"
+        return false
           ? "Quản trị nội dung"
           : "Content administration";
       case "editor":
@@ -1019,7 +1018,7 @@ export default function App() {
             {route === "forum" && <ForumView profile={profile} />}
             {route === "contribute" && <ContributionView profile={profile} />}
             {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
-            {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={profile.language === "vi"} text={profile.language === "vi" ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
+            {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={false} text={false ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
             {route === "mock" && (
               <MockBuilderView
@@ -1088,6 +1087,7 @@ export default function App() {
                 adminUid={user?.uid || ""}
                 onNewTest={handleNewTest}
                 onDeleteTest={handleDeleteTest}
+                onDeleteFolders={async ids=>{const groups=new Map<string,string[]>();for(const id of ids){const t=tests.find(t=>t.id===id);if(t&&!t.deletedAt)groups.set(t.status,[...(groups.get(t.status)||[]),id]);}for(const [restoreStatus,group] of groups)await handleTestMeta(group,{status:"archived",deletedAt:Date.now(),restoreStatus:restoreStatus as TestMeta["status"]});notify(ids.length+" tests moved to Trash.");}}
                 onRestoreTest={handleRestoreTest}
                 onSetCollection={(ids, collection) =>
                   handleTestMeta(ids, { source: collection })
@@ -1414,3 +1414,4 @@ export default function App() {
     </div>
   );
 }
+

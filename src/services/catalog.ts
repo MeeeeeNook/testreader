@@ -62,3 +62,11 @@ export function planFolderMove(tests: TestMeta[], from: string, to: string) {
   }
   return groups;
 }
+
+
+export function planFolderDeletion(tests: TestMeta[], selected: string[]) {
+ const paths=[...new Set(selected.map(folderPath).filter(Boolean))];
+ const roots=paths.filter(p=>!paths.some(other=>other!==p&&inFolder(p,other)));
+ const affected=tests.filter(t=>!t.deletedAt&&roots.some(p=>inFolder(t.source||"Unfiled",p)));
+ return {folders:roots,ids:[...new Set(affected.map(t=>t.id))]};
+}

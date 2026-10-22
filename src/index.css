@@ -1548,64 +1548,23 @@ fieldset.question-row {
 }
 
 /* Dark Theme */
-body.studio-dark {
-  --studio-bg: #1e2426;
-  --studio-white: #272e31;
-  --studio-ink: #edece4;
-  --studio-muted: #acb5b2;
-  --studio-border: #3a4445;
-  --studio-soft: #3c3650;
-  --studio-purple: #b4a5e8;
-  --paper: #202728;
-  --line: #3a4445;
-}
 
-body.studio-dark .studio-drop {
-  background: #302d38;
-}
 
-body.studio-dark .test-card .card-symbol {
-  background: #444438;
-  color: #c6c09d;
-}
 
-body.studio-dark .topbar,
-body.studio-dark .pane,
-body.studio-dark .bottom-bar,
-body.studio-dark .work-toolbar,
-body.studio-dark .studio-nav,
-body.studio-dark .studio-top,
-body.studio-dark .studio-footer {
-  background: #272e31;
-  color: #ecece4;
-}
 
-body.studio-dark .reading-content {
-  color: #e4e8df;
-}
 
-body.studio-dark .reading-content h1,
-body.studio-dark .reading-content h2,
-body.studio-dark .reading-content h3 {
-  color: #eee;
-}
 
-body.studio-dark .fill-input,
-body.studio-dark .question-select {
-  background: #1f2827;
-  color: #eee;
-}
 
-body.studio-dark .option-row,
-body.studio-dark .choice-bank {
-  color: #eee;
-  background: #303b35;
-}
 
-body.studio-dark .source-notice {
-  color: #d5c6a2;
-  background: #39372d;
-}
+
+
+
+
+
+
+
+
+
 
 /* Responsive Media Queries */
 @media (max-width: 820px) {
@@ -1669,10 +1628,7 @@ body.studio-dark .source-notice {
   color: #111;
 }
 .questions-content .fill-field label { font-weight: 500; }
-body.studio-dark .questions-content, body.studio-dark .questions-content .fill-input, body.studio-dark .questions-content .question-select, body.studio-dark .questions-content .fill-field label,
-body.studio-dark .questions-content .question-row legend,
-body.studio-dark .questions-content .option-letter, body.studio-dark .questions-content .q-number,
-body.studio-dark .reading-content .fill-field label { color: #f1f1f1; }
+
 .solution-answer { padding: 10px 12px; background: #eef2f6; color: #111; border-radius: 8px; }
 .part-tabs { min-width: 0; overflow-x: auto; }
 .part-tab { max-width: 280px; white-space: normal; text-align: left; min-width: 130px; flex-shrink: 0; }
@@ -1688,3 +1644,4 @@ body.studio-dark .reading-content .fill-field label { color: #f1f1f1; }
 .folder-management { display: flex; flex-wrap: wrap; gap: 10px; align-items: end; padding: 12px 0; }
 .folder-management label { display: grid; gap: 5px; }
 .passage-titles { font-size: 13px; line-height: 1.6; color: var(--muted); padding-left: 18px; }
+

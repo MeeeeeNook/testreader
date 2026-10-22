@@ -26,10 +26,10 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
 }) => {
   const [target, setTarget] = useState(profile.target);
   const [fontSize, setFontSize] = useState(profile.fontSize);
-  const [language, setLanguage] = useState(profile.language);
-  const [theme, setTheme] = useState(profile.theme);
 
-  const isVi = profile.language === "vi";
+
+
+  const isVi = false;
 
   const handleSavePreferences = async () => {
     const numTarget = Number(target);
@@ -40,8 +40,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     await onUpdateProfile({
       target: numTarget,
       fontSize: Number(fontSize),
-      language,
-      theme,
+      language: "en",
+      theme: "light",
     });
     onNotify("Preferences saved.");
   };
@@ -82,28 +82,6 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
         <h3>Display & Study Preferences</h3>
 
         <div className="studio-form-grid">
-          <label className="studio-field">
-            Interface Language
-            <select
-              value={language}
-              onChange={(e) => setLanguage(e.target.value as any)}
-            >
-              <option value="en">English (US/UK)</option>
-              <option value="vi">Tiếng Việt</option>
-            </select>
-          </label>
-
-          <label className="studio-field">
-            Theme
-            <select
-              value={theme}
-              onChange={(e) => setTheme(e.target.value as any)}
-            >
-              <option value="light">Light Paper</option>
-              <option value="dark">Dark Room</option>
-            </select>
-          </label>
-
           <label className="studio-field">
             Passage Font Size
             <select
@@ -183,3 +161,4 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </div>
   );
 };
+

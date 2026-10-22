@@ -6,7 +6,7 @@ import { TopHeader } from './TopHeader';
 export function PortalHeader({route,user,profile,role,onNavigate,onUpdateProfile,onOpenProfileModal}: {
  route:string;user:User|null;profile:UserProfile;role:'admin'|'student';onNavigate:(path:string)=>void;onUpdateProfile:(value:Partial<UserProfile>)=>void;onOpenProfileModal:()=>void;
 }) {
- const [expanded,setExpanded]=useState(false), vi=profile.language==='vi';
+ const [expanded,setExpanded]=useState(false), vi=false;
  const link=(e:React.MouseEvent,path:string)=>{if(e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){e.preventDefault();setExpanded(false);onNavigate(path);}};
  const a=(path:string,label:string)=> <a href={path} onClick={e=>link(e,path)}>{label}</a>;
  return <header className="portal-header">
@@ -19,6 +19,7 @@ export function PortalHeader({route,user,profile,role,onNavigate,onUpdateProfile
     <a href="/forum" onClick={e=>link(e,'/forum')}>Forum <small className="coming-chip">Soon</small></a>
     <a href="/contribute" className="contribute-link" onClick={e=>link(e,'/contribute')}><Upload size={15}/>{vi?'Đóng góp':'Contribute'}</a>
   </nav>
-  <TopHeader crumb="" user={user} profile={profile} role={role} onUpdateProfile={onUpdateProfile} onOpenProfileModal={onOpenProfileModal}/>
+  <TopHeader crumb="" user={user} profile={profile} role={role} onUpdateProfile={onUpdateProfile} onOpenProfileModal={onOpenProfileModal} onNavigate={onNavigate}/>
  </header>;
 }
+

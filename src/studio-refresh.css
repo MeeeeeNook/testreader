@@ -1149,71 +1149,21 @@ textarea:focus-visible {
 .submit-button {
   background: #6854d9;
 }
-.studio-dark {
-  --studio-bg: #1c1d2a;
-  --studio-ink: #e3e1ec;
-  --studio-muted: #a5a0b6;
-  --studio-border: #363343;
-  --studio-white: #262534;
-  --studio-soft: #383047;
-  --studio-purple: #b6a0f3;
-}
-.studio-dark .studio-top {
-  background: #262534;
-}
-.studio-dark .library-hero {
-  background: #363044;
-  border-color: #463951;
-}
-.studio-dark .hero-copy h1 {
-  color: #efe7fb;
-}
-.studio-dark .hero-copy h1 em {
-  color: #c5a8e8;
-}
-.studio-dark .hero-copy p,
-.studio-dark .hero-copy > small {
-  color: #b7a8c8;
-}
-.studio-dark .pill {
-  background: #ffffff08;
-  border-color: #ffffff14;
-  color: #bfaed0;
-}
-.studio-dark .studio-primary {
-  color: #201a2c;
-  background: #b6a0f3;
-  border-color: #b6a0f3;
-}
-.studio-dark .card-art {
-  filter: brightness(0.7);
-}
-.studio-dark .reading-card h3 {
-  color: #e3e1ec;
-}
-.studio-dark .result-hero {
-  background: #373045;
-  border-color: #504261;
-}
-.studio-dark .result-hero strong,
-.studio-dark .result-hero span,
-.studio-dark .result-hero small {
-  color: #d9c8ef;
-}
-.studio-dark .catalog-scopes button.active {
-  background: #3d324e;
-  color: #c7b1eb;
-  border-color: #4b3d5e;
-}
-.studio-dark .rich-text,
-.studio-dark .passage-content {
-  color: #e5e0ec;
-}
-.studio-dark .rich-text h1,
-.studio-dark .rich-text h2,
-.studio-dark .rich-text h3 {
-  color: #e5e0ec;
-}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 @media (min-width: 1500px) {
   .library-hero {
     min-height: 360px;
@@ -1687,9 +1637,7 @@ textarea:focus-visible {
 .reading-content h3 {
   text-align: center;
 }
-.studio-dark .reading-content {
-  color: #e4e0eb;
-}
+
 
 /* Test text follows the selected reading size instead of hard-coded 12–14px rules. */
 .questions-content,
@@ -1818,3 +1766,4 @@ textarea:focus-visible {
   width: 18px;
   height: 18px;
 }
+

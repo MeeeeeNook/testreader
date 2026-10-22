@@ -25,7 +25,7 @@ export const Navigation: React.FC<Props> = ({
   profile,
   storageConnected,
 }) => {
-  const vi = profile.language === "vi";
+  const vi = false;
   const items = [
     {
       id: "library",
@@ -125,3 +125,4 @@ export const Navigation: React.FC<Props> = ({
     </aside>
   );
 };
+

@@ -23,7 +23,7 @@ test('full tests use one complete test card rather than individual passage cards
  const html=render('/full-tests',true);assert.match(html,/Forecast Test 1/);assert.doesNotMatch(html,/Airborne Dentists/);assert.match(html,/3 passages/);
 });
 test('home statistics come from the catalog and guests do not receive an exam-date account form',()=>{
- const html=renderToStaticMarkup(React.createElement(HomeView,{tests:[meta],profile,attempts:[],onNavigate:()=>{},onUpdateProfile:async()=>{}}));assert.match(html,/Tất cả đề đều miễn phí/);assert.doesNotMatch(html,/type="date"/);
+ const html=renderToStaticMarkup(React.createElement(HomeView,{tests:[meta],profile,attempts:[],onNavigate:()=>{},onUpdateProfile:async()=>{}}));assert.match(html,/Every test is free./);assert.doesNotMatch(html,/type="date"/);
 });
 test('new routes distinguish homepage, practice, full categories, contribution and section setup',()=>{
  assert.equal(parseRoute('/').name,'home');assert.equal(parseRoute('/practice?part=1').name,'practice');assert.deepEqual(parseRoute('/full-tests/cambridge'),{name:'full',category:'cambridge'});assert.deepEqual(parseRoute('/tests/t/sections/p2'),{name:'test',id:'t',section:'p2'});assert.equal(parseRoute('/admin/content').name,'content-admin');assert.equal(parseRoute('/contribute').name,'contribute');
@@ -40,3 +40,4 @@ test('public answer landing has a crawlable title and a real practice link witho
  const html=publicPage('Airborne Dentists Reading Answers','Description',body,answerPath('forecast','p0','Airborne Dentists'));
  assert.match(html,/<title>Airborne Dentists Reading Answers/);assert.match(html,/\/tests\/forecast\/sections\/p0/);assert.match(html,/index,follow/);assert.doesNotMatch(html,/Answer: TRUE|Source explanation/);assert.doesNotMatch(textMarkup('<script>alert(1)</script>'),/<script>/);
 });
+
