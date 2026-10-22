@@ -1,7 +1,7 @@
 import {SignInView} from "./components/SignInView";
 import {Select} from "./components/Select";
 import {testLink,resolveTestLink} from "./services/testLinks";
-import {folderLocation,folderDeletion,trashFolders,restoreFolders,type LibraryFolder} from "./services/folders";
+import {folderLocation,folderDeletion,trashFolders,restoreFolders,reconcileLibrary,organizationPatch,type LibraryFolder} from "./services/folders";
 import {contentMatch} from "./services/importIdentity";
 import {AdminSidebar} from './components/AdminSidebar';
 import {ImportPreview} from './components/ImportPreview';
@@ -13,7 +13,7 @@ import { KnowledgeView, ContributionView, LoginNotice } from "./components/Commu
 import { sectionSummaries } from "./services/portal";
 const ContentAdminView = React.lazy(() => import("./components/ContentAdminView").then(m => ({default:m.ContentAdminView})));
 import { createId } from "./services/ids";
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { User } from "firebase/auth";
 import { subscribeAuth } from "./services/auth";
 import { firestoreAdapter } from "./services/firestoreAdapter";
@@ -112,8 +112,8 @@ export default function App() {
     }
   });
 
-  const [tests, setTests] = useState<TestMeta[]>([]);
-  const folders=profile.libraryFolders||[];
+  const [storedTests, setTests] = useState<TestMeta[]>([]);
+  const {folders,tests}=useMemo(()=>reconcileLibrary(profile.libraryFolders||[],storedTests),[profile.libraryFolders,storedTests]);
   const folderSaving=useRef(false);
   const visibleCatalog=tests.map(t=>({...t,originSource:t.source,source:t.folderPath||"Unfiled"}));
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
@@ -654,7 +654,7 @@ export default function App() {
   ) => {
     testToSave.status = status;
     testToSave.access = "free";
-    await firestoreAdapter.saveTestComplete(testToSave);
+    await firestoreAdapter.saveTestComplete(testToSave,folders);
     await loadData();
   };
 
@@ -676,22 +676,29 @@ export default function App() {
     if (errors.length) throw new Error(errors.join(" · "));
   };
 
-  const saveFolders=async(next:LibraryFolder[])=>{
+  const saveFolders=async(next:LibraryFolder[],unfiledIds:string[]=[])=>{
     if(userRole!=="admin")throw new Error("Administrator access required.");
     if(folderSaving.current)throw new Error("Wait for the current folder change to finish.");
     folderSaving.current=true;
     try{
       const version=await firestoreAdapter.saveLibraryFolders(next,profile.libraryFolderVersion||0);
       setProfile(prev=>({...prev,libraryFolders:next,libraryFolderVersion:version}));
-      const groups=new Map<string,string[]>();
-      for(const test of tests){const target=folderLocation(test.folderId,next);if(target&&target!==test.folderPath)groups.set(target,[...(groups.get(target)||[]),test.id]);}
-      for(const [folderPath,ids]of groups)await handleTestMeta(ids,{folderPath});
+      // Compare against stored metadata so recovered folder IDs are persisted too.
+      const clearing=new Set(unfiledIds);
+      const patches=tests.flatMap(test=>{
+        const patch=organizationPatch(clearing.has(test.id)?{...test,folderId:null}:test,next),stored=storedTests.find(t=>t.id===test.id)!;
+        return stored.folderId!==patch.folderId||(stored.folderPath||'')!==patch.folderPath||JSON.stringify(stored.fullTestMenuFolders||[])!==JSON.stringify(patch.fullTestMenuFolders)?[{id:test.id,...patch}]:[];
+      });
+      await firestoreAdapter.updateTestOrganizations(patches);
+      const updates=new Map(patches.map(p=>[p.id,p]));
+      setTests(prev=>prev.map(t=>updates.has(t.id)?{...t,...updates.get(t.id)!}:t));
     }finally{folderSaving.current=false;}
   };
   const moveTests=async(ids:string[],id:string)=>{
+    if(folderSaving.current)throw new Error("Wait for the folder menu to finish saving, then move tests.");
     const target=folderLocation(id,folders);
     if(id&&!target)throw new Error("Choose an existing folder.");
-    await handleTestMeta(ids,{folderId:id||null,folderPath:target});
+    await handleTestMeta(ids,organizationPatch({folderId:id||null} as TestMeta,folders));
     notify(ids.length+" tests moved to "+(target||"Unfiled")+".");
   };
   const deleteFolders=async(ids:string[],trashTests:boolean)=>{
@@ -700,8 +707,8 @@ export default function App() {
       const groups=new Map<string,string[]>();
       for(const test of tests.filter(t=>affected.testIds.includes(t.id)))groups.set(test.status,[...(groups.get(test.status)||[]),test.id]);
       for(const [restoreStatus,testIds]of groups)await handleTestMeta(testIds,{status:"archived",deletedAt:Date.now(),restoreStatus});
-    }else await moveTests(affected.testIds,"");
-    await saveFolders(trashFolders(folders,affected.folderIds));
+    }
+    await saveFolders(trashFolders(folders,affected.folderIds),trashTests?[]:affected.testIds);
     notify("Folders moved to Deleted folders.");
   };
   const handleDeleteTest = async (id: string) => {
@@ -842,7 +849,7 @@ export default function App() {
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          await firestoreAdapter.saveTestComplete(item.test);
+          await firestoreAdapter.saveTestComplete(item.test,folders);
           imported++;
         } catch (saveErr) {
           errors.push(
@@ -1131,7 +1138,7 @@ export default function App() {
                   const original=await firestoreAdapter.getTestComplete(id);
                   const {sourceTestId,sectionIds,sourceSections,...copy}=original;
                   const duplicate={...copy,id:`test_${createId()}`,title:`${copy.title} (copy)`.slice(0,250),status:"draft" as const,access:"free" as const,createdAt:Date.now(),updatedAt:Date.now()};
-                  await firestoreAdapter.saveTestComplete(duplicate);
+                  await firestoreAdapter.saveTestComplete(duplicate,folders);
                   await loadData();notify("A draft copy was created.");
                 }}
                 onExportSelected={async ids=>{

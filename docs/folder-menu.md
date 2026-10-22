@@ -1,0 +1,11 @@
+# Library folders and the Full Test menu
+
+Admin > Folders manages the library tree. Under Website navigation, select the folders to display in Full Test and press Save menu. Selecting a parent includes full tests in its descendants; it does not automatically add a separate link for each child. New folders are unselected by default. Folders with no published full tests remain configurable but do not produce an empty public menu link. Draft, archived, deleted and single-passage tests do not contribute to menu counts.
+
+A legacy mismatch left tests with folderPath metadata but no corresponding libraryFolders registry entries in the owner's profile. Reconciliation reconstructs the missing tree from those explicit paths (never the source filename), resolves membership, and preserves existing valid folder IDs. Existing IDs take precedence over stale paths after a rename. Deleted folders are not resurrected. Recovery is non-destructive on read; the tree and memberships are persisted on the next folder/menu save.
+
+The registry remains in the owner's private users document, protected by the existing rules and folder revision check. Each test stores only its public fullTestMenuFolders projection (IDs and display paths). Public navigation reads that projection rather than exposing every test's folderPath. Menu and membership updates use metadata-only batches of up to 400 writes, leaving passages, questions and answer keys untouched. Imports, editor saves, duplicates and test moves compute the same projection. No Firestore rule deployment or new public profile access is required.
+
+Optional /api/auth/sync failures no longer skip the direct saved-profile read. This also preserves access to empty folders that cannot be recovered from test paths.
+
+Validation: the existing 102-test suite plus 8 focused regression tests pass. Coverage includes missing-registry recovery, hierarchy/counts, deleted/renamed folders, chosen-only menu rendering, parent filtering, staged checkbox saves and retries, batched database persistence and auth-sync failure recovery. TypeScript and production build pass. Live owner-only controls require an authenticated owner session; guest navigation can be verified separately.
