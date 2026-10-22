@@ -31,15 +31,46 @@ const app = express();
 app.use(express.json({ limit: "4mb" }));
 app.get("/api/health", (_req,res)=>res.json({ok:true,service:"ielts-studio-api"}));
 
+function parseServiceAccount(raw: string) {
+  let text = raw.trim();
+  if ((text.startsWith('"') && text.endsWith('"')) || (text.startsWith("'") && text.endsWith("'"))) {
+    text = text.slice(1, -1).trim();
+  }
+  if (!text.startsWith("{")) {
+    try {
+      const decoded = Buffer.from(text, "base64").toString("utf8");
+      if (decoded.trim().startsWith("{")) {
+        text = decoded.trim();
+      }
+    } catch {}
+  }
+  const parsed = JSON.parse(text);
+  if (parsed && typeof parsed.private_key === "string") {
+    parsed.private_key = parsed.private_key.replace(/\\n/g, "\n");
+  }
+  return parsed;
+}
+
+function getFirebaseCredential() {
+  const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  if (rawKey) {
+    try {
+      const account = parseServiceAccount(rawKey);
+      return cert(account);
+    } catch (e) {
+      console.error("Failed to parse FIREBASE_SERVICE_ACCOUNT_JSON:", e);
+    }
+  }
+  return applicationDefault();
+}
+
 // Server-only credentials use Application Default Credentials. Never expose a service-account key to Vite.
 function backend() {
   const instance =
     getApps().find((a) => a.name === "READING_SERVER") ||
     initializeApp(
       {
-        credential: process.env.FIREBASE_SERVICE_ACCOUNT_JSON
-          ? cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))
-          : applicationDefault(),
+        credential: getFirebaseCredential(),
         projectId: firebaseConfig.projectId,
         storageBucket: firebaseConfig.storageBucket,
       },
@@ -94,7 +125,15 @@ function apiError(res: express.Response, error: unknown) {
     return res.status(error.status).json({ error: error.message });
   console.error("Backend request failed:", error);
   const backendCode = (error as { code?: number | string })?.code;
-  if (backendCode === 7 || backendCode === "permission-denied" || backendCode === "PERMISSION_DENIED") {
+  const message = (error as Error)?.message || "";
+  const details = (error as { details?: string })?.details || "";
+  if (
+    backendCode === 7 ||
+    backendCode === "permission-denied" ||
+    backendCode === "PERMISSION_DENIED" ||
+    message.includes("PERMISSION_DENIED") ||
+    details.includes("PERMISSION_DENIED")
+  ) {
     return res.status(503).json({
       code: "FIREBASE_SERVER_PERMISSION_DENIED",
       error: "The scoring server does not have permission to access the Firebase database. Grant its runtime service account the Cloud Datastore User role in the Firebase project, then retry. Changing Firestore Rules will not fix this server permission.",

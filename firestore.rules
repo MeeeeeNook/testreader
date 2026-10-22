@@ -96,11 +96,9 @@ service cloud.firestore {
       allow update: if isAdmin();
       allow delete: if isAdmin();
 
-      // Full section passages & question structures
+      // Full section passages & question structures (public content; answer keys are stored separately in test_keys)
       match /sections/{sectionId} {
-        allow get, list: if (
-          get(/databases/$(database)/documents/tests/$(testId)).data.status == 'published'
-        ) || isAdmin();
+        allow get, list: if true;
         allow create, update, delete: if isAdmin();
       }
     }
