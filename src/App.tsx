@@ -804,7 +804,7 @@ export default function App() {
               const segments = c.name.split("/");
               const source =
                 segments.length > 1
-                  ? segments[0].replace(/\.zip$/i, "")
+                  ? segments.slice(0, -1).filter((s) => !/\.zip$/i.test(s)).join(" / ") || segments[0].replace(/\.zip$/i, "")
                   : "Imported collection";
               const editable = toEditable(
                 { title, parts: rawParts },
@@ -1149,6 +1149,16 @@ export default function App() {
                 onSetCollection={(ids, collection) =>
                   handleTestMeta(ids, { source: collection })
                 }
+                onRefreshTitles={async ids => {
+                  for (const id of ids) {
+                    const full = await firestoreAdapter.getTestComplete(id);
+                    await handleTestMeta([id], {
+                      passageTitles: full.parts.map(p => p.title),
+                      ...(full.parts.length === 1 ? {title: full.parts[0].title} : {}),
+                    });
+                  }
+                  notify("Passage titles updated.");
+                }}
                 onSetStatus={(ids, status) => handleTestMeta(ids, { status })}
                 onViewStudents={() => setRoute("students")}
                 onEditTest={handleEditTest}

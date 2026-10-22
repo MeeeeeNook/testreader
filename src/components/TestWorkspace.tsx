@@ -1,3 +1,4 @@
+import { passageTitle } from "../services/passageTitle";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
 import { createId } from "../services/ids";
 import { assessmentRequest } from "../services/assessmentClient";
@@ -219,11 +220,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   // Handle Response Changes
   const handleInputChange = (questionNumber: number, value: string) => {
-    if (submitting || (mode === "exam" && scored)) return;
-    if (scored) {
-      setScored(false);
-      setScoreResult(null);
-    }
+    if (submitting || scored) return;
     setResponses((prev) => ({
       ...prev,
       [questionNumber]: value,
@@ -235,7 +232,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     value: string,
     isChecked: boolean,
   ) => {
-    if (submitting || (mode === "exam" && scored)) return;
+    if (submitting || scored) return;
     const selected = groupNumbers.map((n) => responses[n]).filter(Boolean);
     if (
       isChecked &&
@@ -244,10 +241,6 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     ) {
       onNotify(`Please choose at most ${groupNumbers.length} options.`);
       return;
-    }
-    if (scored) {
-      setScored(false);
-      setScoreResult(null);
     }
     setResponses((prev) => {
       const currentValues = groupNumbers.map((n) => prev[n]).filter(Boolean);
@@ -432,28 +425,26 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   };
   submitLatest.current = handleSubmit;
 
-  const toggleReview = async (kind: "answers" | "explanations") => {
-    const shown = kind === "answers" ? showAnswers : showExplanations;
-    if (
-      !shown &&
-      !isPreview &&
-      (mode === "practice" || scored) &&
-      !reviewLoaded
-    ) {
-      try {
-        const data = await assessmentRequest("/api/test-review", {
-          ...submissionPayload(),
-          mode: "practice",
-        });
-        setReviewKeys(data.keys || {});
-        setReviewLoaded(true);
-      } catch (error) {
-        onNotify(
-          error instanceof Error ? error.message : "Could not load solutions.",
-        );
-        return;
-      }
+  const ensureReviewKeys = async () => {
+    if (!scored) return false;
+    if (isPreview || reviewLoaded) return true;
+    try {
+      const data = await assessmentRequest("/api/test-review", {
+        ...submissionPayload(),
+        mode: "practice",
+      });
+      setReviewKeys(data.keys || {});
+      setReviewLoaded(true);
+      return true;
+    } catch (error) {
+      onNotify(error instanceof Error ? error.message : "Could not load solutions.");
+      return false;
     }
+  };
+  const toggleReview = async (kind: "answers" | "explanations") => {
+    if (!scored) return;
+    const shown = kind === "answers" ? showAnswers : showExplanations;
+    if (!shown && !(await ensureReviewKeys())) return;
     if (kind === "answers") setShowAnswers(!shown);
     else setShowExplanations(!shown);
   };
@@ -464,8 +455,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         slot={slot}
         part={part}
         responses={responses}
-        showAnswers={showAnswers}
-        disabled={submitting || (mode === "exam" && scored)}
+        showAnswers={scored && showAnswers}
+        disabled={submitting || scored}
         onChange={handleInputChange}
         onMultiChange={handleMultiChoiceChange}
       />
@@ -790,13 +781,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 className={`part-tab ${idx === currentPartIndex ? "active" : ""}`}
                 onClick={() => setCurrentPartIndex(idx)}
               >
-                Passage / Part {idx + 1}
+                {idx + 1}. {passageTitle(p.passageHtml, p.title, idx)}
               </button>
             ))}
           </nav>
 
           <div className="review-toggles">
-            {(mode === "practice" || scored) && (
+            {scored && (
               <>
                 <button
                   className="toggle"
@@ -819,7 +810,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
             <div className={`timer ${timerRemaining < 300 ? "low" : ""}`}>
               <span>{timeFormatted}</span>
-              {mode === "practice" && (
+              {mode === "practice" && !scored && (
                 <button
                   className="timer-button"
                   onClick={() => setTimerRunning(!timerRunning)}
@@ -857,7 +848,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             className={`pane passage-pane ${mobileTab === "questions" ? "mobile-hidden" : ""}`}
           >
             <div className="pane-label">
-              {part.title || `Passage ${currentPartIndex + 1}`}
+              {passageTitle(part.passageHtml, part.title, currentPartIndex)}
             </div>
 
             <div className="reading-content">
@@ -896,7 +887,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               ))}
 
               {/* Explanations Section */}
-              <div className="explanation-section" hidden={!showExplanations}>
+              {scored && showExplanations && <div className="explanation-section">
                 <h2>Explanations</h2>
                 {part.questions.filter((q) => q.explanationHtml).length ===
                 0 ? (
@@ -926,6 +917,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                             </button>
                           )}
                         </div>
+                        <p className="solution-answer"><strong>Correct answer:</strong> {q.answer ? q.answer.split("||").join(" / ") : "Not provided"}</p>
                         <div
                           dangerouslySetInnerHTML={{
                             __html: cleanLayout(q.explanationHtml || ""),
@@ -935,7 +927,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                     );
                   })
                 )}
-              </div>
+              </div>}
             </div>
           </section>
         </div>
@@ -955,7 +947,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                   Score: {scoreResult.correct} / {scoreResult.gradable}
                   {scoreResult.ungraded > 0 &&
                     ` (${scoreResult.ungraded} ungraded)`}
-                  {approxBand !== null && ` · Estimated Band ${approxBand}`}
+                  {approxBand !== null && ` · IELTS Band ${approxBand.toFixed(1)}`}
                 </span>
               ) : (
                 <span style={{ fontSize: "12px" }}>
@@ -1195,7 +1187,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             {scoreResult.correct} / {scoreResult.gradable}
           </div>
 
-          {approxBand !== null && (
+          {approxBand !== null ? (
             <div
               style={{
                 fontSize: "18px",
@@ -1204,9 +1196,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 marginBottom: "8px",
               }}
             >
-              Estimated IELTS Band: {approxBand}
+              IELTS Academic Reading Band: {approxBand.toFixed(1)}
             </div>
-          )}
+          ) : <p className="result-note">A band is available for a complete 40-question test with all answer keys. Single passages receive a raw score.</p>}
 
           <p style={{ margin: "6px 0 14px" }}>
             {scoreResult.incorrect} incorrect · {scoreResult.blank} unanswered
@@ -1215,7 +1207,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           </p>
 
           <p className="result-note">
-            Practice score based on official answer variants (ignoring case and
+            Practice score based on the uploaded answer keys (ignoring case and
             whitespace). Band estimates are approximate and valid for complete
             40-question tests.
           </p>
@@ -1256,7 +1248,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           >
             <button
               className="studio-primary"
-              onClick={() => {
+              onClick={async () => {
+                if (!(await ensureReviewKeys())) return;
                 setShowResultsModal(false);
                 setShowAnswers(true);
                 setShowExplanations(true);

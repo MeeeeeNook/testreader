@@ -69,6 +69,7 @@ export interface TestMeta {
   status: 'published' | 'draft' | 'archived';
   duration: number;
   passages: number;
+  passageTitles?: string[];
   questions: number;
   updatedAt: number;
   createdAt?: number;

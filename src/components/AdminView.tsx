@@ -1,3 +1,5 @@
+import { FolderBrowser } from "./FolderBrowser";
+import { compareTests, inFolder, folderPath, sortOptions, allFolderPaths, planFolderMove } from "../services/catalog";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
 import React, { useState, useRef } from "react";
 import { TestMeta, ContentReport, UserProfile } from "../types";
@@ -12,6 +14,7 @@ interface AdminViewProps {
   onDeleteTest: (id: string) => Promise<void>;
   onRestoreTest: (id: string) => Promise<void>;
   onSetCollection: (ids: string[], collection: string) => Promise<void>;
+  onRefreshTitles?: (ids: string[]) => Promise<void>;
   onSetStatus: (ids: string[], status: "published" | "draft") => Promise<void>;
   onViewStudents: () => void;
   onEditTest: (testId: string) => void;
@@ -37,6 +40,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onDeleteTest,
   onRestoreTest,
   onSetCollection,
+  onRefreshTitles,
   onSetStatus,
   onViewStudents,
   onEditTest,
@@ -63,6 +67,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
+  const [renamePath, setRenamePath] = useState("");
+  const [recursive, setRecursive] = useState(true);
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -90,7 +96,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         : activeTests
   )
     .filter((t) => {
-      if (collectionFilter && t.source !== collectionFilter) return false;
+      if (!inFolder(t.source || "Unfiled", collectionFilter, recursive)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return (
@@ -98,15 +104,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         (t.source || "").toLowerCase().includes(q)
       );
     })
-    .sort((a, b) =>
-      sort === "title"
-        ? a.title.localeCompare(b.title, undefined, { numeric: true })
-        : sort === "source"
-          ? a.source.localeCompare(b.source) || a.title.localeCompare(b.title)
-          : sort === "questions"
-            ? b.questions - a.questions
-            : b.updatedAt - a.updatedAt,
-    );
+    .sort((a, b) => compareTests(a, b, sort));
 
   const filteredReports = reports.filter((r) => {
     if (reportFilter === "all") return true;
@@ -228,14 +226,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </button>
           </div>
 
+          <FolderBrowser tests={tab === "trash" ? trashedTests : tab === "archive" ? archivedTests : activeTests} value={collectionFilter} onChange={path => {setCollectionFilter(path);setRenamePath(path);setSelected([]);}} />
           <div className="admin-filters">
             <label>
               Sort tests
               <select value={sort} onChange={(e) => setSort(e.target.value)}>
-                <option value="new">Recently updated</option>
-                <option value="title">Title A–Z</option>
-                <option value="source">Collection A–Z</option>
-                <option value="questions">Question count</option>
+                {sortOptions.map(([id,label]) => <option key={id} value={id}>{label}</option>)}
               </select>
             </label>
             <label>
@@ -244,13 +240,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 value={collectionFilter}
                 onChange={(e) => {
                   setCollectionFilter(e.target.value);
+                  setRenamePath(e.target.value);
                   setSelected([]);
                 }}
               >
                 <option value="">All collections</option>
-                {[...new Set(tests.map((t) => t.source).filter(Boolean))]
-                  .sort()
-                  .map((c) => (
+                {allFolderPaths(tests).map((c) => (
                     <option key={c}>{c}</option>
                   ))}
               </select>
@@ -259,6 +254,23 @@ export const AdminView: React.FC<AdminViewProps> = ({
               View student attempts
             </button>
           </div>
+          <p className="studio-lead">Select tests and move them to a folder path, for example Forecast / 2026 / Quý 3. New paths create folders; / adds a subfolder.</p>
+          {onRefreshTitles && tab !== "trash" && <button className="studio-secondary" disabled={busy || !filteredTests.length} onClick={() => void run(() => onRefreshTitles(selected.length ? selected : filteredTests.map(t => t.id)))}>Update passage titles</button>}
+          <label><input type="checkbox" checked={recursive} onChange={e => {setRecursive(e.target.checked);setSelected([]);}} /> Include subfolders</label>
+          {collectionFilter && tab !== "trash" && <form className="folder-management" onSubmit={e => {
+            e.preventDefault();
+            const destination = folderPath(renamePath);
+            if (!destination || destination === folderPath(collectionFilter)) return;
+            void run(async () => {
+              const groups = planFolderMove(tests, collectionFilter, destination);
+              for (const [target, ids] of groups) await onSetCollection(ids, target);
+              setCollectionFilter(destination);
+              onNotify("Folder and subfolders moved.");
+            });
+          }}>
+            <label>Rename or move this folder<input aria-label="New folder path" value={renamePath} onChange={e => setRenamePath(e.target.value)} placeholder="Forecast / 2026 / Quý 3" /></label>
+            <button className="studio-secondary" disabled={busy || !renamePath.trim()} type="submit">Save folder path</button>
+          </form>}
           {selected.length > 0 && (
             <div className="admin-bulk">
               <strong>{selected.length} selected</strong>
@@ -269,11 +281,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   list="existing-collections"
                   value={collection}
                   onChange={(e) => setCollection(e.target.value)}
-                  placeholder="Existing or new collection"
+                  placeholder="Forecast / 2026 / Quý 3"
                 />
               </label>
               <datalist id="existing-collections">
-                {[...new Set(tests.map((t) => t.source).filter(Boolean))].map(
+                {allFolderPaths(tests).map(
                   (c) => (
                     <option key={c} value={c} />
                   ),
@@ -283,10 +295,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 className="studio-secondary"
                 disabled={busy || !collection.trim() || tab === "trash"}
                 onClick={() =>
-                  void run(() => onSetCollection(selected, collection.trim()))
+                  void run(() => onSetCollection(selected, folderPath(collection)))
                 }
               >
-                Move to collection
+                Move to folder
               </button>
               {tab !== "trash" && (
                 <>
