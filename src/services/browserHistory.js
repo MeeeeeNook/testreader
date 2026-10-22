@@ -6,13 +6,13 @@ export function parseRoute(input) {
     const p = url.pathname.replace(/\/+$/, "") || "/";
     if (p === "/") return { name: "home" };
     if (p === "/library") return { name: "library" };
+    if (p === "/sign-in") return {name:"sign-in"};
     if (p === "/practice") return {name:"practice"};
     if (p === "/full-tests") return {name:"full"};
     if (p.startsWith("/full-tests/")) return {name:"full",category:p.split("/")[2]};
-    if (p === "/knowledge") return {name:"knowledge"};
+    if (p === "/knowledge" || p === "/contribute") return {name:"practice"};
     const direct = /^\/(reading|solutions)\/([^/]+)$/.exec(p);
     if(direct)return {name:"reading",slug:decodeURIComponent(direct[2]),solution:direct[1]==="solutions"};
-    if (p === "/contribute") return {name:"contribute"};
     if (/^\/admin\/(overview|tests|folders|upload|reports|users|archive|trash)$/.test(p)) return {name:"admin",section:p.split("/")[2]};
     if (p === "/admin/content") return {name:"content-admin"};
     if (p === "/admin/contributions") return {name:"contributions-admin"};

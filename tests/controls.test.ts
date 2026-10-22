@@ -11,7 +11,7 @@ test('blank text/select controls are labelled and never prefilled with the answe
     const slot:TestSlot={id:'s0',numbers:[1],type,label:'Prompt',options:[{value:'A',label:'First'}]};
     const html=renderToStaticMarkup(React.createElement(AnswerControl,{...base,slot}));
     assert.match(html,/Answer for question 1/);assert.doesNotMatch(html,/SECRET_KEY/);
-    assert.match(html,type==='text'?/<input/:/<select/);
+    assert.match(html,type==='text'?/<input/:/role="combobox"/);
   }
 });
 test('radio and multi-select choices reflect student responses rather than key values',()=>{
@@ -27,4 +27,5 @@ test('solutions appear only when explicitly enabled and submitted controls can b
   const html=renderToStaticMarkup(React.createElement(AnswerControl,{...base,slot,showAnswers:true,disabled:true}));
   assert.match(html,/SECRET_KEY/);assert.match(html,/disabled=""/);
 });
+
 

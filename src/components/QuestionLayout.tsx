@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import React, { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { cleanLayout } from '../services/importer';
@@ -18,10 +19,10 @@ export function AnswerControl({ slot, part, responses, showAnswers, disabled, on
       {slot.type === 'text' ? <input id={id} className="fill-input" type="text" autoComplete="off" spellCheck={false}
         aria-label={`Answer for question ${n}`} placeholder="Your answer" disabled={disabled}
         value={responses[n] || ''} onChange={e => onChange(n, e.target.value)} /> :
-        <select id={id} className="question-select" aria-label={`Answer for question ${n}`} disabled={disabled}
+        <Select id={id} className="question-select" aria-label={`Answer for question ${n}`} disabled={disabled}
           value={responses[n] || ''} onChange={e => onChange(n, e.target.value)}>
           <option value="">Choose…</option>{slot.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
-        </select>}{badge}
+        </Select>}{badge}
     </span>;
   }
   const selected = slot.numbers.map(number => responses[number]).filter(Boolean);
@@ -49,3 +50,4 @@ export function QuestionLayout({ html, renderSlot }: { html: string; renderSlot:
   return <><div ref={root} dangerouslySetInnerHTML={{ __html: safeHtml }} />
     {targets.map(({ id, element }, i) => createPortal(renderSlot(id), element, `${id}-${i}`))}</>;
 }
+

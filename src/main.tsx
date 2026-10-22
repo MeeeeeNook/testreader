@@ -12,3 +12,4 @@ import "./portal.css";
 import "./admin.css";
 
 import "./reader.css";
+import "./polish.css";

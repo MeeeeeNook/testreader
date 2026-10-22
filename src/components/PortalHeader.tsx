@@ -1,24 +1,13 @@
-import React, { useState } from 'react';
-import { BookOpen, Menu, ChevronDown, Upload, X } from 'lucide-react';
-import type { User } from 'firebase/auth';
-import type { UserProfile } from '../types';
-import { TopHeader } from './TopHeader';
-export function PortalHeader({route,user,profile,role,onNavigate,onUpdateProfile,onOpenProfileModal}: {
- route:string;user:User|null;profile:UserProfile;role:'admin'|'student';onNavigate:(path:string)=>void;onUpdateProfile:(value:Partial<UserProfile>)=>void;onOpenProfileModal:()=>void;
-}) {
- const [expanded,setExpanded]=useState(false), vi=false;
- const link=(e:React.MouseEvent,path:string)=>{if(e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){e.preventDefault();setExpanded(false);onNavigate(path);}};
- const a=(path:string,label:string)=> <a href={path} onClick={e=>link(e,path)}>{label}</a>;
- return <header className="portal-header">
-  <a className="portal-brand" href="/" onClick={e=>link(e,'/')}><span><BookOpen size={25}/></span>IELTS<span className="brand-word">studio</span><span className="brand-dot">.</span></a>
-  <button className="portal-menu-button" aria-label="Navigation" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?<X/>:<Menu/>}</button>
-  <nav className={`portal-navigation ${expanded?'is-open':''}`} aria-label="Main navigation">
-    <a href="/practice" aria-current={['library','practice'].includes(route)?'page':undefined} onClick={e=>link(e,'/practice')}>Practice Test</a>
-    <details className="portal-dropdown" onMouseEnter={e=>{if(window.matchMedia("(hover:hover)").matches)e.currentTarget.open=true;}} onMouseLeave={e=>{if(window.matchMedia("(hover:hover)").matches&&!e.currentTarget.contains(document.activeElement))e.currentTarget.open=false;}}><summary>Full Test <ChevronDown size={13}/></summary><div className="portal-dropdown-content">{a('/full-tests','All full tests')}{a('/full-tests/forecast','Forecast')}{a('/full-tests/vol','VOL')}{a('/full-tests/cambridge','Cambridge')}{a('/mock',vi?'Tự tạo đề / Mix test':'Create a mix test')}</div></details>
-    <details className="portal-dropdown" onMouseEnter={e=>{if(window.matchMedia("(hover:hover)").matches)e.currentTarget.open=true;}} onMouseLeave={e=>{if(window.matchMedia("(hover:hover)").matches&&!e.currentTarget.contains(document.activeElement))e.currentTarget.open=false;}}><summary>{vi?'Chia sẻ kiến thức':'Learn'} <ChevronDown size={13}/></summary><div className="portal-dropdown-content knowledge-menu">{['0-5','5-6.5','6.5-8'].map(level=><div key={level}><strong>Level {level}</strong>{['vocabulary','grammar','listening','reading','speaking','writing'].map(skill=><a key={skill} href={`/knowledge?level=${level}&skill=${skill}`} onClick={e=>link(e,`/knowledge?level=${level}&skill=${skill}`)}>{skill[0].toUpperCase()+skill.slice(1)}</a>)}</div>)}<div><strong>{vi?'Khám phá':'Explore'}</strong>{a('/knowledge',vi?'Tất cả bài viết':'All guides')}{a('/knowledge?skill=resources',vi?'Tài liệu học':'Study resources')}</div></div></details>
-    <a href="/contribute" className="contribute-link" onClick={e=>link(e,'/contribute')}><Upload size={15}/>{vi?'Đóng góp':'Contribute'}</a>
-  </nav>
-  <TopHeader crumb="" user={user} profile={profile} role={role} onUpdateProfile={onUpdateProfile} onOpenProfileModal={onOpenProfileModal} onNavigate={onNavigate}/>
- </header>;
+import React,{useEffect,useRef,useState} from 'react';
+import {BookOpen,Menu,ChevronDown,X,History,BookMarked,Folder,Settings2,Layers} from 'lucide-react';
+import type {User} from 'firebase/auth';
+import type {UserProfile,TestMeta} from '../types';
+import {TopHeader} from './TopHeader';
+export function PortalHeader({route,user,profile,role,onNavigate,onUpdateProfile,onOpenProfileModal,tests=[]}:{route:string;user:User|null;profile:UserProfile;role:'admin'|'student';onNavigate:(path:string)=>void;onUpdateProfile:(value:Partial<UserProfile>)=>void;onOpenProfileModal:()=>void;tests?:TestMeta[]}){
+ const [expanded,setExpanded]=useState(false),[fullOpen,setFullOpen]=useState(false);const fullRef=useRef<HTMLDivElement>(null);
+ const full=tests.filter(t=>t.status==='published'&&t.passages===(t.skill==='reading'?3:4));
+ const folders=[...new Set(full.map(t=>t.folderPath).filter((f):f is string=>!!f))].sort((a,b)=>a.localeCompare(b,undefined,{numeric:true}));
+ useEffect(()=>{if(!fullOpen)return;const outside=(e:PointerEvent)=>{if(!fullRef.current?.contains(e.target as Node))setFullOpen(false);};const keys=(e:KeyboardEvent)=>{if(e.key==='Escape')setFullOpen(false);};document.addEventListener('pointerdown',outside);document.addEventListener('keydown',keys);return()=>{document.removeEventListener('pointerdown',outside);document.removeEventListener('keydown',keys);};},[fullOpen]);
+ const link=(e:React.MouseEvent,path:string)=>{if(e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){e.preventDefault();setExpanded(false);setFullOpen(false);onNavigate(path);}};
+ return <header className="portal-header"><a className="portal-brand" href="/" onClick={e=>link(e,'/')}><span><BookOpen size={25}/></span>IELTS<span className="brand-word">studio</span><span className="brand-dot">.</span></a><button className="portal-menu-button" aria-label="Navigation" aria-expanded={expanded} onClick={()=>setExpanded(!expanded)}>{expanded?<X/>:<Menu/>}</button><nav className={'portal-navigation '+(expanded?'is-open':'')} aria-label="Main navigation"><a href="/practice" aria-current={['library','practice'].includes(route)?'page':undefined} onClick={e=>link(e,'/practice')}>Practice Test</a><div className="full-test-menu" ref={fullRef}><button className="full-test-trigger" aria-expanded={fullOpen} aria-controls="full-test-links" onClick={()=>setFullOpen(!fullOpen)}>Full Test <ChevronDown size={14}/></button>{fullOpen&&<div className="full-test-links" id="full-test-links"><a href="/full-tests" onClick={e=>link(e,'/full-tests')}><BookOpen size={18}/><span>All full tests<small>{full.length} tests</small></span></a>{folders.map(folder=><a key={folder} href={'/full-tests?source='+encodeURIComponent(folder)} onClick={e=>link(e,'/full-tests?source='+encodeURIComponent(folder))}><Folder size={17}/><span>{folder}<small>{full.filter(t=>t.folderPath===folder||t.folderPath?.startsWith(folder+' / ')).length} tests</small></span></a>)}<a href="/mock" onClick={e=>link(e,'/mock')}><Layers size={17}/><span>Create a mix test<small>Choose your own passages</small></span></a>{role==='admin'&&<a className="edit-menu-folders" href="/admin/folders" onClick={e=>link(e,'/admin/folders')}><Settings2 size={16}/>Edit folders</a>}</div>}</div><a href="/history" aria-current={route==='progress'?'page':undefined} onClick={e=>link(e,'/history')}><History size={16}/>Test history</a><a href="/vocabulary" aria-current={route==='vocabulary'?'page':undefined} onClick={e=>link(e,'/vocabulary')}><BookMarked size={16}/>Vocabulary</a></nav><TopHeader crumb="" user={user} profile={profile} role={role} onUpdateProfile={onUpdateProfile} onOpenProfileModal={onOpenProfileModal} onNavigate={onNavigate}/></header>;
 }
-

@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import {FolderPicker} from "./FolderPicker";
 import {folderOptions,folderLocation,testInFolder,type LibraryFolder} from "../services/folders";
 import {FolderManager} from "./FolderManager";
@@ -232,18 +233,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
           {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}/>}
           <div className="admin-filters">
-            <label>Skill<select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></select></label>
-            <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
+            <label>Skill<Select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></Select></label>
+            <label>Status<Select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></Select></label>
             <label><input type="checkbox" checked={qualityFilter} onChange={e=>setQualityFilter(e.target.checked)}/> Needs content review</label>
             <label>
               Sort tests
-              <select value={sort} onChange={(e) => setSort(e.target.value)}>
+              <Select value={sort} onChange={(e) => setSort(e.target.value)}>
                 {sortOptions.map(([id,label]) => <option key={id} value={id}>{label}</option>)}
-              </select>
+              </Select>
             </label>
             <label>
               Folder
-              <select
+              <Select
                 value={collectionFilter}
                 onChange={(e) => {
                   setCollectionFilter(e.target.value);
@@ -252,7 +253,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 }}
               >
                 <option value="">All folders</option><option value="unfiled">Unfiled</option>{folderOptions(folders).map(f=><option key={f.id} value={f.id}>{f.path}</option>)}
-              </select>
+              </Select>
             </label>
             <button className="studio-secondary" onClick={onViewStudents}>
               View student attempts
@@ -445,7 +446,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         <div className="studio-panel">
           <div className="studio-heading-line" style={{ marginBottom: "16px" }}>
             <h3 style={{ margin: 0 }}>Student Content Reports</h3>
-            <select
+            <Select
               className="studio-select"
               value={reportFilter}
               onChange={(e) => setReportFilter(e.target.value as any)}
@@ -453,7 +454,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               <option value="all">All Reports</option>
               <option value="open">Open Issues Only</option>
               <option value="resolved">Resolved</option>
-            </select>
+            </Select>
           </div>
 
           {filteredReports.length === 0 ? (

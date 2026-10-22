@@ -1,3 +1,5 @@
+import {SignInView} from "./components/SignInView";
+import {Select} from "./components/Select";
 import {testLink,resolveTestLink} from "./services/testLinks";
 import {folderLocation,folderDeletion,trashFolders,restoreFolders,type LibraryFolder} from "./services/folders";
 import {contentMatch} from "./services/importIdentity";
@@ -129,7 +131,6 @@ export default function App() {
   const [editingTest, setEditingTest] = useState<EditableTest | null>(null);
 
   // Dialog & modal states
-  const [showProfileModal, setShowProfileModal] = useState(false);
   const [setupMode, setSetupMode] = useState<"practice" | "exam">("practice");
   const [setupTime, setSetupTime] = useState(60);
   const [setupSection, setSetupSection] = useState<"all" | number>("all");
@@ -947,7 +948,7 @@ export default function App() {
       )}
       {/* Sidebar Navigation */}
       <div className="studio-main">
-        <PortalHeader route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
+        <PortalHeader tests={tests} route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
 
         {/* Account Suspension Alert */}
         {suspended && (
@@ -1044,11 +1045,12 @@ export default function App() {
                   </button>
                 </div>
               )}
+            {route === "sign-in" && <SignInView location={location} onNavigate={navigate}/>}
             {route === "home" && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
             {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
-            {route === "knowledge" && <KnowledgeView profile={profile} location={location} onNavigate={navigate} />}
+            
 
-            {route === "contribute" && <ContributionView profile={profile} />}
+            
             {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
             {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={false} text={false ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
@@ -1200,7 +1202,7 @@ export default function App() {
 
                 <label className="studio-field">
                   Session Mode
-                  <select
+                  <Select
                     value={setupMode}
                     onChange={(e) => setSetupMode(e.target.value as any)}
                   >
@@ -1211,12 +1213,12 @@ export default function App() {
                       Official Exam Mode — Timed, solutions hidden until
                       submission
                     </option>
-                  </select>
+                  </Select>
                 </label>
 
                 <label className="studio-field">
                   Test Section
-                  <select
+                  <Select
                     value={setupSection}
                     onChange={(e) => {
                       const val = e.target.value;
@@ -1232,12 +1234,12 @@ export default function App() {
                         Section {idx + 1}: {p.title}
                       </option>
                     ))}
-                  </select>
+                  </Select>
                 </label>
 
                 <label className="studio-field">
                   Time Limit
-                  <select
+                  <Select
                     disabled={setupMode === "exam"}
                     value={setupTime}
                     onChange={(e) => setSetupTime(Number(e.target.value))}
@@ -1248,7 +1250,7 @@ export default function App() {
                     </option>
                     <option value={60}>60 Minutes (Standard full test)</option>
                     <option value={0}>Untimed Practice</option>
-                  </select>
+                  </Select>
                 </label>
 
                 <div className="studio-actions" style={{ marginTop: "20px" }}>
@@ -1272,8 +1274,8 @@ export default function App() {
         </div>
 
         <footer className="studio-footer">
-          <div>Reading Studio · Your next chapter starts here</div>
-          <div>Made for focused, high-precision academic practice.</div>
+          <div>IELTS studio</div>
+          <div>Reading & Listening practice</div>
         </footer>
       </div>
 
@@ -1292,75 +1294,6 @@ export default function App() {
             e.target.value = "";
           }}
         />
-      )}
-
-      {/* Profile / Target Band Modal */}
-      {showProfileModal && (
-        <dialog
-          className="studio-modal"
-          open
-          style={{
-            position: "fixed",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 120,
-          }}
-        >
-          <div className="studio-modal-heading">
-            <h2>Your Study Profile</h2>
-            <button
-              className="studio-quiet"
-              onClick={() => setShowProfileModal(false)}
-            >
-              ✕
-            </button>
-          </div>
-
-          <label className="studio-field">
-            Display Name
-            <input
-              value={profile.name}
-              onChange={(e) => setProfile({ ...profile, name: e.target.value })}
-            />
-          </label>
-
-          <label className="studio-field">
-            Target IELTS Band Score (0 – 9)
-            <input
-              type="number"
-              step="0.5"
-              min="0"
-              max="9"
-              value={profile.target}
-              onChange={(e) =>
-                setProfile({ ...profile, target: Number(e.target.value) })
-              }
-            />
-          </label>
-
-          <div className="studio-actions" style={{ marginTop: "20px" }}>
-            <button
-              className="studio-primary"
-              onClick={async () => {
-                await handleUpdateProfile({
-                  name: profile.name,
-                  target: profile.target,
-                });
-                setShowProfileModal(false);
-                notify("Profile updated.");
-              }}
-            >
-              Save Profile
-            </button>
-            <button
-              className="studio-secondary"
-              onClick={() => setShowProfileModal(false)}
-            >
-              Cancel
-            </button>
-          </div>
-        </dialog>
       )}
 
       {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} folders={folders} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}

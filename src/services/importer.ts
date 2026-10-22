@@ -80,6 +80,8 @@ export interface RawPart {
 }
 
 export const ALLOWED_TAGS = new Set([
+  "A",
+  "MARK",
   "P",
   "DIV",
   "SPAN",
@@ -339,12 +341,21 @@ export function safeContent(
     }
     if (supported && ["P", "H1", "H2", "H3", "H4"].includes(el.tagName)) {
       const align = el.style?.textAlign;
-      if (["center", "right"].includes(align))
+      if (["left", "center", "right", "justify"].includes(align))
         (dest as HTMLElement).style.textAlign = align;
       if (/^Questions?\s+\d/i.test(txt(el)))
         (dest as HTMLElement).classList.add("group-heading");
     }
 
+    if(supported&&dest.nodeType===1){
+      const styled=dest as HTMLElement;
+      if(el.tagName==='A'){const href=el.getAttribute('href')||'';if(/^(https?:\/\/|mailto:)/i.test(href)){styled.setAttribute('href',href);styled.setAttribute('rel','noopener noreferrer');}}
+      if(el.tagName==='OL'){const start=Number(el.getAttribute('start'));if(start>0&&start<10000)styled.setAttribute('start',String(start));}
+      const family=el.style?.fontFamily?.replace(/["']/g,'');if(['Arial','Georgia','Times New Roman','Verdana'].includes(family))styled.style.fontFamily=family;
+      const size=el.style?.fontSize;if(/^\d+(?:\.\d+)?px$/.test(size)&&parseFloat(size)>=10&&parseFloat(size)<=40)styled.style.fontSize=size;
+      const line=el.style?.lineHeight;if(Number(line)>=1&&Number(line)<=3)styled.style.lineHeight=line;
+      for(const property of ['color','backgroundColor'] as const){const value=el.style?.[property];if(/^(#[a-f\d]{3,8}|rgba?\([\d., %]+\))$/i.test(value))styled.style[property]=value;}
+    }
     for (const child of Array.from(node.childNodes)) {
       dest.appendChild(copy(child));
     }

@@ -1,6 +1,6 @@
 import React from 'react';
 import {LayoutDashboard,Folder,Files,Upload,Users,Flag,Archive,Trash2,FileText,Inbox,ArrowLeft} from 'lucide-react';
-const groups=[{label:'LIBRARY',items:[['/admin','Overview',LayoutDashboard],['/admin/folders','Folders',Folder],['/admin/tests','Tests',Files],['/admin/upload','Upload & Import',Upload]]},{label:'MANAGEMENT',items:[['/admin/students','Students & attempts',Users],['/admin/reports','Content reports',Flag],['/admin/content','Articles',FileText],['/admin/contributions','Contributions',Inbox]]},{label:'STORAGE',items:[['/admin/archive','Archive',Archive],['/admin/trash','Trash',Trash2]]}] as const;
+const groups=[{label:'LIBRARY',items:[['/admin','Overview',LayoutDashboard],['/admin/folders','Folders',Folder],['/admin/tests','Tests',Files],['/admin/upload','Upload & Import',Upload]]},{label:'MANAGEMENT',items:[['/admin/students','Students & attempts',Users],['/admin/reports','Content reports',Flag]]},{label:'STORAGE',items:[['/admin/archive','Archive',Archive],['/admin/trash','Trash',Trash2]]}] as const;
 export function AdminSidebar({location,onNavigate}:{location:string;onNavigate:(path:string)=>void}){
  const path=location.split('?')[0].replace(/\/$/,'');
  const link=(e:React.MouseEvent,url:string)=>{if(e.button===0&&!e.metaKey&&!e.ctrlKey&&!e.shiftKey&&!e.altKey){e.preventDefault();onNavigate(url);}};

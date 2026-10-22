@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import React, { useState, useEffect } from 'react';
 import { TestMeta, EditableTest, EditablePart } from '../types';
 import { firestoreAdapter } from '../services/firestoreAdapter';
@@ -182,24 +183,24 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
         <div className="studio-form-grid">
           <label className="studio-field">
             Test Skill
-            <select
+            <Select
               value={skill}
               onChange={(e) => setSkill(e.target.value as any)}
             >
               <option value="reading">Reading — 3 passages (60 min)</option>
               <option value="listening">Listening — 4 sections (30 min)</option>
-            </select>
+            </Select>
           </label>
 
           <label className="studio-field">
             Exam Mode
-            <select
+            <Select
               value={mode}
               onChange={(e) => setMode(e.target.value as any)}
             >
               <option value="exam">Official Exam Simulation (Strict timing, hidden keys)</option>
               <option value="practice">Practice Mode (Answers & explanations toggleable)</option>
-            </select>
+            </Select>
           </label>
         </div>
 
@@ -230,7 +231,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
                 >
                   <label className="studio-field" style={{ margin: 0 }}>
                     Section {idx + 1} — Select Test
-                    <select
+                    <Select
                       value={currentSel.testId}
                       onChange={(e) => handleTestChange(idx, e.target.value)}
                     >
@@ -239,12 +240,12 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
                           {t.title} ({t.source || 'General'})
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
 
                   <label className="studio-field" style={{ margin: 0 }}>
                     Section {idx + 1} — Choose Passage
-                    <select
+                    <Select
                       value={currentSel.partIndex}
                       onChange={(e) => handlePartChange(idx, Number(e.target.value))}
                     >
@@ -253,7 +254,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
                           {pIdx + 1}. {passageNames[currentSel.testId]?.[pIdx] || currentTest?.passageTitles?.[pIdx] || `Passage ${pIdx + 1}`}
                         </option>
                       ))}
-                    </select>
+                    </Select>
                   </label>
                 </div>
               );
@@ -282,5 +283,6 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     </div>
   );
 };
+
 
 

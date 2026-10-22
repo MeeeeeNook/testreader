@@ -88,6 +88,7 @@ export interface TestMeta {
 }
 
 export interface UserProfile {
+  weeklyGoal?:number;
   libraryFolders?: import("./services/folders").LibraryFolder[];
   libraryFolderVersion?: number;
   id: string;

@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import React, { useState, useMemo } from 'react';
 import { VocabularyItem, UserProfile } from '../types';
 
@@ -207,7 +208,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
 
             <label className="studio-field">
               Part of Speech
-              <select
+              <Select
                 value={editingWord.partOfSpeech || 'noun'}
                 onChange={(e) => setEditingWord({ ...editingWord, partOfSpeech: e.target.value })}
               >
@@ -216,7 +217,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
                 <option value="adjective">Adjective</option>
                 <option value="adverb">Adverb</option>
                 <option value="phrase">Phrase / Collocation</option>
-              </select>
+              </Select>
             </label>
 
             <label className="studio-field">

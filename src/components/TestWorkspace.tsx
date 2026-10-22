@@ -1,3 +1,4 @@
+import {Select} from "./Select";
 import {paintHighlights,selectionOffsets} from "../services/highlights";
 import {DictionaryPanel} from "./DictionaryPanel";
 import {ExportDialog} from "./ExportDialog";
@@ -676,7 +677,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         {/* Top Header Bar */}
         <header className="topbar reader-toolbar">
           <button className="quiet-button" title="Return to library" onClick={onReturnToLibrary}><Library size={17}/><span>Library</span></button>
-          <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
+          <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><Select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</Select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
           <div className="reader-actions"><div className={timerRemaining<300?'timer low':'timer'}><span>{timeFormatted}</span>{mode==='practice'&&!scored&&!initialSolution&&<button className="timer-button" aria-label={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?'Pause':'Start'}</button>}</div><button className="quiet-button" title="Print or download" onClick={()=>setShowExport(true)}><Printer size={17}/><span>Print</span></button><button className="quiet-button" title="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>setDictionaryWord('')}><BookOpen size={17}/><span>Dictionary</span></button><button className="quiet-button" title="Notes and highlights" onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={17}/><span>Notes</span></button><button className="quiet-button" title="Display settings" onClick={()=>setShowDisplayModal(true)}><Settings2 size={17}/><span>Display</span></button><button className="quiet-button" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}>Report</button></div>
         </header>
         {initialSolution&&!reviewLoaded&&!solutionError&&<p className="studio-callout" role="status">Loading solution guide…</p>}
@@ -1166,7 +1167,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
           <label className="studio-field">
             Question Number
-            <select
+            <Select
               value={reportQuestion}
               onChange={(e) => setReportQuestion(Number(e.target.value))}
             >
@@ -1175,12 +1176,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                   Question {n}
                 </option>
               ))}
-            </select>
+            </Select>
           </label>
 
           <label className="studio-field">
             Issue Category
-            <select
+            <Select
               value={reportCategory}
               onChange={(e) => setReportCategory(e.target.value)}
             >
@@ -1189,7 +1190,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               <option value="explanation">Explanation Error</option>
               <option value="missing">Missing Content</option>
               <option value="other">Other</option>
-            </select>
+            </Select>
           </label>
 
           <label className="studio-field">
@@ -1241,7 +1242,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
           <label className="studio-field">
             Font Size
-            <select
+            <Select
               value={textSize}
               onChange={(e) => {
                 setTextSize(Number(e.target.value));
@@ -1253,7 +1254,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               <option value={20}>Large (20px)</option>
               <option value={22}>Extra large (22px)</option>
               <option value={24}>Maximum (24px)</option>
-            </select>
+            </Select>
           </label>
 
 
