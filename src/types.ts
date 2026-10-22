@@ -44,6 +44,7 @@ export interface EditablePart {
 }
 
 export interface EditableTest {
+  coverImage?: string;
   folderId?: string|null;
   folderPath?: string;
   contentHash?: string;
@@ -65,6 +66,8 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  coverImage?: string;
+  contentBytes?: number;
   fullTestMenuFolders?: import('./services/folders').MenuFolder[];
   originSource?:string;
   folderId?: string|null;

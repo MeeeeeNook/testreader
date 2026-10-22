@@ -27,7 +27,8 @@ import {
   handleFirestoreError,
   OperationType,
 } from "../firebase";
-import { EditableTest, EditablePart, TestMeta, cleanLayout } from "./importer";
+import {cleanLayout} from "./importer";
+import type {EditableTest,EditablePart,TestMeta} from "../types";
 
 export class FirestoreAdapter {
   async saveLibraryFolders(folders:LibraryFolder[],expectedVersion:number):Promise<number> {
@@ -138,6 +139,8 @@ export class FirestoreAdapter {
       throw new Error("Administrator access required.");
     const allowed: any = { updatedAt: Date.now() };
     for (const key of [
+      "coverImage",
+      "contentBytes",
       "source",
       "title",
       "passageTitles",
@@ -290,6 +293,7 @@ export class FirestoreAdapter {
         skill: meta.skill,
         source: meta.source,
         folderId:meta.folderId||null,folderPath:meta.folderPath||"",contentHash:meta.contentHash,
+        coverImage: meta.coverImage,
         access: meta.access,
         status: meta.status,
         duration: meta.duration,
@@ -358,6 +362,8 @@ export class FirestoreAdapter {
       createdAt: test.createdAt || now,
       updatedAt: now,
       custom: true,
+      coverImage: test.coverImage ?? (test.parts.flatMap(p => [...(p.passageHtml || "").matchAll(/<img[^>]+src=['"]([^'"]+)['"]/gi)].map(m => m[1])).find(url => /^https:\/\//.test(url)) || ""),
+      contentBytes: new TextEncoder().encode(JSON.stringify(test)).length,
       ...organizationPatch(test as unknown as TestMeta,folders),
       contentHash:test.contentHash||await contentHash(test),
     };
@@ -417,17 +423,13 @@ export class FirestoreAdapter {
       const url = await getDownloadURL(snap.ref);
       return url;
     } catch (error) {
-      console.error("Storage upload failed, fallback to data URL:", error);
-      return new Promise((resolve, reject) => {
-        const reader = new FileReader();
-        reader.onload = () => resolve(reader.result as string);
-        reader.onerror = reject;
-        reader.readAsDataURL(file);
-      });
+      console.error("Storage upload failed:", error);
+      throw new Error("The image could not be uploaded. Check Firebase Storage access and retry. Your test has not been changed.");
     }
   }
 
   private getPath(kind: string, _id: string, uid?: string): string {
+    if (!uid && ["attempts", "vocabulary"].includes(kind)) throw new Error(`Sign in to save ${kind === "vocabulary" ? "vocabulary" : "test results"}.`);
     switch (kind) {
       case "tests":
         return "tests";

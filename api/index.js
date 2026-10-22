@@ -1,3 +1,11 @@
+// server/app.ts
+import { getStorage } from "firebase-admin/storage";
+
+// src/services/storageUsage.ts
+function summarizeFiles(files) {
+  return { bytes: files.reduce((sum, file) => sum + file.size, 0), count: files.length, largest: [...files].sort((a, b) => b.size - a.size).slice(0, 20) };
+}
+
 // src/services/portal.ts
 var slugify = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 100) || "reading";
 var answerPath = (id, sectionId, title) => `/answers/${encodeURIComponent(id)}/${encodeURIComponent(sectionId)}/${slugify(title)}`;
@@ -428,12 +436,14 @@ function backend() {
   const instance = getApps().find((a) => a.name === "READING_SERVER") || initializeApp(
     {
       credential: process.env.FIREBASE_SERVICE_ACCOUNT_JSON ? cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON)) : applicationDefault(),
-      projectId: firebase_applet_config_default.projectId
+      projectId: firebase_applet_config_default.projectId,
+      storageBucket: firebase_applet_config_default.storageBucket
     },
     "READING_SERVER"
   );
   return {
     auth: getAuth(instance),
+    bucket: getStorage(instance).bucket(),
     db: getFirestore(
       instance,
       firebase_applet_config_default.firestoreDatabaseId || "(default)"
@@ -525,7 +535,6 @@ app.post("/api/auth/sync", async (req, res) => {
 });
 app.post("/api/dictionary", async (req, res) => {
   try {
-    await caller(req);
     if (!process.env.GEMINI_API_KEY)
       throw new AssessmentError(503, "Dictionary lookup is not configured.");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -618,6 +627,46 @@ app.post("/api/admin/user-status", async (req, res) => {
     }
     await db.doc(`users/${targetUserId}`).update({ status: newStatus, updatedAt: Date.now() });
     res.json({ success: true, targetUserId, status: newStatus });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+app.post("/api/admin/storage-usage", async (req, res) => {
+  try {
+    const { isAdmin } = await caller(req);
+    if (!isAdmin) throw new AssessmentError(403, "Administrator access required.");
+    const files = [];
+    let query = { autoPaginate: false, maxResults: 1e3 };
+    do {
+      const [page, next] = await backend().bucket.getFiles(query);
+      files.push(...page.map((file) => ({ name: file.name, size: Number(file.metadata.size) || 0 })));
+      query = next;
+    } while (query && files.length < 1e4);
+    res.json({ ...summarizeFiles(files), truncated: Boolean(query), scannedAt: Date.now() });
+  } catch (error) {
+    console.error("Storage inventory failed", error);
+    const message = error instanceof AssessmentError ? error.message : "Uploaded file sizes are unavailable. The owner needs to configure server Firebase credentials with Storage Object Viewer access. Test content can still be measured below.";
+    res.status(error instanceof AssessmentError ? error.status : 503).json({ error: message });
+  }
+});
+var reportLimits = /* @__PURE__ */ new Map();
+app.post("/api/content-report", async (req, res) => {
+  try {
+    const { db, identity } = await optionalCaller(req);
+    const { testId, message, question, category } = req.body;
+    if (typeof testId !== "string" || !/^[-\w]{1,128}$/.test(testId) || typeof message !== "string" || !message.trim() || message.length > 3e3) throw new AssessmentError(400, "Please describe the issue in up to 3000 characters.");
+    const key = req.ip || "unknown", now = Date.now();
+    if (reportLimits.size > 1e4) {
+      for (const [id2, entry2] of reportLimits) if (entry2.until < now) reportLimits.delete(id2);
+    }
+    const entry = reportLimits.get(key);
+    if (entry && entry.until > now && entry.count >= 10) throw new AssessmentError(429, "Please wait before sending another report.");
+    reportLimits.set(key, { count: entry && entry.until > now ? entry.count + 1 : 1, until: entry && entry.until > now ? entry.until : now + 6e5 });
+    const meta = await db.doc(`tests/${testId}`).get();
+    if (meta.data()?.status !== "published") throw new AssessmentError(404, "This test is unavailable.");
+    const id = randomUUID2();
+    await db.doc(`reports/${id}`).set({ id, owner: identity?.uid || "guest", testId, testTitle: meta.data()?.title || "", message: message.trim(), question: Number.isInteger(question) ? question : 0, category: typeof category === "string" ? category.slice(0, 80) : "content", status: "open", createdAt: now });
+    res.json({ success: true });
   } catch (error) {
     apiError(res, error);
   }

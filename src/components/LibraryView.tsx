@@ -1,3 +1,4 @@
+import {TestCover} from "./TestCover";
 import {Select} from "./Select";
 import { FolderBrowser } from "./FolderBrowser";
 import { compareTests, inFolder, sortOptions, latestAttempt, allFolderPaths } from "../services/catalog";
@@ -265,7 +266,7 @@ export const LibraryView: React.FC<Props> = ({
             <article className="reading-card" key={test.id}>
               <div className={`card-art color-${i % 4}`}>
                 <span className="card-art-lines" />
-                <BookOpen size={42} strokeWidth={1.2} />
+                <TestCover id={test.id} title={test.title} image={test.coverImage}/>
                 <span className="card-art-label">
                   {test.passages > 1 ? "THE FULL PICTURE" : "A CLOSER LOOK"}
                 </span>

@@ -63,7 +63,9 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
     path,
   };
   console.error('Firestore Error:', JSON.stringify(errInfo));
-  throw new Error(errInfo.error);
+  const code=(error as {code?:string})?.code;
+  if(code==='permission-denied'||code==='unauthenticated')throw new Error(auth.currentUser ? 'This action could not be completed. Please retry or contact the site owner.' : 'This resource is temporarily unavailable. Please retry; public tests do not require sign-in.');
+  throw new Error('Could not connect to your study data. Please check your connection and retry.');
 }
 
 // Validate connection on boot
@@ -76,4 +78,4 @@ export async function testConnection() {
     }
   }
 }
-testConnection();
+// Connection checks are explicit; avoid a forbidden Firestore read on every page load.
