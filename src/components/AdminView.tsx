@@ -6,6 +6,8 @@ import React, { useState, useRef, useEffect } from "react";
 import { TestMeta, ContentReport, UserProfile } from "../types";
 
 interface AdminViewProps {
+  section?: string;
+  onNavigate?: (path:string)=>void;
   tests: TestMeta[];
   reports: ContentReport[];
   learners: UserProfile[];
@@ -35,6 +37,7 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({
+  section="tests",onNavigate,
   tests,
   reports,
   learners,
@@ -58,9 +61,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onNotify,
 }) => {
   const folderInput = useRef<HTMLInputElement>(null);
-  const [tab, setTab] = useState<
-    "tests" | "reports" | "users" | "archive" | "trash"
-  >("tests");
+  const tab=section==='folders'?'tests':section;
+  const go=(path:string)=>onNavigate?.(path);
   const [search, setSearch] = useState("");
   const [reportFilter, setReportFilter] = useState<"all" | "open" | "resolved">(
     "all",
@@ -153,17 +155,13 @@ export const AdminView: React.FC<AdminViewProps> = ({
       <div className="studio-page-head">
         <div>
           <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
-          <h1 className="studio-heading">Admin Studio</h1>
+          <h1 className="studio-heading">{{overview:"Tổng quan",tests:"Đề thi",folders:"Thư mục",upload:"Upload & Import",reports:"Báo lỗi nội dung",users:"Học viên",archive:"Kho lưu trữ",trash:"Thùng rác"}[section]||"Admin Studio"}</h1>
           <p className="studio-lead">
-            Manage your Cloud Firestore test bank, author new reading and
-            listening exams, review learner error reports, and oversee account
-            access.
+            {{overview:"Quản lý thư viện, nội dung và tiến độ học viên ở một nơi.",tests:"Tìm kiếm, chỉnh sửa, xuất bản và quản lý nhiều đề cùng lúc.",folders:"Sắp xếp nguồn đề theo thư mục và thư mục con. Chọn thư mục để xem và di chuyển đề.",upload:"Chọn file hoặc kéo thả để xem trước. Chỉ lưu lên Firebase sau khi xác nhận.",reports:"Theo dõi và giải quyết lỗi nội dung do học viên gửi.",users:"Quản lý tài khoản và truy cập kết quả của học viên.",archive:"Các đề tạm ngừng sử dụng. Khôi phục khi cần.",trash:"Khôi phục những đề đã xóa khỏi thư viện."}[section]}
           </p>
         </div>
 
         <div className="studio-actions">
-          <a className="studio-secondary" href="/admin/content">Quản lý bài viết</a>
-          <a className="studio-secondary" href="/admin/contributions">Duyệt đóng góp</a>
           <button className="studio-primary" onClick={onNewTest}>
             + New Test
           </button>
@@ -173,7 +171,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       </div>
 
-      <section
+      {section === "upload" && <section
         className="admin-dropzone"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
@@ -205,33 +203,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
             e.target.value = "";
           }}
         />
-      </section>
-      <div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
-      {/* Tabs */}
-      <div className="studio-chips">
-        {[
-          { id: "tests", label: `Test Bank (${activeTests.length})` },
-          {
-            id: "reports",
-            label: `Content Reports (${reports.filter((r) => r.status === "open").length} open)`,
-          },
-          { id: "users", label: `Learners (${learners.length})` },
-          { id: "archive", label: `Archive (${archivedTests.length})` },
-          { id: "trash", label: `Trash (${trashedTests.length})` },
-        ].map((item) => (
-          <button
-            key={item.id}
-            className={`studio-chip ${tab === item.id ? "active" : ""}`}
-            onClick={() => {
-              setTab(item.id as any);
-              setSelected([]);
-            }}
-          >
-            {item.label}
-          </button>
-        ))}
-      </div>
-
+      </section>}
+      {section === "overview" && <><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
+      <div className="admin-overview-grid"><section className="studio-panel"><h2>Bắt đầu quản lý</h2><p>Nhập đề mới, sắp xếp bộ đề theo thư mục và kiểm tra nội dung trước khi xuất bản.</p><div className="admin-shortcuts">{[['/admin/upload','Upload đề mới','Xem trước và chọn đề trước khi import'],['/admin/folders','Sắp xếp thư mục','Quản lý nguồn đề và các thư mục con'],['/admin/tests','Quản lý đề thi','Chỉnh sửa, xuất bản và thao tác hàng loạt'],['/admin/students','Theo dõi học viên','Xem lịch sử và kết quả làm bài']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} →</strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Cần xử lý</h2><p>{reports.filter(r=>r.status==='open').length} báo lỗi chưa giải quyết</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} đề cần kiểm tra nội dung</p><p>{trashedTests.length} đề trong thùng rác</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Xem báo lỗi</button></section></div></>}
+      {section === "upload" && <section className="studio-panel"><h2>Kiểm tra trước khi nhập</h2><ol><li>Chọn ZIP, HTML, JSON hoặc cả thư mục.</li><li>Xem trước danh sách đề, passage, câu hỏi và cảnh báo.</li><li>Chọn đề cần nhập, tên, thư mục và trạng thái.</li><li>Xác nhận để tải ảnh và lưu đề lên Firebase.</li></ol><p>Mặc định nhập thành bản nháp để mình kiểm tra trước khi xuất bản.</p></section>}
       {/* Test Bank & Archive Tab */}
       {(tab === "tests" || tab === "archive" || tab === "trash") && (
         <div className="studio-panel">
@@ -249,7 +224,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </button>
           </div>
 
-          <FolderBrowser tests={tab === "trash" ? trashedTests : tab === "archive" ? archivedTests : activeTests} value={collectionFilter} onChange={path => {setCollectionFilter(path);setRenamePath(path);setSelected([]);}} />
+          {section === "folders" && <FolderBrowser tests={tab === "trash" ? trashedTests : tab === "archive" ? archivedTests : activeTests} value={collectionFilter} onChange={path => {setCollectionFilter(path);setRenamePath(path);setSelected([]);}} />}
           <div className="admin-filters">
             <label>Skill<select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></select></label>
             <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>

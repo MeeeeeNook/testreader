@@ -44,8 +44,6 @@ test("admin offers sorting, collection filters, folder import, Trash and student
   for (const label of [
     "Sort tests",
     "All collections",
-    "Upload a folder",
-    "Trash (0)",
     "View student attempts",
     "Delete",
   ])
@@ -106,4 +104,12 @@ test('admin paginates large libraries and duplicates only the requested test as 
   await click('Rename');assert.ok(document.querySelector('dialog[aria-label="Rename test"] input'));
   await click('Cancel');assert.equal(document.querySelector('dialog'),null);
  }finally{await act(async()=>root.unmount());}
+});
+
+test('admin pages separate upload, folder navigation and the dashboard from the test bank',()=>{
+ const render=(section:string)=>renderToStaticMarkup(React.createElement(AdminView,{...props,section,onNavigate:()=>{}}));
+ const overview=render('overview');assert.match(overview,/Bắt đầu quản lý/);assert.doesNotMatch(overview,/<tbody>|admin-dropzone/);
+ const upload=render('upload');assert.match(upload,/admin-dropzone/);assert.match(upload,/Upload a folder/);assert.doesNotMatch(upload,/<tbody>/);
+ const folders=render('folders');assert.match(folders,/aria-label="Test folders"/);assert.match(folders,/New folder path|All folders/);
+ const bank=render('tests');assert.match(bank,/<tbody>/);assert.doesNotMatch(bank,/admin-dropzone|aria-label="Test folders"/);
 });

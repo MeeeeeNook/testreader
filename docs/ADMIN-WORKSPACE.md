@@ -18,3 +18,22 @@ Practice cards use passage titles as headings, with the original Passage/Section
 Existing folder/subfolder moves, bulk publication changes, Trash/restore, archive, imports, question editing, reports, student attempts and article management remain available to the verified owner only.
 
 Validation: TypeScript check, automated component/service tests and production frontend/backend build. Updating GitHub does not redeploy an independent AI Studio instance; sync the latest main branch and redeploy there. Firebase runtime IAM and live upload permissions depend on that hosting project's configuration.
+
+## Admin sidebar and preview import
+
+The owner workspace has its own sidebar with reloadable URLs:
+
+- `/admin`: dashboard and shortcuts.
+- `/admin/folders`: folder hierarchy, rename/move folders, contained tests and bulk moves.
+- `/admin/tests`: test bank with filters, sorting, editing and bulk actions.
+- `/admin/upload`: file/folder import entry point and instructions.
+- `/admin/students`: learners and their attempts.
+- `/admin/reports`: content reports.
+- `/admin/content`, `/admin/contributions`: articles and contribution moderation.
+- `/admin/archive`, `/admin/trash`: archive and deleted tests.
+
+Choosing files or dropping a folder now prepares a local import plan. No tests or media are written at this stage. The modal shows file parsing errors, possible duplicate IDs, test/section/question counts, sandboxed passage/question previews, source answer/explanation counts and content warnings. Select individual tests, change names, override the destination folder, and choose draft/published. Draft is the default. Cancel or Escape disposes local image URLs and performs no import.
+
+Confirm starts uploads for images referenced by selected tests, replaces temporary URLs throughout the test, then saves selected records. Existing complete IDs are skipped; legacy tests missing response controls retain the existing repair behavior and settings. The import report lists successful imports, skipped duplicates and failures. A fatal image-upload failure returns to preview instead of saving tests with broken local image links. Already-uploaded image objects may remain if a later operation fails.
+
+Folders are derived from test source paths; empty folders are not persisted separately. Back/Forward changes admin pages normally. Authorization remains restricted to the verified owner account.
