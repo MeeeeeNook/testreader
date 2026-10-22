@@ -12,6 +12,7 @@ export function parseRoute(input) {
     if (p === "/knowledge") return {name:"knowledge"};
     if (p === "/forum") return {name:"forum"};
     if (p === "/contribute") return {name:"contribute"};
+    if (/^\/admin\/(overview|tests|folders|upload|reports|users|archive|trash)$/.test(p)) return {name:"admin",section:p.split("/")[2]};
     if (p === "/admin/content") return {name:"content-admin"};
     if (p === "/admin/contributions") return {name:"contributions-admin"};
     let sectionMatch = /^\/tests\/([^/]+)\/sections\/([^/]+)$/.exec(p);

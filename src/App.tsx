@@ -1,3 +1,6 @@
+import {AdminSidebar} from './components/AdminSidebar';
+import {ImportPreview} from './components/ImportPreview';
+import {prepareImport,disposeImport,replaceImportAssets,type ImportPlan,type ImportCandidate} from './services/importPreview';
 import { PortalHeader } from "./components/PortalHeader";
 import { HomeView } from "./components/HomeView";
 import { PracticeCatalog } from "./components/PracticeCatalog";
@@ -18,11 +21,7 @@ import {
   ContentReport,
 } from "./types";
 import {
-  collectFiles,
-  importJsonTests,
-  jsonParts,
   toEditable,
-  extractTitle,
   fingerprint,
 } from "./services/importer";
 
@@ -133,6 +132,12 @@ export default function App() {
 
   // Upload progress modal
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [importPlan,setImportPlan]=useState<ImportPlan|null>(null);
+  const importPlanRef=useRef<ImportPlan|null>(null);
+  const preparingImport=useRef(false);
+  const importing=useRef(false);
+  const closeImportPreview=()=>{if(importPlanRef.current)disposeImport(importPlanRef.current);importPlanRef.current=null;setImportPlan(null);};
+  useEffect(()=>()=>{if(importPlanRef.current)disposeImport(importPlanRef.current);},[]);
   const [uploadReport, setUploadReport] = useState<{
     imported: number;
     duplicates: number;
@@ -748,86 +753,32 @@ export default function App() {
     );
   };
 
-  // Admin Upload Files Handler (ZIP, HTML, JSON)
+  // Prepare locally, then wait for the owner's explicit import selection.
   const handleUploadFiles = async (files: File[]) => {
-    if (!files.length || userRole !== "admin") return;
-    setUploadProgress("Analyzing and unpacking files…");
-    setUploadReport(null);
-
-    let imported = 0;
-    let duplicates = 0;
-    const errors: string[] = [];
-    const seenIds = new Set<string>();
-    const candidates: { test: EditableTest; name: string }[] = [];
-
+    if (!files.length || userRole !== "admin" || preparingImport.current || importing.current) return;
+    preparingImport.current=true;
+    setUploadProgress("Đang đọc file để xem trước…");setUploadReport(null);
     try {
-      // 1. JSON test files
-      for (const file of files.filter((f) => /\.json$/i.test(f.name))) {
-        try {
-          const text = await file.text();
-          for (const test of importJsonTests(text, file.name))
-            candidates.push({ test, name: file.name });
-        } catch (err) {
-          errors.push(
-            `${file.name}: ${err instanceof Error ? err.message : String(err)}`,
-          );
-        }
+      const plan=await prepareImport(files);
+      closeImportPreview();importPlanRef.current=plan;setImportPlan(plan);
+    }catch(error){notify(error instanceof Error?error.message:String(error));}
+    finally{preparingImport.current=false;setUploadProgress(null);}
+  };
+  const confirmImport=async (items:ImportCandidate[])=>{
+    const plan=importPlanRef.current;
+    if(!plan||userRole!=="admin"||importing.current||!items.length)return;
+    importing.current=true;setImportPlan(null);setUploadProgress("Đang tải hình ảnh…");
+    let imported=0,duplicates=0,completed=false;
+    const errors=[...plan.errors],seenIds=new Set<string>();
+    try {
+      const assets=new Map<string,string>();
+      const selectedContent=JSON.stringify(items);
+      for(const image of plan.images) {
+        if(!selectedContent.includes(image.url))continue;
+        // A missing diagram must never become an expired blob URL in a saved test.
+        assets.set(image.url,await firestoreAdapter.uploadMedia(image.blob,`media/${createId()}-${image.name}`));
       }
-
-      // 2. ZIP and HTML files
-      const nonJsonFiles = files.filter((f) => !/\.json$/i.test(f.name));
-      if (nonJsonFiles.length > 0) {
-        const {
-          candidates: htmlCandidates,
-          images,
-          errors: parseErrors,
-        } = await collectFiles(nonJsonFiles);
-        errors.push(...parseErrors);
-
-        const assets: Record<string, string> = {};
-        // Upload any diagrams/images to Firebase Storage
-        for (const img of images) {
-          try {
-            assets[img.name] = await firestoreAdapter.uploadMedia(
-              img.blob,
-              `media/${createId()}-${img.name}`,
-            );
-          } catch {
-            errors.push(`${img.name}: diagram upload failed.`);
-          } finally {
-            URL.revokeObjectURL(img.url);
-          }
-        }
-
-        // Parse HTML candidates
-        for (const c of htmlCandidates) {
-          try {
-            if (/\.json$/i.test(c.name)) {
-              for (const test of importJsonTests(c.source, c.name, assets))
-                candidates.push({ test, name: c.name });
-            } else {
-              const rawParts = jsonParts(c.source);
-              const title = extractTitle(c.source, c.name);
-              const segments = c.name.split("/");
-              const source =
-                segments.length > 1
-                  ? segments.slice(0, -1).filter((s) => !/\.zip$/i.test(s)).join(" / ") || segments[0].replace(/\.zip$/i, "")
-                  : "Imported collection";
-              const editable = toEditable(
-                { title, parts: rawParts },
-                { source },
-                assets,
-              );
-              candidates.push({ test: editable, name: c.name });
-            }
-          } catch (err) {
-            errors.push(
-              `${c.name}: ${err instanceof Error ? err.message : String(err)}`,
-            );
-          }
-        }
-      }
-
+      const candidates=items.map(c=>({...c,test:replaceImportAssets(c.test,assets)}));
       // 3. Save candidates to Firestore with duplicate detection
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
@@ -870,18 +821,19 @@ export default function App() {
         }
       }
 
-      setUploadReport({ imported, duplicates, errors });
+      setUploadReport({ imported, duplicates, errors });completed=true;
       await loadData();
       notify(
         `Import complete: ${imported} imported or repaired, ${duplicates} duplicates skipped.`,
       );
     } catch (topErr) {
+      if(!completed)setImportPlan(plan);
       notify(
         "Upload failed: " +
           (topErr instanceof Error ? topErr.message : String(topErr)),
       );
     } finally {
-      setUploadProgress(null);
+      importing.current=false;if(completed)closeImportPreview();setUploadProgress(null);
     }
   };
 
@@ -983,6 +935,8 @@ export default function App() {
           </div>
         )}
 
+        <div className={userRole === "admin" && ["admin","students","editor","content-admin","contributions-admin"].includes(route) ? "admin-shell" : undefined}>
+        {userRole === "admin" && ["admin","students","editor","content-admin","contributions-admin"].includes(route) && <AdminSidebar location={location} onNavigate={navigate} />}
         <main id="studioContent">
           <React.Suspense
             fallback={<div className="studio-empty">Loading page…</div>}
@@ -1125,6 +1079,9 @@ export default function App() {
             )}
             {route === "admin" && userRole === "admin" && (
               <AdminView
+                key={page.section || "overview"}
+                section={page.section || "overview"}
+                onNavigate={navigate}
                 tests={tests}
                 reports={reports}
                 learners={learners}
@@ -1279,6 +1236,7 @@ export default function App() {
             )}
           </React.Suspense>
         </main>
+        </div>
 
         <footer className="studio-footer">
           <div>Reading Studio · Your next chapter starts here</div>
@@ -1372,6 +1330,7 @@ export default function App() {
         </dialog>
       )}
 
+      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} existingIds={new Set(tests.map(t=>t.id))} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
       {/* Upload Progress Modal */}
       {(uploadProgress || uploadReport) && (
         <dialog
