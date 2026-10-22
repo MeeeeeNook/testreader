@@ -1,7 +1,7 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
 import {once} from 'node:events';
-import app from '../api/index.ts';
+import app from '../api/index.js';
 test('the actual Vercel entry serves health, denies unauthenticated admin and returns JSON for unknown APIs',async()=>{
  const server=app.listen(0,'127.0.0.1');await once(server,'listening');
  const port=(server.address() as {port:number}).port;
