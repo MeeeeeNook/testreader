@@ -1,3 +1,4 @@
+import {TestCover} from "./TestCover";
 import {createId} from "../services/ids";
 import {RichEditor} from "./RichEditor";
 import {Select} from "./Select";
@@ -32,6 +33,8 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
   const [newQuestionType, setNewQuestionType] = useState<'text' | 'select' | 'radio' | 'multi'>('text');
   const [newQuestionLabel, setNewQuestionLabel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [coverBusy,setCoverBusy]=useState(false);
+  const uploadCover=async(file?:File)=>{if(!file)return;if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)||file.size>5*1024*1024){onNotify('Choose a PNG, JPEG, WebP or GIF image up to 5 MB.');return;}setCoverBusy(true);try{const image=await createImageBitmap(file),scale=Math.min(1,1200/image.width,800/image.height),canvas=document.createElement('canvas');canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext('2d')!.drawImage(image,0,0,canvas.width,canvas.height);image.close();const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not process this image.')),'image/webp',.82));const url=await firestoreAdapter.uploadMedia(blob,`tests/${test.id}/covers/${Date.now()}.webp`);setTest(prev=>({...prev,coverImage:url}));}catch(error){onNotify((error as Error).message);}finally{setCoverBusy(false);}};
   const [openQuestions,setOpenQuestions]=useState<number[]>([]);
   const uploadEditorImage=(file:File)=>firestoreAdapter.uploadMedia(file,`tests/${test.id}/images/${Date.now()}-${file.name}`);
 
@@ -220,14 +223,14 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           <button
             className="studio-secondary"
             onClick={() => handleCommit('draft')}
-            disabled={saving}
+            disabled={saving||coverBusy}
           >
             Save Draft
           </button>
           <button
             className="studio-primary"
             onClick={() => handleCommit('published')}
-            disabled={saving}
+            disabled={saving||coverBusy}
           >
             Publish to Library
           </button>
@@ -278,6 +281,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
         </div>
       </div>
 
+      <section className="studio-panel cover-editor"><div><h2>Test cover</h2><p>Upload an image for this test. Images are resized and compressed before uploading.</p><label className="studio-secondary">{coverBusy?'Uploading…':'Choose image'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={coverBusy||saving} onChange={e=>{void uploadCover(e.target.files?.[0]);e.target.value='';}}/></label>{test.coverImage&&<button className="quiet-button" disabled={coverBusy} onClick={()=>setTest({...test,coverImage:''})}>Use illustration</button>}</div><TestCover id={test.id} title={test.title} image={test.coverImage}/></section>
       {/* Section Tabs */}
       <div className="editor-tabs">
         {test.parts.map((p, idx) => (

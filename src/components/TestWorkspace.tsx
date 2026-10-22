@@ -1,10 +1,11 @@
+import {requestJson} from "../services/apiRequest";
+import {ListeningAudio} from "./ListeningAudio";
 import {Select} from "./Select";
 import {paintHighlights,selectionOffsets} from "../services/highlights";
 import {DictionaryPanel} from "./DictionaryPanel";
 import {ExportDialog} from "./ExportDialog";
 import {testLink} from "../services/testLinks";
-import {BookOpen,Printer,NotebookPen,Flag,Settings2,Library,ChevronLeft,ChevronRight} from "lucide-react";
-import { countsAsAttempt } from "../services/portal";
+import {BookOpen,Printer,NotebookPen,Flag,Settings2,Library,ChevronLeft,ChevronRight,AlarmClock,Pause,Play,Bug,Infinity as InfinityIcon} from "lucide-react";
 import { loginWithGoogle } from "../services/auth";
 import { passageTitle } from "../services/passageTitle";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
@@ -411,13 +412,14 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setScoreResult(data.result);
       setApproxBand(data.band);
       setScored(true);
-      setShowResultsModal(true);
+      setShowAnswers(true);
+      setShowExplanations(true);
 
-      if (!countsAsAttempt(submissionOwner, manual, data.result.total, responses, allQuestionNumbers)) {
-        setHistoryNotice(submissionOwner === "guest" ? "Sign in before submitting to save your score and history." : !manual ? "Time is up. This automatic review does not count as a submitted attempt." : "Answer at least 50% of the questions to count this as an attempt. Your score is still available below.");
+      if (submissionOwner === "guest") {
+        setHistoryNotice("Sign in to save your test results. Your answers and explanations are available to review.");
         return;
       }
-      setHistoryNotice("This attempt is saved to your history.");
+      setHistoryNotice("");
       const attemptRecord: AttemptRecord = {
         id: data.attemptId || attemptId,
         owner: submissionOwner,
@@ -601,17 +603,17 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       return;
     }
     try {
-      await firestoreAdapter.put("reports", {
+      await requestJson("/api/content-report", {
         id: `rep_${Date.now()}`,
         owner: profile.id,
-        testId: test.id,
+        testId: test.sourceTestId || test.id,
         testTitle: test.title,
         question: reportQuestion,
         category: reportCategory,
         message: reportMessage.trim(),
         status: "open",
         createdAt: Date.now(),
-      });
+      },()=>auth.currentUser);
       setShowReportModal(false);
       setReportMessage("");
       onNotify("Content issue reported for admin review.");
@@ -676,9 +678,16 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       <main className="main">
         {/* Top Header Bar */}
         <header className="topbar reader-toolbar">
-          <button className="quiet-button" title="Return to library" onClick={onReturnToLibrary}><Library size={17}/><span>Library</span></button>
+          <button className="reader-icon" title="Return to library" aria-label="Return to library" onClick={onReturnToLibrary}><Library size={21}/></button>
           <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><Select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</Select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
-          <div className="reader-actions"><div className={timerRemaining<300?'timer low':'timer'}><span>{timeFormatted}</span>{mode==='practice'&&!scored&&!initialSolution&&<button className="timer-button" aria-label={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?'Pause':'Start'}</button>}</div><button className="quiet-button" title="Print or download" onClick={()=>setShowExport(true)}><Printer size={17}/><span>Print</span></button><button className="quiet-button" title="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>setDictionaryWord('')}><BookOpen size={17}/><span>Dictionary</span></button><button className="quiet-button" title="Notes and highlights" onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={17}/><span>Notes</span></button><button className="quiet-button" title="Display settings" onClick={()=>setShowDisplayModal(true)}><Settings2 size={17}/><span>Display</span></button><button className="quiet-button" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}>Report</button></div>
+          <div className="reader-actions" role="toolbar" aria-label="Test tools">
+            <div className={`reader-clock ${initialDurationMinutes>0&&timerRemaining<300?'low':''}`} aria-label={initialDurationMinutes>0?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{initialDurationMinutes>0?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{initialDurationMinutes>0?'remaining':'Unlimited time'}</span>{mode==='practice'&&initialDurationMinutes>0&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
+            <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
+            <button className="reader-icon" title="Report an issue" aria-label="Report an issue" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}><Bug size={22}/></button>
+            <button className="reader-icon" title="Dictionary" aria-label="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>setDictionaryWord('')}><BookOpen size={22}/></button>
+            <button className="reader-icon" title="Display settings" aria-label="Display settings" onClick={()=>setShowDisplayModal(true)}><Settings2 size={22}/></button>
+            <button className="reader-icon" title="Notes and highlights" aria-label="Notes and highlights" aria-pressed={activeDrawer==='notes'} onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={22}/></button>
+          </div>
         </header>
         {initialSolution&&!reviewLoaded&&!solutionError&&<p className="studio-callout" role="status">Loading solution guide…</p>}
         {solutionError&&<div className="studio-callout" role="alert">{solutionError}<button className="quiet-button" onClick={()=>setSolutionRetry(i=>i+1)}>Retry solutions</button></div>}
@@ -730,7 +739,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         {part.audio && (
           <div className="audio-strip">
             <span style={{ fontWeight: 600 }}>Section Audio:</span>
-            <audio controls src={part.audio} />
+            {mode==='exam'&&!scored&&!initialSolution ? test.parts.map((audioPart,index)=>audioPart.audio&&<div key={audioPart.id} hidden={index!==currentPartIndex}><ListeningAudio src={audioPart.audio} exam/></div>) : <ListeningAudio key={sessionId+part.id} src={part.audio} exam={false}/>}
           </div>
         )}
 

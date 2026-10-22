@@ -7,6 +7,7 @@ import { build } from 'esbuild';
 import React, { act } from 'react';
 import { createRoot } from 'react-dom/client';
 import { parseHTML } from 'linkedom';
+import { readAttempts } from '../src/services/localHistory.js';
 import { scoreTest, estimatedBand } from '../src/services/scoring.ts';
 
 // Exercise the actual workspace with isolated network adapters, not a second UI implementation.
@@ -19,19 +20,21 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onResolve({filter:/services\/auth$/},()=>({path:'auth',namespace:'offline'}));
       builder.onResolve({filter:/(?:^|\/)firebase$/},()=>({path:'firebase',namespace:'offline'}));
       builder.onResolve({filter:/services\/(assessmentClient|firestoreAdapter)$/},args=>({path:args.path.endsWith('assessmentClient')?'assessment':'store',namespace:'offline'}));
-      builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={currentUser:null};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
+      builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={get currentUser(){return globalThis.__workspaceUser||null}};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const mode of ['practice','exam','solution']) {
+    for (const mode of ['practice','exam','solution','member']) {
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
       const storage=new Map<string,string>();
       let requests=0;
       const questions=Array.from({length:40},(_,i)=>({number:i+1,kind:'fill_blank',answer:'yes',explanationHtml:'<p>Source explanation.</p>'}));
       const numbers=questions.map(q=>q.number);
       const keys=Object.fromEntries(questions.map(q=>[q.number,q]));
-      storage.set(`reading-room:v3:guest:${mode}:${mode}`, JSON.stringify({responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
+      const owner=mode==='member'?'student-one':'guest',actualMode=mode==='member'?'practice':mode;
+      storage.set(`reading-room:v3:${owner}:${mode}:${actualMode}`, JSON.stringify({responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
       Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true,
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
+        __workspaceUser:mode==='member'?{uid:owner}:null,
         __scoreRequest:async(url:string,payload:any)=>{
           requests++; if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys};}assert.equal(url,'/api/submit-exam');
           const result=scoreTest([{numbers,keys}],payload.responses);
@@ -41,7 +44,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       const noop=()=>{};
       const root=createRoot(document.getElementById('root')!);
       try {
-        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':mode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:'guest',fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
         if(mode==='solution'){assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);assert.equal(document.querySelector('.results-panel'),null);continue;}
         assert.equal(requests,0,'opening a test must not fetch solutions');
         assert.equal(document.querySelector('.review-toggles .toggle'),null);
@@ -59,10 +62,10 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         const confirm=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Confirm submission')!;
         await act(async()=>confirm.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,1);
-        assert.match(document.querySelector('.results-panel')!.textContent!,/IELTS Academic Reading Band: 7\.0/);
+        assert.equal(document.querySelector('.results-panel'),null,'submission reveals answers without a blocking score modal');
+        assert.match(document.querySelector('.solution-score-banner')!.textContent!,/Band 7\.0/);
+        assert.equal(readAttempts(localStorage,owner).length,mode==='member'?1:0,'only signed-in results save quietly in history');
         assert.equal(document.querySelectorAll('.solution-score-banner button[aria-pressed]').length,2);
-        const review=[...document.querySelectorAll('button')].find(b=>b.textContent==='Review Test Questions with Answers')!;
-        await act(async()=>review.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.match(document.querySelector('.explanation-card')!.textContent!,/Correct answer: yes.*Source explanation/s);
         assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
       } finally {await act(async()=>root.unmount());}

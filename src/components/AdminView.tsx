@@ -1,3 +1,4 @@
+import {StorageOverview} from "./StorageOverview";
 import {Select} from "./Select";
 import {FolderPicker} from "./FolderPicker";
 import {folderOptions,folderLocation,testInFolder,type LibraryFolder} from "../services/folders";
@@ -211,7 +212,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           }}
         />
       </section>}
-      {section === "overview" && <><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
+      {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
       <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
       {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are imported as drafts by default, ready for review.</p></section>}
       {/* Test Bank & Archive Tab */}

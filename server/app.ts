@@ -1,3 +1,5 @@
+import {getStorage} from "firebase-admin/storage";
+import {summarizeFiles} from "../src/services/storageUsage";
 import { registerPortalRoutes } from "./portalRoutes";
 import express from "express";
 import { verifyIdentity } from "./identity";
@@ -39,11 +41,13 @@ function backend() {
           ? cert(JSON.parse(process.env.FIREBASE_SERVICE_ACCOUNT_JSON))
           : applicationDefault(),
         projectId: firebaseConfig.projectId,
+        storageBucket: firebaseConfig.storageBucket,
       },
       "READING_SERVER",
     );
   return {
     auth: getAuth(instance),
+    bucket: getStorage(instance).bucket(),
     db: getFirestore(
       instance,
       firebaseConfig.firestoreDatabaseId || "(default)",
@@ -150,7 +154,6 @@ app.post("/api/auth/sync", async (req, res) => {
 // Secure AI Dictionary & Vocabulary Lookup
 app.post("/api/dictionary", async (req, res) => {
   try {
-    await caller(req);
     if (!process.env.GEMINI_API_KEY)
       throw new AssessmentError(503, "Dictionary lookup is not configured.");
     const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
@@ -275,6 +278,43 @@ app.post("/api/admin/user-status", async (req, res) => {
   } catch (error) {
     apiError(res, error);
   }
+});
+
+// Inventory is owner-only and explicitly requested; no background polling or file downloads.
+app.post("/api/admin/storage-usage", async (req,res)=>{
+  try {
+    const {isAdmin}=await caller(req);
+    if(!isAdmin)throw new AssessmentError(403,"Administrator access required.");
+    const files:{name:string;size:number}[]=[];
+    let query:any={autoPaginate:false,maxResults:1000};
+    do {
+      const [page,next]=await backend().bucket.getFiles(query);
+      files.push(...page.map(file=>({name:file.name,size:Number(file.metadata.size)||0})));
+      query=next;
+    }while(query&&files.length<10000);
+    res.json({...summarizeFiles(files),truncated:Boolean(query),scannedAt:Date.now()});
+  }catch(error){
+    console.error("Storage inventory failed",error);
+    const message=error instanceof AssessmentError?error.message:"Uploaded file sizes are unavailable. The owner needs to configure server Firebase credentials with Storage Object Viewer access. Test content can still be measured below.";
+    res.status(error instanceof AssessmentError?error.status:503).json({error:message});
+  }
+});
+
+// Reports are available to guests; identity is derived only from the optional verified token.
+const reportLimits=new Map<string,{count:number;until:number}>();
+app.post("/api/content-report",async(req,res)=>{
+  try {
+    const {db,identity}=await optionalCaller(req);
+    const {testId,message,question,category}=req.body;
+    if(typeof testId!=="string"||!/^[-\w]{1,128}$/.test(testId)||typeof message!=="string"||!message.trim()||message.length>3000)throw new AssessmentError(400,"Please describe the issue in up to 3000 characters.");
+    const key=req.ip||"unknown",now=Date.now();
+    if(reportLimits.size>10000)for(const [id,entry]of reportLimits)if(entry.until<now)reportLimits.delete(id);
+    const entry=reportLimits.get(key);if(entry&&entry.until>now&&entry.count>=10)throw new AssessmentError(429,"Please wait before sending another report.");
+    reportLimits.set(key,{count:entry&&entry.until>now?entry.count+1:1,until:entry&&entry.until>now?entry.until:now+600000});
+    const meta=await db.doc(`tests/${testId}`).get();if(meta.data()?.status!=="published")throw new AssessmentError(404,"This test is unavailable.");
+    const id=randomUUID();await db.doc(`reports/${id}`).set({id,owner:identity?.uid||"guest",testId,testTitle:meta.data()?.title||"",message:message.trim(),question:Number.isInteger(question)?question:0,category:typeof category==="string"?category.slice(0,80):"content",status:"open",createdAt:now});
+    res.json({success:true});
+  }catch(error){apiError(res,error);}
 });
 
 registerPortalRoutes(app, {caller, backend, apiError});

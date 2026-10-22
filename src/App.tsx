@@ -1,3 +1,5 @@
+import {TestSetup} from "./components/TestSetup";
+import {directSession,examMinutes} from "./services/sessionSettings";
 import {SignInView} from "./components/SignInView";
 import {Select} from "./components/Select";
 import {testLink,resolveTestLink} from "./services/testLinks";
@@ -357,7 +359,7 @@ export default function App() {
           if(target.section&&!section)throw new Error("This passage is unavailable.");
           const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],title:section.title}:full;
           const params=new URL(location,'https://studio.local').searchParams;
-          setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(params.get('mode')==='exam'?'exam':'practice');setActiveDuration(params.has('minutes')?Math.max(0,Math.min(180,Number(params.get('minutes'))||0)):section?20:full.duration||60);setActivePreview(false);
+          const settings=directSession(params,chosen);setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(settings.mode);setActiveDuration(settings.minutes);setActivePreview(false);
           setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all"));
         } else if (page.name === "test" && page.id) {
           setPageLoading(true);
@@ -367,11 +369,11 @@ export default function App() {
           if(page.solution){navigate(testLink(test,page.section?{id:page.section,title:test.parts.find(p=>p.id===page.section)?.title||test.title}:null,true),true);return;}
           setSelectedTestFull(test);
           setSetupMode("practice");
-          setSetupTime(test.duration || 60);
+          setSetupTime(0);
           const sectionIndex = page.section ? test.parts.findIndex(p => p.id === page.section) : -1;
           if (page.section && sectionIndex < 0) throw new Error("This passage is unavailable.");
           setSetupSection(sectionIndex >= 0 ? sectionIndex : "all");
-          if (sectionIndex >= 0) setSetupTime(test.skill === "reading" ? 20 : 10);
+
         } else if (
           page.name === "workspace" &&
           page.session &&
@@ -545,7 +547,7 @@ export default function App() {
     if(!preview&&!testToStart.sourceSections?.length){
       const parent={id:testToStart.sourceTestId||testToStart.id,title:testToStart.title};
       const section=testToStart.sectionIds?.length===1?{id:testToStart.sectionIds[0],title:testToStart.parts[0].title}:null;
-      const path=testLink(parent,section);const params=new URLSearchParams();if(modeToUse==='exam')params.set('mode','exam');if(durationMinutes!==(section?20:testToStart.duration||60))params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
+      const path=testLink(parent,section);const params=new URLSearchParams();if(modeToUse==='exam')params.set('mode','exam');if(modeToUse==='practice'&&durationMinutes>0)params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
     }
     const launchId = createId();
     const safe = {
@@ -607,7 +609,7 @@ export default function App() {
       }
     }
 
-    const duration = setupMode === "exam" ? chosen.duration || 60 : setupTime;
+    const duration = setupMode === "exam" ? examMinutes(chosen) : setupTime;
     handleStartSession(chosen, setupMode, duration);
   };
 
@@ -921,7 +923,7 @@ export default function App() {
           />
         )}
         <TestWorkspace
-          key={`${profile.id}:${sessionId}:${activeMode}:${page.solution ? "solution" : "test"}`}
+          key={`${profile.id}:${sessionId}:${activeMode}:${activeDuration}:${page.solution ? "solution" : "test"}`}
           onRetake={()=>{const t=activeTest;try{localStorage.removeItem(`reading-room:v3:${profile.id}:${sessionId}:practice`);}catch{}navigate(testLink({id:t.sourceTestId||t.id,title:t.title},t.sectionIds?.length===1?{id:t.sectionIds[0],title:t.title}:null));}}
           initialSolution={page.name === "reading" && Boolean(page.solution)}
           sessionId={sessionId}
@@ -1055,9 +1057,9 @@ export default function App() {
             {route === "sign-in" && <SignInView location={location} onNavigate={navigate}/>}
             {route === "home" && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
             {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
-            
 
-            
+
+
             {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
             {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={false} text={false ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
@@ -1192,89 +1194,7 @@ export default function App() {
               )}
             {/* Dedicated test setup page */}
             {route === "test" && selectedTestFull && !pageLoading && (
-              <section className="studio-panel test-launch-page">
-                <div className="studio-modal-heading">
-                  <h2>{selectedTestFull.title}</h2>
-                  <button
-                    className="studio-quiet"
-                    onClick={() => setRoute("library")}
-                  >
-                    ✕
-                  </button>
-                </div>
-
-                <p>
-                  Configure your session. All tests are free. Sign in and submit at least 50% of the questions to save an attempt to your history.
-                </p>
-
-                <label className="studio-field">
-                  Session Mode
-                  <Select
-                    value={setupMode}
-                    onChange={(e) => setSetupMode(e.target.value as any)}
-                  >
-                    <option value="practice">
-                      Practice Mode — Flexible timing, solutions after submission
-                    </option>
-                    <option value="exam">
-                      Official Exam Mode — Timed, solutions hidden until
-                      submission
-                    </option>
-                  </Select>
-                </label>
-
-                <label className="studio-field">
-                  Test Section
-                  <Select
-                    value={setupSection}
-                    onChange={(e) => {
-                      const val = e.target.value;
-                      setSetupSection(val === "all" ? "all" : Number(val));
-                    }}
-                  >
-                    <option value="all">
-                      Complete Test (All {selectedTestFull.parts.length}{" "}
-                      sections)
-                    </option>
-                    {selectedTestFull.parts.map((p, idx) => (
-                      <option key={idx} value={idx}>
-                        Section {idx + 1}: {p.title}
-                      </option>
-                    ))}
-                  </Select>
-                </label>
-
-                <label className="studio-field">
-                  Time Limit
-                  <Select
-                    disabled={setupMode === "exam"}
-                    value={setupTime}
-                    onChange={(e) => setSetupTime(Number(e.target.value))}
-                  >
-                    <option value={15}>15 Minutes</option>
-                    <option value={20}>
-                      20 Minutes (Standard single passage)
-                    </option>
-                    <option value={60}>60 Minutes (Standard full test)</option>
-                    <option value={0}>Untimed Practice</option>
-                  </Select>
-                </label>
-
-                <div className="studio-actions" style={{ marginTop: "20px" }}>
-                  <button
-                    className="studio-primary"
-                    onClick={handleConfirmStartTest}
-                  >
-                    Start Session →
-                  </button>
-                  <button
-                    className="studio-secondary"
-                    onClick={() => setRoute("library")}
-                  >
-                    Cancel
-                  </button>
-                </div>
-              </section>
+              <TestSetup test={selectedTestFull} mode={setupMode} minutes={setupTime} section={setupSection} onMode={setSetupMode} onMinutes={setSetupTime} onSection={setSetupSection} onStart={handleConfirmStartTest} onClose={()=>setRoute("library")}/>
             )}
           </React.Suspense>
         </main>
