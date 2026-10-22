@@ -135,8 +135,8 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       <div className="studio-panel">
         <h3>Your Data, Your Ownership</h3>
         <p className="studio-lead">
-          All your test responses, personal vocabulary notebooks, and practice sessions sync to your
-          authenticated cloud Firestore account. You can export a full portable backup at any time.
+          Completed test results are saved on this device first. Sign in to sync your history with your
+          account. Session drafts stay on this device. You can export your study data below.
         </p>
 
         <div className="studio-actions" style={{ marginTop: '20px' }}>
@@ -165,3 +165,4 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
     </div>
   );
 };
+
