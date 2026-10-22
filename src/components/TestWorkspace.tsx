@@ -1,3 +1,5 @@
+import { countsAsAttempt } from "../services/portal";
+import { loginWithGoogle } from "../services/auth";
 import { passageTitle } from "../services/passageTitle";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
 import { createId } from "../services/ids";
@@ -137,6 +139,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const submissionRef = useRef(false);
   const pendingAttempt = useRef<AttemptRecord | null>(null);
   const [historyError, setHistoryError] = useState("");
+  const [historyNotice, setHistoryNotice] = useState("");
   const [reviewLoaded, setReviewLoaded] = useState(false);
   useEffect(() => {
     onSessionActive(!isPreview && (!scored || Boolean(historyError)));
@@ -340,7 +343,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     };
   }
   // Both modes use server keys or local deterministic scoring, saving progress to local storage.
-  const handleSubmit = async () => {
+  const handleSubmit = async (manual = true) => {
     if (scored) {
       setShowResultsModal(true);
       return;
@@ -383,6 +386,11 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setScored(true);
       setShowResultsModal(true);
 
+      if (!countsAsAttempt(submissionOwner, manual, data.result.total, responses, allQuestionNumbers)) {
+        setHistoryNotice(submissionOwner === "guest" ? "Sign in before submitting to save your score and history." : !manual ? "Time is up. This automatic review does not count as a submitted attempt." : "Answer at least 50% of the questions to count this as an attempt. Your score is still available below.");
+        return;
+      }
+      setHistoryNotice("This attempt is saved to your history.");
       const attemptRecord: AttemptRecord = {
         id: data.attemptId || attemptId,
         owner: submissionOwner,
@@ -423,7 +431,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setSubmitting(false);
     }
   };
-  submitLatest.current = handleSubmit;
+  submitLatest.current = () => handleSubmit(false);
 
   const ensureReviewKeys = async () => {
     if (!scored) return false;
@@ -1183,6 +1191,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </button>
           </div>
 
+          {historyNotice && <p className="studio-callout">{historyNotice} {profile.id === "guest" && <button className="studio-secondary" onClick={() => void loginWithGoogle().catch(error => onNotify(error.message))}>Sign in with Google</button>}</p>}
           <div className="result-score">
             {scoreResult.correct} / {scoreResult.gradable}
           </div>

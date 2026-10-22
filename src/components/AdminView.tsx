@@ -142,6 +142,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
 
         <div className="studio-actions">
+          <a className="studio-secondary" href="/admin/content">Quản lý bài viết</a>
+          <a className="studio-secondary" href="/admin/contributions">Duyệt đóng góp</a>
           <button className="studio-primary" onClick={onNewTest}>
             + New Test
           </button>

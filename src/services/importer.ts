@@ -21,6 +21,7 @@ export interface TestQuestion {
 
 export interface EditablePart {
   id: string;
+  position?: number;
   title: string;
   passageHtml: string;
   questionHtml: string;
@@ -57,6 +58,7 @@ export interface TestMeta {
   duration: number;
   passages: number;
   passageTitles?: string[];
+  sectionSummaries?: {id:string;index:number;title:string;questions:number;kinds:string[]}[];
   questions: number;
   updatedAt: number;
   createdAt?: number;
@@ -855,6 +857,7 @@ export function toEditable(
 
     parts.push({
       id: `p${partIndex}`,
+      position: Number(/(?:PASSAGE|SECTION|PART)\s*([1-4])\b/i.exec(part.topic_content.replace(/<[^>]*>/g," "))?.[1]) || partIndex + 1,
       title,
       passageHtml,
       questionHtml,

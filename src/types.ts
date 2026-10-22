@@ -34,6 +34,7 @@ export interface TestQuestion {
 
 export interface EditablePart {
   id: string;
+  position?: number;
   title: string;
   passageHtml: string;
   questionHtml: string;
@@ -70,6 +71,7 @@ export interface TestMeta {
   duration: number;
   passages: number;
   passageTitles?: string[];
+  sectionSummaries?: {id:string;index:number;title:string;questions:number;kinds:string[]}[];
   questions: number;
   updatedAt: number;
   createdAt?: number;
@@ -83,6 +85,7 @@ export interface UserProfile {
   email: string;
   name: string;
   target: number;
+  examDate?: string;
   language: 'en' | 'vi';
   theme: 'light' | 'dark';
   fontSize: number;

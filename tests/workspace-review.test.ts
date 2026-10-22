@@ -16,9 +16,10 @@ test('practice and exam hide solutions until submission, then show answer with e
   const output = join(temp,'workspace.cjs');
   try {
     await build({entryPoints:['src/components/TestWorkspace.tsx'], outfile:output, bundle:true, platform:'node', format:'cjs', packages:'external', plugins:[{name:'offline-workspace',setup(builder){
+      builder.onResolve({filter:/services\/auth$/},()=>({path:'auth',namespace:'offline'}));
       builder.onResolve({filter:/(?:^|\/)firebase$/},()=>({path:'firebase',namespace:'offline'}));
       builder.onResolve({filter:/services\/(assessmentClient|firestoreAdapter)$/},args=>({path:args.path.endsWith('assessmentClient')?'assessment':'store',namespace:'offline'}));
-      builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='firebase'?'export const auth={currentUser:null};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
+      builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={currentUser:null};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
     for (const mode of ['practice','exam']) {

@@ -164,17 +164,14 @@ function fakeWindow() {
   };
   return win;
 }
-test("cancelling Back restores the exact session URL and active warning", () => {
-  const win = fakeWindow(),
-    changed: string[] = [];
+test("Back and Forward restore the exact session URL without confirmation", () => {
+  const win = fakeWindow(), changed: string[] = [];
   const h = createBrowserHistory(win, (p: string) => changed.push(p));
-  h.navigate("/tests/t/take/s");
-  h.guard(true);
-  win.history.go(-1);
+  h.navigate("/tests/t/take/s"); h.guard(true); win.history.go(-1);
+  assert.equal(win.location.pathname, "/library");
+  win.history.go(1);
   assert.equal(win.location.pathname, "/tests/t/take/s");
-  assert.deepEqual(changed, ["/tests/t/take/s"]);
-  win.history.go(-1);
-  assert.equal(win.confirms, 2);
+  assert.equal(win.confirms, 0);
   h.destroy();
 });
 test("accepting Back navigates and removes the leave guard", () => {
@@ -195,7 +192,7 @@ test("accepting Back navigates and removes the leave guard", () => {
   assert.equal(event.prevented, false);
   h.destroy();
 });
-test("refresh and closing trigger the native beforeunload warning only in an active test", () => {
+test("refresh and closing do not ask for confirmation while drafts autosave", () => {
   const win = fakeWindow();
   const h = createBrowserHistory(win, () => {});
   h.guard(true);
@@ -206,8 +203,8 @@ test("refresh and closing trigger the native beforeunload warning only in an act
     },
   };
   win.emit("beforeunload", e);
-  assert.equal(e.prevented, true);
-  assert.equal(e.returnValue, true);
+  assert.equal(e.prevented, false);
+  assert.equal(e.returnValue, undefined);
   h.guard(false);
   const next = {
     prevented: false,
@@ -219,18 +216,19 @@ test("refresh and closing trigger the native beforeunload warning only in an act
   assert.equal(next.prevented, false);
   h.destroy();
 });
-test("cancelled internal navigation adds no history entry", () => {
+test("internal navigation proceeds without confirmation", () => {
   const win = fakeWindow();
   const h = createBrowserHistory(win, () => {});
   h.guard(true);
-  assert.equal(h.navigate("/settings"), false);
-  assert.equal(win.history.length, 1);
-  assert.equal(win.location.pathname, "/library");
+  assert.equal(h.navigate("/settings"), true);
+  assert.equal(win.history.length, 2);
+  assert.equal(win.location.pathname, "/settings");
+  assert.equal(win.confirms, 0);
   h.destroy();
 });
 test("cloud failure preserves local results and retries the same document ID", async () => {
   const s = memory();
-  saveAttempt(s, "guest", attempt());
+  saveAttempt(s, "alice", attempt("one", "alice"));
   const puts: string[] = [];
   let fail = true;
   const remote = {

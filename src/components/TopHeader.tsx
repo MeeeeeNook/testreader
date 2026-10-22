@@ -1,3 +1,4 @@
+import { Globe2 } from "lucide-react";
 import React, { useState } from "react";
 import { User } from "firebase/auth";
 import { UserProfile } from "../types";
@@ -45,7 +46,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           onClick={toggleLanguage}
           title={isVi ? "Chuyển sang tiếng Anh" : "Switch to Vietnamese"}
         >
-          {isVi ? "VI / EN" : "EN / VI"}
+          <Globe2 size={14}/> {isVi ? "VI / EN" : "EN / VI"}
         </button>
 
         <button
@@ -90,7 +91,7 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
               ? "Connecting…"
               : isVi
                 ? "Đăng nhập Google"
-                : "Sign in to sync"}
+                : "Sign in"}
           </button>
         )}
 
@@ -156,6 +157,10 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
                 {isVi ? "Hồ sơ học tập" : "Study Profile & Target"}
               </button>
 
+              <a className="studio-quiet" href="/history">{isVi ? "Lịch sử làm bài" : "My history"}</a>
+              <a className="studio-quiet" href="/vocabulary">{isVi ? "Sổ từ vựng" : "Vocabulary"}</a>
+              <a className="studio-quiet" href="/settings">{isVi ? "Cài đặt" : "Settings"}</a>
+              {role === "admin" && <><a className="studio-quiet" href="/admin">Admin Studio</a><a className="studio-quiet" href="/admin/content">Quản lý bài viết</a><a className="studio-quiet" href="/admin/contributions">Duyệt đóng góp</a><a className="studio-quiet" href="/admin/students">Học viên</a></>}
               <button
                 className="studio-quiet studio-danger"
                 style={{ textAlign: "left", width: "100%" }}

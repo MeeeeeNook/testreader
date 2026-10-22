@@ -5,3 +5,5 @@ import "./index.css";
 createRoot(document.getElementById("root")!).render(<App />);
 
 import "./studio-refresh.css";
+
+import "./portal.css";

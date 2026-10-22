@@ -1,3 +1,4 @@
+import { registerPortalRoutes } from "./server/portalRoutes";
 import express from "express";
 import { verifyIdentity } from "./server/identity";
 import { randomUUID } from "node:crypto";
@@ -279,6 +280,8 @@ app.post("/api/admin/user-status", async (req, res) => {
   }
 });
 
+registerPortalRoutes(app, {caller, backend, apiError});
+
 // Unknown API requests must never be served the frontend HTML with status 200.
 app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found. Check that the Express backend is deployed.", code: "API_ROUTE_NOT_FOUND" }));
 
@@ -304,4 +307,3 @@ async function startServer() {
 }
 
 startServer();
-
