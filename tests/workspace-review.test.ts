@@ -31,7 +31,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       const numbers=questions.map(q=>q.number);
       const keys=Object.fromEntries(questions.map(q=>[q.number,q]));
       const owner=mode==='member'?'student-one':'guest',actualMode=mode==='member'?'practice':mode;
-      storage.set(`reading-room:v3:${owner}:${mode}:${actualMode}`, JSON.stringify({responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
+      storage.set(`reading-room:v4:${owner}:${mode}:${actualMode}`, JSON.stringify({responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
       Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true,
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
         __workspaceUser:mode==='member'?{uid:owner}:null,
@@ -42,14 +42,26 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         }});
       const test={schemaVersion:1,id:'test-one',title:'Test',skill:'reading',access:'free',status:'published',source:'Forecast',duration:60,createdAt:1,updatedAt:1,parts:[{id:'p0',title:'Airborne Dentists',passageHtml:'<p>A passage.</p>',questionHtml:'<p>Question prompt</p><span data-slot="s0"></span>',slots:{s0:{id:'s0',type:'text',numbers:[1],label:'Complete the sentence',options:[]}},questions:questions.map(q=>({...q,answer:'',explanationHtml:''}))}]};
       const noop=()=>{};
-      const root=createRoot(document.getElementById('root')!);
+      let root=createRoot(document.getElementById('root')!);
       try {
         await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
-        if(mode==='solution'){assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);assert.equal(document.querySelector('.results-panel'),null);continue;}
+        if(mode==='solution'){
+          assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
+          await act(async()=>root.unmount());root=createRoot(document.getElementById('root')!);
+          await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:'practice',initialSolution:false,sessionId:mode,initialDurationMinutes:0,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+          assert.equal(requests,1,'practice must not request solutions after visiting the answer page');assert.equal(document.querySelector('.solution-score-banner'),null);assert.equal((document.querySelector('.fill-input') as HTMLInputElement).disabled,false);continue;
+        }
         assert.equal(requests,0,'opening a test must not fetch solutions');
         assert.equal(document.querySelector('.review-toggles .toggle'),null);
         assert.equal(document.querySelector('.explanation-card'),null);
         assert.equal(document.querySelector('.answer-tag'),null);
+        if(mode==='practice'){
+          const flagMode=document.querySelector('[aria-label="Flag questions"]')!;await act(async()=>flagMode.dispatchEvent(new window.Event('click',{bubbles:true})));
+          const question=document.querySelector('[aria-label="Question 1"]')!;await act(async()=>question.dispatchEvent(new window.Event('click',{bubbles:true})));
+          assert.ok(document.querySelector('[aria-label="Question 1, flagged"]'));assert.match(document.querySelector('.question-flag')!.getAttribute('aria-label')!,/Unflag/);
+          await act(async()=>document.querySelector('.question-flag')!.dispatchEvent(new window.Event('click',{bubbles:true})));
+          assert.equal(document.querySelector('[aria-label="Question 1, flagged"]'),null);
+        }
         const submit=[...document.querySelectorAll('button')].find(b=>b.textContent==='Submit test')!;
         await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,0,'pressing Submit must not grade before confirmation');

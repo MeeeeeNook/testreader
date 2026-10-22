@@ -69,6 +69,8 @@ export default function App() {
     cancelNavigation,
   } = usePageRouter();
   const route = page.name;
+  const setupBackground=useRef('/practice');
+  useEffect(()=>{if(['practice','library','full'].includes(route))setupBackground.current=location;},[route,location]);
   const [authReady, setAuthReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<
     "local" | "syncing" | "synced" | "offline"
@@ -91,7 +93,7 @@ export default function App() {
       return {
         name: "Learner",
         target: 7.5,
-        fontSize: 16,
+        fontSize: 18,
         favorites: [],
         ...saved,
         language: "en", theme: "light",
@@ -107,7 +109,7 @@ export default function App() {
         target: 7.5,
         language: "en",
         theme: "light",
-        fontSize: 16,
+        fontSize: 18,
         favorites: [],
         status: "active",
       };
@@ -208,7 +210,7 @@ export default function App() {
         setProfile({
           name: "Learner",
           target: 7.5,
-          fontSize: 16,
+          fontSize: 18,
           favorites: [],
           ...prefs,
           language: "en", theme: "light",
@@ -360,7 +362,7 @@ export default function App() {
           const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],title:section.title}:full;
           const params=new URL(location,'https://studio.local').searchParams;
           const settings=directSession(params,chosen);setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(settings.mode);setActiveDuration(settings.minutes);setActivePreview(false);
-          setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all"));
+          const attempt=params.get("attempt");setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all")+(attempt&&/^[\w-]{1,128}$/.test(attempt)?":"+attempt:""));
         } else if (page.name === "test" && page.id) {
           setPageLoading(true);
           setSelectedTestFull(null);
@@ -474,23 +476,20 @@ export default function App() {
   // Vocabulary handlers
   const handleSaveWord = async (word: Partial<VocabularyItem>) => {
     if (!user) { notify(false ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
-    const id = word.id || `voc_${Date.now()}`;
+    const duplicate=!word.id?vocabulary.find(item=>!item.archived&&item.word.toLowerCase()===word.word?.trim().toLowerCase()&&item.meaning===word.meaning?.trim()):undefined;
+    const id = word.id || duplicate?.id || createId();
     const item: VocabularyItem = {
       id,
       owner: profile.id,
       word: word.word?.trim() || "",
       meaning: word.meaning?.trim() || "",
       example: word.example?.trim() || "",
-      partOfSpeech: word.partOfSpeech || "noun",
+      partOfSpeech: word.partOfSpeech || "term",
       archived: word.archived || false,
       createdAt: word.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
-    if (user) {
-      try {
-        await firestoreAdapter.put("vocabulary", item);
-      } catch {}
-    }
+    await firestoreAdapter.put("vocabulary", item);
     setVocabulary((prev) => {
       const idx = prev.findIndex((w) => w.id === id);
       const next =
@@ -503,6 +502,7 @@ export default function App() {
       } catch {}
       return next;
     });
+    notify(`“${item.word}” saved to vocabulary.`);
   };
 
   const handleArchiveWord = async (wordId: string) => {
@@ -547,7 +547,7 @@ export default function App() {
     if(!preview&&!testToStart.sourceSections?.length){
       const parent={id:testToStart.sourceTestId||testToStart.id,title:testToStart.title};
       const section=testToStart.sectionIds?.length===1?{id:testToStart.sectionIds[0],title:testToStart.parts[0].title}:null;
-      const path=testLink(parent,section);const params=new URLSearchParams();if(modeToUse==='exam')params.set('mode','exam');if(modeToUse==='practice'&&durationMinutes>0)params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
+      const path=testLink(parent,section);const params=new URLSearchParams();params.set('attempt',createId());if(modeToUse==='exam')params.set('mode','exam');if(modeToUse==='practice'&&durationMinutes>0)params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
     }
     const launchId = createId();
     const safe = {
@@ -924,7 +924,7 @@ export default function App() {
         )}
         <TestWorkspace
           key={`${profile.id}:${sessionId}:${activeMode}:${activeDuration}:${page.solution ? "solution" : "test"}`}
-          onRetake={()=>{const t=activeTest;try{localStorage.removeItem(`reading-room:v3:${profile.id}:${sessionId}:practice`);}catch{}navigate(testLink({id:t.sourceTestId||t.id,title:t.title},t.sectionIds?.length===1?{id:t.sectionIds[0],title:t.title}:null));}}
+          onRetake={()=>handleStartSession(activeTest,'practice',0)}
           initialSolution={page.name === "reading" && Boolean(page.solution)}
           sessionId={sessionId}
           onSessionActive={setGuard}
@@ -942,7 +942,7 @@ export default function App() {
           onSaveVocabulary={handleSaveWord}
           onNotify={notify}
         />
-        {toastMessage && <div className="toast visible">{toastMessage}</div>}
+        {toastMessage && <div className="toast visible" role="status" aria-live="polite">{toastMessage}</div>}
       </>
     );
   }
@@ -1056,7 +1056,7 @@ export default function App() {
               )}
             {route === "sign-in" && <SignInView location={location} onNavigate={navigate}/>}
             {route === "home" && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
-            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
+            {["library", "practice", "full", "test"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"||(route==='test'&&setupBackground.current.startsWith('/full-tests'))} category={page.category} location={route==='test'?setupBackground.current:location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
 
 
 
@@ -1194,7 +1194,7 @@ export default function App() {
               )}
             {/* Dedicated test setup page */}
             {route === "test" && selectedTestFull && !pageLoading && (
-              <TestSetup test={selectedTestFull} mode={setupMode} minutes={setupTime} section={setupSection} onMode={setSetupMode} onMinutes={setSetupTime} onSection={setSetupSection} onStart={handleConfirmStartTest} onClose={()=>setRoute("library")}/>
+              <TestSetup test={selectedTestFull} mode={setupMode} minutes={setupTime} section={setupSection} onMode={setSetupMode} onMinutes={setSetupTime} onSection={setSetupSection} onStart={handleConfirmStartTest} onClose={()=>navigate(setupBackground.current)}/>
             )}
           </React.Suspense>
         </main>
@@ -1301,7 +1301,7 @@ export default function App() {
       )}
 
       {/* Toast Notification */}
-      {toastMessage && <div className="toast visible">{toastMessage}</div>}
+      {toastMessage && <div className="toast visible" role="status" aria-live="polite">{toastMessage}</div>}
     </div>
   );
 }

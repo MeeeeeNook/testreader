@@ -79,7 +79,7 @@ async function handleUserSync(user: User | null) {
   const role = roleForIdentity(user);
   const fallbackProfile: UserProfile = {
     id: user.uid, email: user.email || '', name: user.displayName || 'Learner',
-    target: 7.5, language: 'en', theme: 'light', fontSize: 16, favorites: [], status: 'active',
+    target: 7.5, language: 'en', theme: 'light', fontSize: 18, favorites: [], status: 'active',
   };
   // Make the owner portal available immediately, even if optional profile sync is offline.
   currentState = { user, profile: fallbackProfile, role, loading: false, suspended: false };
@@ -122,7 +122,7 @@ async function handleUserSync(user: User | null) {
         target: 7.5,
         language: "en",
         theme: "light",
-        fontSize: 16,
+        fontSize: 18,
         favorites: [],
         status: status as "active" | "suspended",
         createdAt: Date.now(),
@@ -151,7 +151,7 @@ async function handleUserSync(user: User | null) {
         target: 7.5,
         language: "en",
         theme: "light",
-        fontSize: 16,
+        fontSize: 18,
         favorites: [],
         status: "active",
       },
