@@ -6,7 +6,7 @@ import type { TestMeta, UserProfile, AttemptRecord } from '../types';
 import { catalogSections, questionTypes, answerPath, matchesSource } from '../services/portal';
 import { compareTests, allFolderPaths, sortOptions } from '../services/catalog';
 export function PracticeCatalog({tests,profile,attempts,full=false,category='',location,onNavigate,loadSummary}:{tests:TestMeta[];profile:UserProfile;attempts:AttemptRecord[];full?:boolean;category?:string;location:string;onNavigate:(path:string,replace?:boolean)=>void;loadSummary?:(test:TestMeta)=>Promise<Partial<TestMeta>>}) {
- const vi=profile.language==='vi', params=new URL(location,'https://studio.local').searchParams;
+ const vi=false, params=new URL(location,'https://studio.local').searchParams;
  const skill=params.get('skill')==='listening'?'listening':'reading', q=params.get('q')||'', source=params.get('source')||'', order=params.get('sort')||'new', part=params.get('part')||'', kinds=(params.get('types')||'').split(',').filter(Boolean), done=params.get('done')||'';
  const path=full?`/full-tests${category?'/'+category:''}`:'/practice';
  const update=(values:Record<string,string>)=>{const next=new URLSearchParams(params);Object.entries(values).forEach(([k,v])=>v?next.set(k,v):next.delete(k));if(!('page' in values))next.delete('page');onNavigate(path+(next.size?'?'+next:''));};
@@ -46,3 +46,4 @@ export function PracticeCatalog({tests,profile,attempts,full=false,category='',l
  {pages>1&&<nav className="portal-pagination" aria-label="Catalog pages"><button disabled={!page} onClick={()=>update({page:String(page-1)})}>←</button><span>{page+1} / {pages}</span><button disabled={page>=pages-1} onClick={()=>update({page:String(page+1)})}>→</button></nav>}
  </section></div></div>;
 }
+

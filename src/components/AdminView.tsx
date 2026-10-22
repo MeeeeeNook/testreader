@@ -1,3 +1,5 @@
+import {FolderManager} from "./FolderManager";
+import {Plus,Upload,LayoutDashboard,Files,Folder,Users} from "lucide-react";
 import {catalogIssues} from "../services/testAudit";
 import { FolderBrowser } from "./FolderBrowser";
 import { compareTests, inFolder, folderPath, sortOptions, allFolderPaths, planFolderMove } from "../services/catalog";
@@ -7,6 +9,7 @@ import { TestMeta, ContentReport, UserProfile } from "../types";
 
 interface AdminViewProps {
   section?: string;
+  onDeleteFolders?: (ids:string[])=>Promise<void>;
   onNavigate?: (path:string)=>void;
   tests: TestMeta[];
   reports: ContentReport[];
@@ -37,7 +40,7 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({
-  section="tests",onNavigate,
+  section="tests",onNavigate,onDeleteFolders,
   tests,
   reports,
   learners,
@@ -133,7 +136,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   });
 
   return (
-    <div style={{ paddingBottom: "40px" }}>
+    <div className="admin-page" style={{ paddingBottom: "40px" }}>
       {renameTest && <dialog open className="studio-modal admin-rename-dialog" aria-label="Rename test"><form onSubmit={e=>{e.preventDefault();if(!newTitle.trim()||!onRenameTest)return;const id=renameTest.id;void run(async()=>{await onRenameTest(id,newTitle.trim());setRenameTest(null);});}}><h2>Rename test</h2><input aria-label="New test title" value={newTitle} onChange={e=>setNewTitle(e.target.value)} required maxLength={250}/><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setRenameTest(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save title</button></div></form></dialog>}
       {deleteIds.length > 0 && (
         <ConfirmActionDialog
@@ -155,18 +158,18 @@ export const AdminView: React.FC<AdminViewProps> = ({
       <div className="studio-page-head">
         <div>
           <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
-          <h1 className="studio-heading">{{overview:"Tổng quan",tests:"Đề thi",folders:"Thư mục",upload:"Upload & Import",reports:"Báo lỗi nội dung",users:"Học viên",archive:"Kho lưu trữ",trash:"Thùng rác"}[section]||"Admin Studio"}</h1>
+          <h1 className="studio-heading">{{overview:"Overview",tests:"Tests",folders:"Folders",upload:"Upload & Import",reports:"Content reports",users:"Students",archive:"Archive",trash:"Trash"}[section]||"Admin Studio"}</h1>
           <p className="studio-lead">
-            {{overview:"Quản lý thư viện, nội dung và tiến độ học viên ở một nơi.",tests:"Tìm kiếm, chỉnh sửa, xuất bản và quản lý nhiều đề cùng lúc.",folders:"Sắp xếp nguồn đề theo thư mục và thư mục con. Chọn thư mục để xem và di chuyển đề.",upload:"Chọn file hoặc kéo thả để xem trước. Chỉ lưu lên Firebase sau khi xác nhận.",reports:"Theo dõi và giải quyết lỗi nội dung do học viên gửi.",users:"Quản lý tài khoản và truy cập kết quả của học viên.",archive:"Các đề tạm ngừng sử dụng. Khôi phục khi cần.",trash:"Khôi phục những đề đã xóa khỏi thư viện."}[section]}
+            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Organise sources into folders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests removed from the library."}[section]}
           </p>
         </div>
 
         <div className="studio-actions">
           <button className="studio-primary" onClick={onNewTest}>
-            + New Test
+            <Plus size={16}/> New test
           </button>
           <button className="studio-secondary" onClick={onOpenUpload}>
-            Upload Files (ZIP/HTML/JSON)
+            <Upload size={16}/> Import tests
           </button>
         </div>
       </div>
@@ -205,8 +208,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
         />
       </section>}
       {section === "overview" && <><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
-      <div className="admin-overview-grid"><section className="studio-panel"><h2>Bắt đầu quản lý</h2><p>Nhập đề mới, sắp xếp bộ đề theo thư mục và kiểm tra nội dung trước khi xuất bản.</p><div className="admin-shortcuts">{[['/admin/upload','Upload đề mới','Xem trước và chọn đề trước khi import'],['/admin/folders','Sắp xếp thư mục','Quản lý nguồn đề và các thư mục con'],['/admin/tests','Quản lý đề thi','Chỉnh sửa, xuất bản và thao tác hàng loạt'],['/admin/students','Theo dõi học viên','Xem lịch sử và kết quả làm bài']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} →</strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Cần xử lý</h2><p>{reports.filter(r=>r.status==='open').length} báo lỗi chưa giải quyết</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} đề cần kiểm tra nội dung</p><p>{trashedTests.length} đề trong thùng rác</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Xem báo lỗi</button></section></div></>}
-      {section === "upload" && <section className="studio-panel"><h2>Kiểm tra trước khi nhập</h2><ol><li>Chọn ZIP, HTML, JSON hoặc cả thư mục.</li><li>Xem trước danh sách đề, passage, câu hỏi và cảnh báo.</li><li>Chọn đề cần nhập, tên, thư mục và trạng thái.</li><li>Xác nhận để tải ảnh và lưu đề lên Firebase.</li></ol><p>Mặc định nhập thành bản nháp để mình kiểm tra trước khi xuất bản.</p></section>}
+      <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
+      {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are imported as drafts by default, ready for review.</p></section>}
       {/* Test Bank & Archive Tab */}
       {(tab === "tests" || tab === "archive" || tab === "trash") && (
         <div className="studio-panel">
@@ -224,7 +227,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </button>
           </div>
 
-          {section === "folders" && <FolderBrowser tests={tab === "trash" ? trashedTests : tab === "archive" ? archivedTests : activeTests} value={collectionFilter} onChange={path => {setCollectionFilter(path);setRenamePath(path);setSelected([]);}} />}
+          {section === "folders" && <FolderManager tests={tests} value={collectionFilter} onOpen={path=>{setCollectionFilter(path);setRenamePath(path);setSelected([]);}} onDelete={onDeleteFolders|| (async ids=>{for(const id of ids)await onDeleteTest(id);})}/>}
           <div className="admin-filters">
             <label>Skill<select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></select></label>
             <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
@@ -255,7 +258,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               View student attempts
             </button>
           </div>
-          <p className="studio-lead">Select tests and move them to a folder path, for example Forecast / 2026 / Quý 3. New paths create folders; / adds a subfolder.</p>
+          <p className="studio-lead">Select tests and move them to a folder path, for example Forecast / 2026 / Q3. New paths create folders; / adds a subfolder.</p>
           {onRefreshTitles && tab !== "trash" && <button className="studio-secondary" disabled={busy || !filteredTests.length} onClick={() => void run(() => onRefreshTitles(selected.length ? selected : filteredTests.map(t => t.id)))}>Update passage titles</button>}
           <label><input type="checkbox" checked={recursive} onChange={e => {setRecursive(e.target.checked);setSelected([]);}} /> Include subfolders</label>
           {collectionFilter && tab !== "trash" && <form className="folder-management" onSubmit={e => {
@@ -269,7 +272,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               onNotify("Folder and subfolders moved.");
             });
           }}>
-            <label>Rename or move this folder<input aria-label="New folder path" value={renamePath} onChange={e => setRenamePath(e.target.value)} placeholder="Forecast / 2026 / Quý 3" /></label>
+            <label>Rename or move this folder<input aria-label="New folder path" value={renamePath} onChange={e => setRenamePath(e.target.value)} placeholder="Forecast / 2026 / Q3" /></label>
             <button className="studio-secondary" disabled={busy || !renamePath.trim()} type="submit">Save folder path</button>
           </form>}
           {selected.length > 0 && (
@@ -283,7 +286,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   list="existing-collections"
                   value={collection}
                   onChange={(e) => setCollection(e.target.value)}
-                  placeholder="Forecast / 2026 / Quý 3"
+                  placeholder="Forecast / 2026 / Q3"
                 />
               </label>
               <datalist id="existing-collections">
@@ -632,3 +635,4 @@ export const AdminView: React.FC<AdminViewProps> = ({
     </div>
   );
 };
+

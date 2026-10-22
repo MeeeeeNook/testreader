@@ -35,8 +35,13 @@ function notify() {
 }
 
 export async function loginWithGoogle(): Promise<User> {
-  const result = await signInWithPopup(auth, googleProvider);
-  return result.user;
+  try {
+    const result = await signInWithPopup(auth, googleProvider);
+    return result.user;
+  } catch (error) {
+    if ((error as {code?:string}).code === "auth/unauthorized-domain") throw new Error("Google sign-in is not enabled for " + window.location.hostname + ". The owner needs to add this domain in Firebase Console → Authentication → Settings → Authorized domains.");
+    throw error;
+  }
 }
 
 export async function logout(): Promise<void> {
@@ -167,3 +172,4 @@ export function subscribeAuth(callback: AuthCallback): () => void {
 onAuthStateChanged(auth, async (user) => {
   await handleUserSync(user);
 });
+

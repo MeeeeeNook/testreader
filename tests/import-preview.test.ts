@@ -28,10 +28,10 @@ test('preview does not import on open and confirmation sends only selected tests
   assert.equal(confirmed.length,0);assert.ok(document.querySelector('dialog[open]'));assert.equal(document.querySelector('iframe')?.getAttribute('sandbox'),'');
   const checks=[...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   await act(async()=>{checks[1].checked=false;checks[1].dispatchEvent(new window.Event("click",{bubbles:true}));});
-  const submit=[...document.querySelectorAll('button')].find(b=>b.textContent?.startsWith('Xác nhận import'))!;
+  const submit=[...document.querySelectorAll('button')].find(b=>b.textContent?.startsWith('Confirm import'))!;
   await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
   assert.equal(confirmed.length,1);assert.equal(confirmed[0].length,1);assert.equal(confirmed[0][0].test.status,'draft');assert.equal(confirmed[0][0].test.id,plan.candidates[0].test.id);
-  const cancel=[...document.querySelectorAll('button')].find(b=>b.textContent==='Hủy import')!;
+  const cancel=[...document.querySelectorAll('button')].find(b=>b.textContent==='Cancel import')!;
   await act(async()=>cancel.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(cancelled,1);
  }finally{await act(async()=>root.unmount());disposeImport(plan);}
 });
@@ -40,3 +40,4 @@ test('admin sidebar points to separate reloadable pages with active page state',
  const html=renderToStaticMarkup(React.createElement(AdminSidebar,{location:'/admin/folders',onNavigate:()=>{}}));
  assert.match(html,/href="\/admin\/folders" aria-current="page"/);assert.match(html,/href="\/admin\/upload"/);assert.match(html,/href="\/admin\/students"/);
 });
+

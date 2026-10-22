@@ -19,7 +19,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
   const [search, setSearch] = useState('');
   const [editingWord, setEditingWord] = useState<Partial<VocabularyItem> | null>(null);
 
-  const isVi = profile.language === 'vi';
+  const isVi = false;
 
   const activeWords = useMemo(() => {
     return vocabulary
@@ -271,3 +271,4 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
     </div>
   );
 };
+

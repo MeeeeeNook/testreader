@@ -634,8 +634,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       style={{ "--study-font-size": `${textSize}px` } as React.CSSProperties}
       onMouseUp={handleMouseUp}
     >
-      {confirmSubmit && <ConfirmActionDialog title={profile.language === "vi" ? "Nộp bài?" : "Submit your test?"} confirmLabel={profile.language === "vi" ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
-        {profile.language === "vi" ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
+      {confirmSubmit && <ConfirmActionDialog title={false ? "Nộp bài?" : "Submit your test?"} confirmLabel={false ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
+        {false ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
       </ConfirmActionDialog>}
       {resetAction && (
         <ConfirmActionDialog
@@ -1426,3 +1426,4 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     </div>
   );
 };
+
