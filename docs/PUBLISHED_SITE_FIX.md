@@ -12,7 +12,7 @@ Select several folders on Admin → Folders, then choose Delete folders. The con
 
 The previous Vercel build served static Vite output without a deep-link fallback. Opening /admin or following ordinary account/answer links returned Vercel NOT_FOUND before React could load.
 
-vercel.json now routes application pages to index.html, API requests to api/index.ts, and public article/answer-landing routes plus sitemap/robots to Express. The same Express app is exported from server/app.ts and reused by both Vercel and the existing AI Studio server.ts startup. Importing the Vercel handler does not open a listening port or load Vite.
+vercel.json now routes application pages to index.html, API requests to api/index.js, and public article/answer-landing routes plus sitemap/robots to Express. The production build bundles server/app.ts and its local imports into this JavaScript entry. The same Express app is reused by both Vercel and the existing AI Studio server.ts startup. Importing the Vercel handler does not open a listening port or load Vite.
 
 GET /api/health returns JSON identifying the backend. Unknown API paths return JSON 404 instead of frontend HTML. Answer landing pages retain their existing post-submission answer policy.
 
@@ -30,5 +30,5 @@ Optionally set PUBLIC_SITE_URL=https://ielts.vungocmanhcuong.id.vn for sitemap a
 
 TypeScript, production frontend/server builds and 85 automated tests passed. Tests cover nested folder boundaries and overlap, cancel/confirm deletion, preservation of existing Trash behavior, English rendering for legacy Vietnamese/dark profiles, and the actual serverless entry's health/401/JSON404 responses.
 
-Browser checks on the old public deployment reproduced the direct /admin and /answers/... 404s. Local browser access is unavailable from the browser environment; local HTTP integration tests cover the backend instead. Live owner sign-in, uploads and scoring require the user's authenticated session and correctly configured Firebase runtime.
+Browser checks on the old public deployment reproduced the direct /admin and /answers/... 404s. Local browser access is unavailable from the browser environment; local HTTP integration tests cover the backend instead. After merging PRs #9 and #10, Vercel deployed successfully. Live checks confirmed the English homepage and settings, the owner guard on a direct /admin visit, and JSON success from /api/health. An answer landing still returned its Firebase-data-unavailable message. Runtime log inspection is blocked by Vercel connector scope (403), so server credentials/database permissions remain unverified. Live owner sign-in, uploads and scoring require the user's authenticated session and correctly configured Firebase runtime.
 
