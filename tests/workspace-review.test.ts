@@ -10,7 +10,7 @@ import { parseHTML } from 'linkedom';
 import { scoreTest, estimatedBand } from '../src/services/scoring.ts';
 
 // Exercise the actual workspace with isolated network adapters, not a second UI implementation.
-test('practice and exam hide solutions until submission, then show answer with explanation and band', async () => {
+test('practice and exam require submit confirmation, allow cancellation, and reveal grading only after confirming', async () => {
   const cache = resolve('node_modules/.cache'); mkdirSync(cache, {recursive:true});
   const temp = mkdtempSync(join(cache,'workspace-test-'));
   const output = join(temp,'workspace.cjs');
@@ -48,6 +48,15 @@ test('practice and exam hide solutions until submission, then show answer with e
         assert.equal(document.querySelector('.answer-tag'),null);
         const submit=[...document.querySelectorAll('button')].find(b=>b.textContent==='Submit & Review')!;
         await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
+        assert.equal(requests,0,'pressing Submit must not grade before confirmation');
+        assert.ok(document.querySelector('dialog[open]'));
+        const cancel=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Cancel')!;
+        await act(async()=>cancel.dispatchEvent(new window.Event('click',{bubbles:true})));
+        assert.equal(requests,0);
+        assert.equal(document.querySelector('.results-panel'),null);
+        await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
+        const confirm=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Confirm submission')!;
+        await act(async()=>confirm.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,1);
         assert.match(document.querySelector('.results-panel')!.textContent!,/IELTS Academic Reading Band: 7\.0/);
         assert.equal(document.querySelectorAll('.review-toggles .toggle').length,2);

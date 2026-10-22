@@ -90,3 +90,20 @@ test("Delete opens a visible confirmation and moves only the confirmed test to T
   assert.deepEqual(deleted, ["one"]);
   await act(async () => root.unmount());
 });
+
+test('admin paginates large libraries and duplicates only the requested test as a draft',async()=>{
+ const {window}=parseHTML('<html><body><div id="app"></div></body></html>');
+ Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true});
+ const duplicated:string[]=[];
+ const tests=Array.from({length:30},(_,i)=>({...testMeta,id:String(i),title:`Test ${i+1}`}));
+ const root=createRoot(document.getElementById('app')!);
+ try {
+  await act(async()=>root.render(React.createElement(AdminView,{...props,tests,onDuplicateTest:async id=>{duplicated.push(id);},onRenameTest:async()=>{},onExportSelected:async()=>{}})));
+  assert.equal(document.querySelectorAll('tbody tr').length,25);
+  const click=async(label:string)=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===label)!;assert.ok(b,label);await act(async()=>b.dispatchEvent(new window.Event('click',{bubbles:true})));};
+  await click('Next →');assert.equal(document.querySelectorAll('tbody tr').length,5);
+  await click('Duplicate draft');assert.equal(duplicated.length,1);assert.ok(tests.some(t=>t.id===duplicated[0]));
+  await click('Rename');assert.ok(document.querySelector('dialog[aria-label="Rename test"] input'));
+  await click('Cancel');assert.equal(document.querySelector('dialog'),null);
+ }finally{await act(async()=>root.unmount());}
+});

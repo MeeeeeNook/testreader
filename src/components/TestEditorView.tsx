@@ -1,3 +1,5 @@
+import {auditTest} from "../services/testAudit";
+import {passageTitle} from "../services/passageTitle";
 import React, { useState } from 'react';
 import { EditableTest, EditablePart, TestQuestion, TestSlot } from '../types';
 import { firestoreAdapter } from '../services/firestoreAdapter';
@@ -25,6 +27,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
   const [saving, setSaving] = useState(false);
 
   const part = test.parts[currentPartIndex] || test.parts[0];
+  const issues = auditTest(test);
 
   const updatePart = (updater: (p: EditablePart) => void) => {
     setTest((prev) => {
@@ -225,6 +228,10 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
         </div>
       </div>
 
+      <details className="studio-panel test-audit" open={issues.length > 0}>
+        <summary>Content check · {issues.length ? `${issues.length} items to review` : "Ready"}</summary>
+        {issues.length ? <ul>{issues.map((issue,index)=><li key={index}>{issue}</li>)}</ul> : <p>Titles, answer keys and controls are present.</p>}
+      </details>
       {/* Meta Properties Panel */}
       <div className="studio-panel">
         <div className="studio-form-grid">
@@ -288,13 +295,17 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
       <div className="studio-panel">
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '14px' }}>
           <label className="studio-field" style={{ margin: 0, flex: 1, maxWidth: '400px' }}>
-            Section Title
+            Passage / Section Title
             <input
               value={part.title}
               onChange={(e) => updatePart((p) => { p.title = e.target.value; })}
             />
           </label>
 
+          <label className="studio-field" style={{margin:"0 15px"}}>Passage / Section number
+            <select value={part.position || currentPartIndex + 1} onChange={e=>updatePart(p=>{p.position=Number(e.target.value);})}>{Array.from({length:test.skill==='reading'?3:4},(_,i)=><option key={i} value={i+1}>{i+1}</option>)}</select>
+          </label>
+          <button className="studio-secondary" onClick={()=>updatePart(p=>{p.title=passageTitle(p.passageHtml,'',currentPartIndex);})}>Detect title</button>
           <button
             className="studio-quiet studio-danger"
             onClick={handleRemoveSection}

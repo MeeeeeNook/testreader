@@ -925,7 +925,6 @@ export default function App() {
   if (route === "workspace" && activeTest && page.session === sessionId) {
     return (
       <>
-        {activeMode === "practice" && <PortalHeader route="practice" user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />}
         {pendingNavigation && (
           <LeaveTestDialog
             onStay={cancelNavigation}
@@ -1061,7 +1060,7 @@ export default function App() {
                 </div>
               )}
             {route === "home" && <HomeView tests={tests} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
-            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={tests} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} />}
+            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={tests} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
             {route === "knowledge" && <KnowledgeView profile={profile} location={location} onNavigate={navigate} />}
             {route === "forum" && <ForumView profile={profile} />}
             {route === "contribute" && <ContributionView profile={profile} />}
@@ -1136,6 +1135,20 @@ export default function App() {
                 onSetCollection={(ids, collection) =>
                   handleTestMeta(ids, { source: collection })
                 }
+                onRenameTest={(id,title)=>handleTestMeta([id],{title})}
+                onDuplicateTest={async id=>{
+                  const original=await firestoreAdapter.getTestComplete(id);
+                  const {sourceTestId,sectionIds,sourceSections,...copy}=original;
+                  const duplicate={...copy,id:`test_${createId()}`,title:`${copy.title} (copy)`.slice(0,250),status:"draft" as const,access:"free" as const,createdAt:Date.now(),updatedAt:Date.now()};
+                  await firestoreAdapter.saveTestComplete(duplicate);
+                  await loadData();notify("A draft copy was created.");
+                }}
+                onExportSelected={async ids=>{
+                  const records=[];
+                  for(const id of ids)records.push(await firestoreAdapter.getTestComplete(id));
+                  const url=URL.createObjectURL(new Blob([JSON.stringify({format:"ielts-studio-backup",tests:records},null,2)],{type:"application/json"}));
+                  const a=document.createElement("a");a.href=url;a.download="IELTS_Selected_Tests.json";a.click();setTimeout(()=>URL.revokeObjectURL(url),10000);
+                }}
                 onRefreshTitles={async ids => {
                   for (const id of ids) {
                     const full = await firestoreAdapter.getTestComplete(id);

@@ -55,6 +55,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
+  const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [resetAction, setResetAction] = useState<"reset" | "restart" | null>(
     null,
   );
@@ -633,6 +634,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       style={{ "--study-font-size": `${textSize}px` } as React.CSSProperties}
       onMouseUp={handleMouseUp}
     >
+      {confirmSubmit && <ConfirmActionDialog title={profile.language === "vi" ? "Nộp bài?" : "Submit your test?"} confirmLabel={profile.language === "vi" ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
+        {profile.language === "vi" ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
+      </ConfirmActionDialog>}
       {resetAction && (
         <ConfirmActionDialog
           title={
@@ -968,7 +972,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               <button
                 className="studio-primary"
                 disabled={submitting || isLegacyBroken}
-                onClick={() => void handleSubmit()}
+                onClick={() => scored ? setShowResultsModal(true) : setConfirmSubmit(true)}
                 style={{ padding: "8px 16px", fontSize: "12px" }}
               >
                 {scored ? "Review Score" : "Submit & Review"}
