@@ -1,3 +1,4 @@
+import {DictionaryPanel} from "./DictionaryPanel";
 import {Select} from "./Select";
 import React, { useState, useMemo } from 'react';
 import { VocabularyItem, UserProfile } from '../types';
@@ -18,6 +19,8 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
   onNotify,
 }) => {
   const [search, setSearch] = useState('');
+  const [lookupWord,setLookupWord]=useState<VocabularyItem|null>(null);
+  const [saveError,setSaveError]=useState('');
   const [editingWord, setEditingWord] = useState<Partial<VocabularyItem> | null>(null);
 
   const isVi = false;
@@ -64,9 +67,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
       onNotify('Please enter a word or phrase.');
       return;
     }
-    await onSaveWord(editingWord);
-    setEditingWord(null);
-    onNotify('Word saved to notebook.');
+    try {await onSaveWord(editingWord);setEditingWord(null);setSaveError('');}catch(error){setSaveError((error as Error).message);}
   };
 
   return (
@@ -122,7 +123,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
             <article key={item.id} className="test-card" style={{ minHeight: '190px' }}>
               <div className="card-top">
                 <span className="studio-tag" style={{ textTransform: 'uppercase' }}>
-                  {item.partOfSpeech || 'term'}
+                  {item.meaning.trim()?item.partOfSpeech||'term':'Needs definition'}
                 </span>
                 <button
                   className="studio-quiet"
@@ -136,8 +137,8 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
               <h3 style={{ margin: '14px 0 8px', fontSize: '20px' }}>{item.word}</h3>
 
               <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--studio-ink)', lineHeight: '1.6' }}>
-                {item.meaning}
-              </p>
+                {item.meaning||'No definition saved.'}
+              </p>{!item.meaning.trim()&&<button className="quiet-button" onClick={()=>setLookupWord(item)}>Look up definition</button>}
 
               {item.example && (
                 <p
@@ -181,6 +182,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
         </div>
       )}
 
+      {lookupWord&&<DictionaryPanel initialWord={lookupWord.word} sourceContext={lookupWord.example} saveIntent onClose={()=>setLookupWord(null)} onSave={async entry=>{await onSaveWord({...lookupWord,...entry});}}/>}
       {/* Add / Edit Word Modal */}
       {editingWord && (
         <dialog
@@ -195,7 +197,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
             </button>
           </div>
 
-          <form onSubmit={handleSubmitWord}>
+          <form onSubmit={handleSubmitWord}>{saveError&&<p role="alert">{saveError}</p>}
             <label className="studio-field">
               Word / Phrase
               <input

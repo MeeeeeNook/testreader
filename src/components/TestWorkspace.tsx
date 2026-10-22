@@ -1,3 +1,6 @@
+import {Modal} from "./Modal";
+import {FontSizeSlider,readingSize} from "./FontSizeSlider";
+import {readerSessionKey,readReaderSession} from "../services/readerSession";
 import {requestJson} from "../services/apiRequest";
 import {ListeningAudio} from "./ListeningAudio";
 import {Select} from "./Select";
@@ -5,7 +8,7 @@ import {paintHighlights,selectionOffsets} from "../services/highlights";
 import {DictionaryPanel} from "./DictionaryPanel";
 import {ExportDialog} from "./ExportDialog";
 import {testLink} from "../services/testLinks";
-import {BookOpen,Printer,NotebookPen,Flag,Settings2,Library,ChevronLeft,ChevronRight,AlarmClock,Pause,Play,Bug,Infinity as InfinityIcon} from "lucide-react";
+import {BookOpen,Printer,NotebookPen,Flag,Settings2,ArrowLeft,RotateCcw,ChevronLeft,ChevronRight,AlarmClock,Pause,Play,Bug,Infinity as InfinityIcon} from "lucide-react";
 import { loginWithGoogle } from "../services/auth";
 import { passageTitle } from "../services/passageTitle";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
@@ -67,6 +70,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onNotify,
 }) => {
   const [dictionaryWord,setDictionaryWord]=useState<string|null>(null);
+  const [dictionaryContext,setDictionaryContext]=useState(''),[dictionarySaveIntent,setDictionarySaveIntent]=useState(false);
   const [showExport,setShowExport]=useState(false);
   const [paneWidth,setPaneWidth]=useState(50);
   const splitRef=useRef<HTMLDivElement>(null);
@@ -77,20 +81,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     null,
   );
   const [textSize, setTextSize] = useState(
-    Math.max(18, profile.fontSize || 18),
+    readingSize(profile.fontSize),
   );
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
-  const sessionKey = `reading-room:v3:${profile.id}:${sessionId}:${mode}${isPreview ? ":preview" : ""}`;
-  const [savedSession] = useState(() => {
-    try {
-      const saved = JSON.parse(localStorage.getItem(sessionKey) || "{}");
-      return saved && typeof saved === "object" && !Array.isArray(saved)
-        ? saved
-        : {};
-    } catch {
-      return {};
-    }
-  });
+  const sessionKey = readerSessionKey(profile.id,sessionId,mode,initialSolution,isPreview);
+  const [savedSession] = useState(()=>readReaderSession(localStorage,sessionKey,initialSolution));
+  const [flagMode,setFlagMode]=useState(false);
   const [responses, setResponses] = useState<Record<string | number, string>>(
     savedSession.responses || {},
   );
@@ -164,7 +160,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   useEffect(() => {
     onSessionActive(!isPreview && !initialSolution && (!scored || Boolean(historyError)));
     return () => onSessionActive(false);
-  }, [isPreview, scored, historyError, onSessionActive]);
+  }, [isPreview, initialSolution, scored, historyError, onSessionActive]);
   const originalPart = test.parts[currentPartIndex] || test.parts[0];
   const part: EditablePart = {
     ...originalPart,
@@ -189,6 +185,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   // Save the exact session for refresh/recovery, including completed exams.
   useEffect(() => {
+    if(initialSolution)return;
     const persist = () => {
       try {
         localStorage.setItem(
@@ -219,6 +216,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     };
   }, [
     sessionKey,
+    initialSolution,
     responses,
     flags,
     notes,
@@ -496,7 +494,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         disabled={initialSolution || submitting || scored}
         onChange={handleInputChange}
         onMultiChange={handleMultiChoiceChange}
-      />{scored&&(showAnswers||showExplanations)&&slot.numbers.map(n=>{const q=part.questions.find(q=>q.number===n);if(!q)return null;const row=scoreResult?.rows.find(r=>r.number===n);return <span className="slot-solution" key={n}>{showAnswers&&<span className="solution-answer"><strong>Answer {n}:</strong> {q.answer?.split('||').join(' / ')||'Not provided'} {row&&<small data-score={row.status}>{row.status==='correct'?'Correct':row.response?'Your answer: '+row.response:'Unanswered'}</small>}</span>}{q.referenceQuote&&<button className="quiet-button" onClick={()=>handleLocateQuote(q.referenceQuote!)}>Locate in passage</button>}{showExplanations&&q.explanationHtml&&<details className="explanation-card" open><summary>Explanation · Question {n}</summary><span><strong>Correct answer:</strong> {q.answer?.split('||').join(' / ')}</span>{q.referenceQuote&&<blockquote>{q.referenceQuote}</blockquote>}<span dangerouslySetInnerHTML={{__html:cleanLayout(q.explanationHtml)}}/></details>}</span>;})}</>
+      />{!initialSolution&&!scored&&<span className="inline-question-flags">{slot.numbers.map(n=><button key={n} className={`question-flag ${flags.includes(n)?'is-flagged':''}`} aria-label={`${flags.includes(n)?'Unflag':'Flag'} question ${n}`} title={`${flags.includes(n)?'Unflag':'Flag'} question ${n}`} aria-pressed={flags.includes(n)} onClick={()=>toggleFlag(n)}><Flag size={15} fill={flags.includes(n)?'currentColor':'none'}/></button>)}</span>}{scored&&(showAnswers||showExplanations)&&slot.numbers.map(n=>{const q=part.questions.find(q=>q.number===n);if(!q)return null;const row=scoreResult?.rows.find(r=>r.number===n);return <span className="slot-solution" key={n}>{showAnswers&&<span className="solution-answer"><strong>Answer {n}:</strong> {q.answer?.split('||').join(' / ')||'Not provided'} {row&&<small data-score={row.status}>{row.status==='correct'?'Correct':row.response?'Your answer: '+row.response:'Unanswered'}</small>}</span>}{q.referenceQuote&&<button className="quiet-button" onClick={()=>handleLocateQuote(q.referenceQuote!)}>Locate in passage</button>}{showExplanations&&q.explanationHtml&&<details className="explanation-card" open><summary>Explanation · Question {n}</summary><span><strong>Correct answer:</strong> {q.answer?.split('||').join(' / ')}</span>{q.referenceQuote&&<blockquote>{q.referenceQuote}</blockquote>}<span dangerouslySetInnerHTML={{__html:cleanLayout(q.explanationHtml)}}/></details>}</span>;})}</>
     ) : (
       <span role="alert">Question slot missing. Please report this test.</span>
     );
@@ -579,22 +577,14 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     setSelectionBox(null);
   };
 
-  const handleSelectionWord = () => {
-    if (!selectionBox) return;
-    onSaveVocabulary({
-      word: selectionBox.text,
-      meaning: "",
-      example: selectionBox.context,
-      partOfSpeech: "noun",
-    });
-    setSelectionBox(null);
-  };
-
-  const handleSelectionDictionary = () => {
+  const openSelectionDictionary=(saveIntent:boolean)=>{
     if(!selectionBox)return;
     if(mode==='exam'&&!scored){onNotify('Dictionary is disabled during an active exam.');return;}
-    setDictionaryWord(selectionBox.text);setSelectionBox(null);
+    if(saveIntent&&!auth.currentUser){onNotify('Sign in to save vocabulary.');setSelectionBox(null);return;}
+    setDictionaryContext(selectionBox.context);setDictionarySaveIntent(saveIntent);setDictionaryWord(selectionBox.text);setSelectionBox(null);
   };
+  const handleSelectionWord=()=>openSelectionDictionary(true);
+  const handleSelectionDictionary=()=>openSelectionDictionary(false);
 
   // Content Report submission
   const handleSendReport = async () => {
@@ -678,13 +668,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       <main className="main">
         {/* Top Header Bar */}
         <header className="topbar reader-toolbar">
-          <button className="reader-icon" title="Return to library" aria-label="Return to library" onClick={onReturnToLibrary}><Library size={21}/></button>
+          <button className="reader-back" title="Return to tests" onClick={onReturnToLibrary}><ArrowLeft size={17}/>Back</button>
           <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><Select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</Select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
           <div className="reader-actions" role="toolbar" aria-label="Test tools">
             <div className={`reader-clock ${initialDurationMinutes>0&&timerRemaining<300?'low':''}`} aria-label={initialDurationMinutes>0?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{initialDurationMinutes>0?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{initialDurationMinutes>0?'remaining':'Unlimited time'}</span>{mode==='practice'&&initialDurationMinutes>0&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
             <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
             <button className="reader-icon" title="Report an issue" aria-label="Report an issue" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}><Bug size={22}/></button>
-            <button className="reader-icon" title="Dictionary" aria-label="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>setDictionaryWord('')}><BookOpen size={22}/></button>
+            <button className="reader-icon" title="Dictionary" aria-label="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>{setDictionaryContext('');setDictionarySaveIntent(false);setDictionaryWord('');}}><BookOpen size={22}/></button>
             <button className="reader-icon" title="Display settings" aria-label="Display settings" onClick={()=>setShowDisplayModal(true)}><Settings2 size={22}/></button>
             <button className="reader-icon" title="Notes and highlights" aria-label="Notes and highlights" aria-pressed={activeDrawer==='notes'} onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={22}/></button>
           </div>
@@ -817,82 +807,20 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           </section>
         </div>
 
-        {/* Bottom Bar & Question Navigation */}
-        <footer className="bottom-bar">
-          <div className="bottom-meta">
-            <div>
-              {scoreResult ? (
-                <span
-                  style={{
-                    fontWeight: 600,
-                    color: "var(--teal)",
-                    fontSize: "13px",
-                  }}
-                >
-                  Score: {scoreResult.correct} / {scoreResult.gradable}
-                  {scoreResult.ungraded > 0 &&
-                    ` (${scoreResult.ungraded} ungraded)`}
-                  {approxBand !== null && ` · IELTS Band ${approxBand.toFixed(1)}`}
-                </span>
-              ) : (
-                <span style={{ fontSize: "12px" }}>
-                  {answeredCount} of {allQuestionNumbers.length} answered
-                </span>
-              )}
-            </div>
-
-            <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
-              <button
-                className="studio-primary"
-                disabled={submitting || isLegacyBroken || (initialSolution&&!reviewLoaded)}
-                onClick={() => scored ? scoreResult ? setShowResultsModal(true) : setActiveDrawer("review") : setConfirmSubmit(true)}
-                style={{ padding: "8px 16px", fontSize: "12px" }}
-              >
-                {scored ? scoreResult ? "Review score" : "Answer sheet" : "Submit test"}
-              </button>
-
-              <button
-                className="quiet-button"
-                disabled={submitting}
-                onClick={() => {
-                  if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored ? "restart" : "reset");
-                }}
-              >
-                {scored ? "Retake test" : "Reset responses"}
-              </button>
-            </div>
-          </div>
-
-          <nav className="question-nav" aria-label="Question navigation">
-            {allQuestionNumbers.map((qNum) => {
-              const isCurrentPart = currentPartNumbers.includes(qNum);
-              const isAnswered = Boolean(responses[qNum]?.trim());
-              const isFlagged = flags.includes(qNum);
-
-              // Row status if scored
-              const scoreStatus = scoreResult?.rows.find(
-                (r: ScoreRow) => r.number === qNum,
-              )?.status;
-
-              return (
-                <button
-                  key={qNum}
-                  className={`question-chip ${isCurrentPart ? "current-part" : ""} ${
-                    isAnswered ? "answered" : ""
-                  } ${isFlagged ? "flagged" : ""}`}
-                  data-score={scoreStatus}
-                  onClick={() => handleJump(qNum)}
-                  title={`Question ${qNum}${scoreStatus ? ` (${scoreStatus})` : ""}`}
-                >
-                  {qNum}
-                </button>
-              );
-            })}
-          </nav>
+        <footer className="bottom-bar compact-reader-footer">
+          <span className="reader-progress" aria-live="polite">{flagMode?'Click numbers to flag':`${answeredCount}/${allQuestionNumbers.length} answered`}</span>
+          {!initialSolution&&!scored&&<button className={`reader-icon flag-mode-button ${flagMode?'is-active':''}`} aria-label="Flag questions" title={flagMode?'Leave flag mode':'Flag questions'} aria-pressed={flagMode} onClick={()=>setFlagMode(value=>!value)}><Flag size={17}/>{flags.length>0&&<span>{flags.length}</span>}</button>}
+          <nav className="question-nav" aria-label="Question navigation">{allQuestionNumbers.map(qNum=>{
+            const isFlagged=flags.includes(qNum),scoreStatus=scoreResult?.rows.find(row=>row.number===qNum)?.status;
+            return <button key={qNum} className={`question-chip ${currentPartNumbers.includes(qNum)?'current-part':''} ${responses[qNum]?.trim()?'answered':''} ${isFlagged?'flagged':''}`} data-score={scoreStatus} aria-label={`Question ${qNum}${isFlagged?', flagged':''}`} aria-pressed={flagMode?isFlagged:undefined} onClick={()=>flagMode?toggleFlag(qNum):handleJump(qNum)} title={flagMode?`${isFlagged?'Unflag':'Flag'} question ${qNum}`:`Question ${qNum}${isFlagged?' · Flagged':''}`}>
+              {qNum}{isFlagged&&<Flag className="chip-flag" size={9} fill="currentColor"/>}
+            </button>;
+          })}</nav>
+          <div className="reader-footer-actions"><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setActiveDrawer('review'):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':'Submit test'}</button></div>
         </footer>
       </main>
 
-      {dictionaryWord!==null&&<DictionaryPanel initialWord={dictionaryWord} onClose={()=>setDictionaryWord(null)} onSave={onSaveVocabulary}/>}
+      {dictionaryWord!==null&&<DictionaryPanel initialWord={dictionaryWord} sourceContext={dictionaryContext} saveIntent={dictionarySaveIntent} onClose={()=>setDictionaryWord(null)} onSave={onSaveVocabulary}/>}
       {showExport&&<ExportDialog test={test} onClose={()=>setShowExport(false)} loadKeys={async()=>{if(isPreview)return Object.fromEntries(test.parts.flatMap(p=>p.questions.map(q=>[q.number,q])));const data=await assessmentRequest('/api/test-review',{...submissionPayload(),mode:'practice'});return data.keys||{};}}/>}
       {/* Floating Selection Tools */}
       {selectionBox && (
@@ -1226,66 +1154,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         </dialog>
       )}
 
-      {/* Display Settings Dialog */}
-      {showDisplayModal && (
-        <dialog
-          className="studio-modal"
-          open
-          style={{
-            position: "fixed",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 130,
-          }}
-        >
-          <div className="studio-modal-heading">
-            <h2>Reading Display Settings</h2>
-            <button
-              className="studio-quiet"
-              onClick={() => setShowDisplayModal(false)}
-            >
-              ✕
-            </button>
-          </div>
+      {showDisplayModal&&<Modal className="reading-display-dialog" label="Reading display settings" onClose={()=>setShowDisplayModal(false)}><div className="studio-modal-heading"><h2>Reading display</h2><button className="quiet-button" aria-label="Close display settings" onClick={()=>setShowDisplayModal(false)}>×</button></div><FontSizeSlider value={textSize} onChange={setTextSize}/><p className="font-size-preview" style={{fontSize:textSize}}>Make reading feel comfortable.</p><div className="studio-actions"><button className="studio-primary" onClick={()=>setShowDisplayModal(false)}>Done</button></div></Modal>}
 
-          <label className="studio-field">
-            Font Size
-            <Select
-              value={textSize}
-              onChange={(e) => {
-                setTextSize(Number(e.target.value));
-              }}
-            >
-              <option value={14}>Compact (14px)</option>
-              <option value={16}>Small (16px)</option>
-              <option value={18}>Comfortable (18px)</option>
-              <option value={20}>Large (20px)</option>
-              <option value={22}>Extra large (22px)</option>
-              <option value={24}>Maximum (24px)</option>
-            </Select>
-          </label>
-
-
-
-          <div className="studio-actions" style={{ marginTop: "20px" }}>
-            <button
-              className="studio-primary"
-              onClick={() => setShowDisplayModal(false)}
-            >
-              Done
-            </button>
-            <button
-              className="studio-secondary studio-danger"
-              onClick={() => {
-                setResetAction("restart");
-              }}
-            >
-              Restart Test
-            </button>
-          </div>
-        </dialog>
-      )}
     </div>
   );
 };
