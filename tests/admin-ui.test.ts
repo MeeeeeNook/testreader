@@ -39,11 +39,11 @@ const props = {
   onSetStatus: async () => {},
   onViewStudents: noop,
 };
-test("admin offers sorting, collection filters, folder import, Trash and student attempts", () => {
+test("admin offers sorting, folder filters, folder import, Trash and student attempts", () => {
   const html = renderToStaticMarkup(React.createElement(AdminView, props));
   for (const label of [
     "Sort tests",
-    "All collections",
+    "All folders",
     "View student attempts",
     "Delete",
   ])

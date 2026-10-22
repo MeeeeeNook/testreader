@@ -1,15 +1,18 @@
+import {FolderPicker} from "./FolderPicker";
+import {folderOptions,folderLocation,testInFolder,type LibraryFolder} from "../services/folders";
 import {FolderManager} from "./FolderManager";
 import {Plus,Upload,LayoutDashboard,Files,Folder,Users} from "lucide-react";
 import {catalogIssues} from "../services/testAudit";
-import { FolderBrowser } from "./FolderBrowser";
-import { compareTests, inFolder, folderPath, sortOptions, allFolderPaths, planFolderMove } from "../services/catalog";
+import { compareTests, sortOptions } from "../services/catalog";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
 import React, { useState, useRef, useEffect } from "react";
 import { TestMeta, ContentReport, UserProfile } from "../types";
 
 interface AdminViewProps {
   section?: string;
-  onDeleteFolders?: (ids:string[])=>Promise<void>;
+  folders?: LibraryFolder[];
+  onFolderChange?: (folders:LibraryFolder[])=>Promise<void>;
+  onDeleteFolders?: (folderIds:string[],trashTests:boolean)=>Promise<void>;
   onNavigate?: (path:string)=>void;
   tests: TestMeta[];
   reports: ContentReport[];
@@ -40,7 +43,7 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({
-  section="tests",onNavigate,onDeleteFolders,
+  section="tests",onNavigate,onDeleteFolders,folders=[],onFolderChange,
   tests,
   reports,
   learners,
@@ -72,7 +75,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   );
 
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
-  const [sort, setSort] = useState("new");
+  const [sort, setSort] = useState("title");
   const [collectionFilter, setCollectionFilter] = useState("");
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
@@ -116,15 +119,15 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (skillFilter && t.skill !== skillFilter) return false;
       if (statusFilter && t.status !== statusFilter) return false;
       if (qualityFilter && !catalogIssues(t).length) return false;
-      if (!inFolder(t.source || "Unfiled", collectionFilter, recursive)) return false;
+      if (!testInFolder(t,collectionFilter,folders,recursive)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
       return (
         t.title.toLowerCase().includes(q) ||
-        (t.source || "").toLowerCase().includes(q)
+        folderLocation(t.folderId,folders).toLowerCase().includes(q)
       );
     })
-    .sort((a, b) => compareTests(a, b, sort));
+    .sort((a, b) => compareTests({...a,source:folderLocation(a.folderId,folders)},{...b,source:folderLocation(b.folderId,folders)},sort));
 
   const pages=Math.max(1,Math.ceil(filteredTests.length/25));
   const currentPage=Math.min(page,pages-1);
@@ -160,7 +163,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
           <h1 className="studio-heading">{{overview:"Overview",tests:"Tests",folders:"Folders",upload:"Upload & Import",reports:"Content reports",users:"Students",archive:"Archive",trash:"Trash"}[section]||"Admin Studio"}</h1>
           <p className="studio-lead">
-            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Organise sources into folders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests removed from the library."}[section]}
+            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Create folders and subfolders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests removed from the library."}[section]}
           </p>
         </div>
 
@@ -227,7 +230,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </button>
           </div>
 
-          {section === "folders" && <FolderManager tests={tests} value={collectionFilter} onOpen={path=>{setCollectionFilter(path);setRenamePath(path);setSelected([]);}} onDelete={onDeleteFolders|| (async ids=>{for(const id of ids)await onDeleteTest(id);})}/>}
+          {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}/>}
           <div className="admin-filters">
             <label>Skill<select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></select></label>
             <label>Status<select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></select></label>
@@ -239,7 +242,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               </select>
             </label>
             <label>
-              Collection
+              Folder
               <select
                 value={collectionFilter}
                 onChange={(e) => {
@@ -248,59 +251,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   setSelected([]);
                 }}
               >
-                <option value="">All collections</option>
-                {allFolderPaths(tests).map((c) => (
-                    <option key={c}>{c}</option>
-                  ))}
+                <option value="">All folders</option><option value="unfiled">Unfiled</option>{folderOptions(folders).map(f=><option key={f.id} value={f.id}>{f.path}</option>)}
               </select>
             </label>
             <button className="studio-secondary" onClick={onViewStudents}>
               View student attempts
             </button>
           </div>
-          <p className="studio-lead">Select tests and move them to a folder path, for example Forecast / 2026 / Q3. New paths create folders; / adds a subfolder.</p>
-          {onRefreshTitles && tab !== "trash" && <button className="studio-secondary" disabled={busy || !filteredTests.length} onClick={() => void run(() => onRefreshTitles(selected.length ? selected : filteredTests.map(t => t.id)))}>Update passage titles</button>}
-          <label><input type="checkbox" checked={recursive} onChange={e => {setRecursive(e.target.checked);setSelected([]);}} /> Include subfolders</label>
-          {collectionFilter && tab !== "trash" && <form className="folder-management" onSubmit={e => {
-            e.preventDefault();
-            const destination = folderPath(renamePath);
-            if (!destination || destination === folderPath(collectionFilter)) return;
-            void run(async () => {
-              const groups = planFolderMove(tests, collectionFilter, destination);
-              for (const [target, ids] of groups) await onSetCollection(ids, target);
-              setCollectionFilter(destination);
-              onNotify("Folder and subfolders moved.");
-            });
-          }}>
-            <label>Rename or move this folder<input aria-label="New folder path" value={renamePath} onChange={e => setRenamePath(e.target.value)} placeholder="Forecast / 2026 / Q3" /></label>
-            <button className="studio-secondary" disabled={busy || !renamePath.trim()} type="submit">Save folder path</button>
-          </form>}
+          <p className="studio-lead">Select tests below and choose Move to. Create folders on the Folders page.</p>
           {selected.length > 0 && (
             <div className="admin-bulk">
               <strong>{selected.length} selected</strong>
               {onExportSelected&&<button className="studio-secondary" disabled={busy} onClick={()=>void run(()=>onExportSelected(selected))}>Export selected</button>}
-              <label>
-                Collection
-                <input
-                  aria-label="Destination collection"
-                  list="existing-collections"
-                  value={collection}
-                  onChange={(e) => setCollection(e.target.value)}
-                  placeholder="Forecast / 2026 / Q3"
-                />
-              </label>
-              <datalist id="existing-collections">
-                {allFolderPaths(tests).map(
-                  (c) => (
-                    <option key={c} value={c} />
-                  ),
-                )}
-              </datalist>
+              <FolderPicker folders={folders} value={collection} onChange={setCollection} label="Move to"/>
               <button
                 className="studio-secondary"
-                disabled={busy || !collection.trim() || tab === "trash"}
+                disabled={busy || tab === "trash"}
                 onClick={() =>
-                  void run(() => onSetCollection(selected, folderPath(collection)))
+                  void run(() => onSetCollection(selected, collection))
                 }
               >
                 Move to folder
@@ -378,7 +346,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         }
                       />
                     </th>
-                    <th>Test Title & Source</th>
+                    <th>Test title & folder</th>
                     <th>Skill</th>
                     <th>Sections</th>
                     <th>Status</th>
@@ -408,7 +376,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         {catalogIssues(t).map(issue=><span className="admin-quality-tag" key={issue}>{issue}</span>)}
                         <br />
                         <span className="studio-small">
-                          {t.source || "General"}
+                          {folderLocation(t.folderId,folders)||"Unfiled"}
                         </span>
                       </td>
                       <td style={{ textTransform: "capitalize" }}>{t.skill}</td>

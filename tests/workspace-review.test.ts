@@ -22,7 +22,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={currentUser:null};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const mode of ['practice','exam']) {
+    for (const mode of ['practice','exam','solution']) {
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
       const storage=new Map<string,string>();
       let requests=0;
@@ -33,7 +33,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true,
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
         __scoreRequest:async(url:string,payload:any)=>{
-          requests++; assert.equal(url,'/api/submit-exam');
+          requests++; if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys};}assert.equal(url,'/api/submit-exam');
           const result=scoreTest([{numbers,keys}],payload.responses);
           return {attemptId:payload.attemptId,result,band:estimatedBand(result),keys};
         }});
@@ -41,12 +41,13 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       const noop=()=>{};
       const root=createRoot(document.getElementById('root')!);
       try {
-        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode,sessionId:mode,initialDurationMinutes:60,profile:{id:'guest',fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':mode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:'guest',fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        if(mode==='solution'){assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);assert.equal(document.querySelector('.results-panel'),null);continue;}
         assert.equal(requests,0,'opening a test must not fetch solutions');
         assert.equal(document.querySelector('.review-toggles .toggle'),null);
-        assert.equal(document.querySelector('.explanation-section'),null);
+        assert.equal(document.querySelector('.explanation-card'),null);
         assert.equal(document.querySelector('.answer-tag'),null);
-        const submit=[...document.querySelectorAll('button')].find(b=>b.textContent==='Submit & Review')!;
+        const submit=[...document.querySelectorAll('button')].find(b=>b.textContent==='Submit test')!;
         await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,0,'pressing Submit must not grade before confirmation');
         assert.ok(document.querySelector('dialog[open]'));
@@ -59,7 +60,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         await act(async()=>confirm.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,1);
         assert.match(document.querySelector('.results-panel')!.textContent!,/IELTS Academic Reading Band: 7\.0/);
-        assert.equal(document.querySelectorAll('.review-toggles .toggle').length,2);
+        assert.equal(document.querySelectorAll('.solution-score-banner button[aria-pressed]').length,2);
         const review=[...document.querySelectorAll('button')].find(b=>b.textContent==='Review Test Questions with Answers')!;
         await act(async()=>review.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.match(document.querySelector('.explanation-card')!.textContent!,/Correct answer: yes.*Source explanation/s);
@@ -68,3 +69,4 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
     }
   } finally {rmSync(temp,{recursive:true,force:true});}
 });
+

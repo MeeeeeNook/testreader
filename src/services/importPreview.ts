@@ -1,6 +1,7 @@
+import {contentHash,mediaDigests,newImportIdentity} from "./importIdentity";
 import {collectFiles,importJsonTests,jsonParts,toEditable,extractTitle} from './importer';
 import type {EditableTest} from '../types';
-export interface ImportCandidate {test:EditableTest;name:string}
+export interface ImportCandidate {test:EditableTest;name:string;match?:{title:string;folder:string}}
 export interface ImportPlan {candidates:ImportCandidate[];images:{name:string;url:string;blob:Blob}[];errors:string[]}
 // Parsing is entirely local: this function never writes tests or uploads media.
 export async function prepareImport(files:File[]):Promise<ImportPlan> {
@@ -23,6 +24,9 @@ export async function prepareImport(files:File[]):Promise<ImportPlan> {
     }
    }catch(e){plan.errors.push(`${c.name}: ${e instanceof Error?e.message:String(e)}`);}
   }
+  plan.candidates.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
+  const media=await mediaDigests(plan.images);
+  for(const candidate of plan.candidates)candidate.test=newImportIdentity(candidate.test,await contentHash(candidate.test,media));
   return plan;
  }catch(e){disposeImport(plan);throw e;}
 }
@@ -35,3 +39,4 @@ export function replaceImportAssets(test:EditableTest,assets:Map<string,string>)
   return value;
  }));
 }
+

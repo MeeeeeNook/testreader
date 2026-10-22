@@ -44,6 +44,9 @@ export interface EditablePart {
 }
 
 export interface EditableTest {
+  folderId?: string|null;
+  folderPath?: string;
+  contentHash?: string;
   schemaVersion: 1;
   id: string;
   title: string;
@@ -62,6 +65,10 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  originSource?:string;
+  folderId?: string|null;
+  folderPath?: string;
+  contentHash?: string;
   id: string;
   title: string;
   skill: 'reading' | 'listening';
@@ -81,6 +88,8 @@ export interface TestMeta {
 }
 
 export interface UserProfile {
+  libraryFolders?: import("./services/folders").LibraryFolder[];
+  libraryFolderVersion?: number;
   id: string;
   email: string;
   name: string;
@@ -146,6 +155,8 @@ export interface StudyNote {
 }
 
 export interface StudyHighlight {
+  start?: number;
+  end?: number;
   id: string;
   text: string;
   context?: string;
@@ -165,5 +176,6 @@ export interface ContentReport {
   status: 'open' | 'resolved';
   createdAt: number;
 }
+
 
 
