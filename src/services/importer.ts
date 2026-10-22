@@ -31,6 +31,9 @@ export interface EditablePart {
 }
 
 export interface EditableTest {
+  folderId?: string|null;
+  folderPath?: string;
+  contentHash?: string;
   schemaVersion: 1;
   id: string;
   title: string;
@@ -49,6 +52,9 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  folderId?: string|null;
+  folderPath?: string;
+  contentHash?: string;
   id: string;
   title: string;
   skill: "reading" | "listening";
@@ -1051,3 +1057,4 @@ export function importJsonTests(
     } as EditableTest;
   });
 }
+

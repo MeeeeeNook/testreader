@@ -10,11 +10,14 @@ export function parseRoute(input) {
     if (p === "/full-tests") return {name:"full"};
     if (p.startsWith("/full-tests/")) return {name:"full",category:p.split("/")[2]};
     if (p === "/knowledge") return {name:"knowledge"};
-    if (p === "/forum") return {name:"forum"};
+    const direct = /^\/(reading|solutions)\/([^/]+)$/.exec(p);
+    if(direct)return {name:"reading",slug:decodeURIComponent(direct[2]),solution:direct[1]==="solutions"};
     if (p === "/contribute") return {name:"contribute"};
     if (/^\/admin\/(overview|tests|folders|upload|reports|users|archive|trash)$/.test(p)) return {name:"admin",section:p.split("/")[2]};
     if (p === "/admin/content") return {name:"content-admin"};
     if (p === "/admin/contributions") return {name:"contributions-admin"};
+    const legacyAnswers=/^\/answers\/([^/]+)\/([^/]+)\/[^/]+$/.exec(p);
+    if(legacyAnswers)return {name:"test",id:decodeURIComponent(legacyAnswers[1]),section:legacyAnswers[2]==="all"?undefined:decodeURIComponent(legacyAnswers[2]),solution:true};
     let sectionMatch = /^\/tests\/([^/]+)\/sections\/([^/]+)$/.exec(p);
     if (sectionMatch) return {name:"test",id:decodeURIComponent(sectionMatch[1]),section:decodeURIComponent(sectionMatch[2])};
     const simple = {
@@ -90,3 +93,4 @@ export function createBrowserHistory(win, changed) {
     destroy() {win.removeEventListener("popstate", pop);},
   };
 }
+

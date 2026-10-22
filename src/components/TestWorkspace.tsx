@@ -1,3 +1,8 @@
+import {paintHighlights,selectionOffsets} from "../services/highlights";
+import {DictionaryPanel} from "./DictionaryPanel";
+import {ExportDialog} from "./ExportDialog";
+import {testLink} from "../services/testLinks";
+import {BookOpen,Printer,NotebookPen,Flag,Settings2,Library,ChevronLeft,ChevronRight} from "lucide-react";
 import { countsAsAttempt } from "../services/portal";
 import { loginWithGoogle } from "../services/auth";
 import { passageTitle } from "../services/passageTitle";
@@ -24,6 +29,8 @@ import { firestoreAdapter } from "../services/firestoreAdapter";
 import { scoreTest, estimatedBand } from "../services/scoring";
 
 interface TestWorkspaceProps {
+  initialSolution?: boolean;
+  onRetake?:()=>void;
   test: EditableTest;
   sessionId: string;
   onSessionActive: (active: boolean) => void;
@@ -44,6 +51,8 @@ interface TestWorkspaceProps {
 
 export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   test,
+  initialSolution=false,
+  onRetake,
   sessionId,
   onSessionActive,
   onHistorySaved,
@@ -55,6 +64,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
+  const [dictionaryWord,setDictionaryWord]=useState<string|null>(null);
+  const [showExport,setShowExport]=useState(false);
+  const [paneWidth,setPaneWidth]=useState(50);
+  const splitRef=useRef<HTMLDivElement>(null);
+  const [solutionError,setSolutionError]=useState('');
+  const [solutionRetry,setSolutionRetry]=useState(0);
   const [confirmSubmit, setConfirmSubmit] = useState(false);
   const [resetAction, setResetAction] = useState<"reset" | "restart" | null>(
     null,
@@ -90,7 +105,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       : Math.max(0, initialDurationMinutes) * 60,
   );
   const [timerRunning, setTimerRunning] = useState(
-    !savedSession.scored && (mode === "exam" || initialDurationMinutes > 0),
+    !initialSolution && !savedSession.scored && (mode === "exam" || initialDurationMinutes > 0),
   );
   const [scored, setScored] = useState(Boolean(savedSession.scored));
   const [scoreResult, setScoreResult] = useState<ScoreResult | null>(
@@ -119,6 +134,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   // Floating selection tools state
   const [selectionBox, setSelectionBox] = useState<{
     text: string;
+    start:number;
+    end:number;
     context: string;
     pane: "passage" | "questions";
     x: number;
@@ -143,7 +160,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const [historyNotice, setHistoryNotice] = useState("");
   const [reviewLoaded, setReviewLoaded] = useState(false);
   useEffect(() => {
-    onSessionActive(!isPreview && (!scored || Boolean(historyError)));
+    onSessionActive(!isPreview && !initialSolution && (!scored || Boolean(historyError)));
     return () => onSessionActive(false);
   }, [isPreview, scored, historyError, onSessionActive]);
   const originalPart = test.parts[currentPartIndex] || test.parts[0];
@@ -154,6 +171,14 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       ...reviewKeys[q.number],
     })),
   };
+  useEffect(()=>{
+    const roots=([['passage',passageRef.current],['questions',questionsRef.current]] as const).filter(([,root])=>root).map(([pane,root])=>({root:root!,items:highlights.filter(h=>h.part===currentPartIndex&&h.pane===pane)}));
+    return paintHighlights(roots);
+  },[highlights,currentPartIndex,showExplanations,showAnswers]);
+  useEffect(()=>{
+    if(!initialSolution)return;let alive=true;setSolutionError('');
+    void assessmentRequest('/api/test-review',{testId:test.sourceTestId||test.id,sectionIds:test.sectionIds,sourceSections:test.sourceSections,mode:'practice'}).then(data=>{if(!alive)return;setReviewKeys(data.keys||{});setReviewLoaded(true);setScored(true);setTimerRunning(false);setShowAnswers(true);setShowExplanations(true);}).catch(e=>{if(alive)setSolutionError(e.message);});return ()=>{alive=false;};
+  },[initialSolution,test.id,solutionRetry]);
   const allQuestions = test.parts.flatMap((p) => p.questions);
   const allQuestionNumbers = allQuestions
     .map((q) => q.number)
@@ -460,15 +485,15 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const renderSlot = (id: string) => {
     const slot = part.slots[id];
     return slot ? (
-      <AnswerControl
+      <> <AnswerControl
         slot={slot}
         part={part}
         responses={responses}
-        showAnswers={scored && showAnswers}
-        disabled={submitting || scored}
+        showAnswers={false}
+        disabled={initialSolution || submitting || scored}
         onChange={handleInputChange}
         onMultiChange={handleMultiChoiceChange}
-      />
+      />{scored&&(showAnswers||showExplanations)&&slot.numbers.map(n=>{const q=part.questions.find(q=>q.number===n);if(!q)return null;const row=scoreResult?.rows.find(r=>r.number===n);return <span className="slot-solution" key={n}>{showAnswers&&<span className="solution-answer"><strong>Answer {n}:</strong> {q.answer?.split('||').join(' / ')||'Not provided'} {row&&<small data-score={row.status}>{row.status==='correct'?'Correct':row.response?'Your answer: '+row.response:'Unanswered'}</small>}</span>}{q.referenceQuote&&<button className="quiet-button" onClick={()=>handleLocateQuote(q.referenceQuote!)}>Locate in passage</button>}{showExplanations&&q.explanationHtml&&<details className="explanation-card" open><summary>Explanation · Question {n}</summary><span><strong>Correct answer:</strong> {q.answer?.split('||').join(' / ')}</span>{q.referenceQuote&&<blockquote>{q.referenceQuote}</blockquote>}<span dangerouslySetInnerHTML={{__html:cleanLayout(q.explanationHtml)}}/></details>}</span>;})}</>
     ) : (
       <span role="alert">Question slot missing. Please report this test.</span>
     );
@@ -493,7 +518,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       return;
     }
     const range = s.getRangeAt(0);
-    const text = s.toString().trim();
+    const rawText=s.toString();
+    const text = rawText.trim();
     if (text.length < 2 || text.length > 500) {
       setSelectionBox(null);
       return;
@@ -516,6 +542,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     const context = commonAncestor?.textContent?.slice(0, 300) || text;
 
     setSelectionBox({
+      ...(()=>{const offsets=selectionOffsets(isPassage?passageRef.current!:questionsRef.current!,range);const start=offsets.start+rawText.indexOf(text);return {start,end:start+text.length};})(),
       text,
       context,
       pane: isPassage ? "passage" : "questions",
@@ -531,6 +558,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       ...prev,
       {
         id: `hl_${Date.now()}`,
+        start:selectionBox.start,end:selectionBox.end,
         text: selectionBox.text,
         context: selectionBox.context,
         pane: selectionBox.pane,
@@ -559,40 +587,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     setSelectionBox(null);
   };
 
-  const handleSelectionDictionary = async () => {
-    if (!selectionBox) return;
-    if (mode === "exam" && !scored) {
-      onNotify("Dictionary lookup is disabled during an active exam.");
-      return;
-    }
-    onNotify(`Looking up "${selectionBox.text}"…`);
-    try {
-      const res = await fetch("/api/dictionary", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          Authorization: `Bearer ${await auth.currentUser?.getIdToken()}`,
-        },
-        body: JSON.stringify({
-          text: selectionBox.text,
-          context: selectionBox.context,
-          language: profile.language,
-        }),
-      });
-      if (res.ok) {
-        const data = await res.json();
-        await onSaveVocabulary({
-          word: data.word || selectionBox.text,
-          meaning: data.meaning,
-          example: data.example || selectionBox.context,
-          partOfSpeech: data.partOfSpeech || "noun",
-        });
-        onNotify(`Word "${data.word}" added to vocabulary.`);
-      }
-    } catch {
-      onNotify("Dictionary lookup failed.");
-    }
-    setSelectionBox(null);
+  const handleSelectionDictionary = () => {
+    if(!selectionBox)return;
+    if(mode==='exam'&&!scored){onNotify('Dictionary is disabled during an active exam.');return;}
+    setDictionaryWord(selectionBox.text);setSelectionBox(null);
   };
 
   // Content Report submission
@@ -633,6 +631,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       className={`app ${mode === "exam" ? "exam-mode" : ""} ${scored ? "exam-finished" : ""}`}
       style={{ "--study-font-size": `${textSize}px` } as React.CSSProperties}
       onMouseUp={handleMouseUp}
+      onTouchEnd={()=>setTimeout(handleMouseUp,100)}
     >
       {confirmSubmit && <ConfirmActionDialog title={false ? "Nộp bài?" : "Submit your test?"} confirmLabel={false ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
         {false ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
@@ -675,63 +674,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       )}
       <main className="main">
         {/* Top Header Bar */}
-        <header className="topbar">
-          <div style={{ display: "flex", alignItems: "center", gap: "14px" }}>
-            <button className="quiet-button" onClick={onReturnToLibrary}>
-              ← Library
-            </button>
-            <div>
-              <div className="eyebrow">
-                {test.skill.toUpperCase()} ·{" "}
-                {mode === "exam" ? "OFFICIAL EXAM SIMULATION" : "PRACTICE MODE"}
-              </div>
-              <div className="top-title">{test.title}</div>
-            </div>
-          </div>
-
-          <div style={{ display: "flex", gap: "6px", alignItems: "center" }}>
-            <button
-              className="quiet-button"
-              onClick={() => setActiveDrawer("notes")}
-            >
-              Notes
-            </button>
-            <button
-              className="quiet-button"
-              onClick={() => setActiveDrawer("review")}
-            >
-              Review
-            </button>
-            <button
-              className="quiet-button"
-              onClick={() => {
-                const qNum = currentPartNumbers[0] || 1;
-                toggleFlag(qNum);
-              }}
-            >
-              Flag
-            </button>
-            <button
-              className="quiet-button"
-              onClick={() => {
-                setReportQuestion(currentPartNumbers[0] || 1);
-                setShowReportModal(true);
-              }}
-            >
-              Report
-            </button>
-            <button
-              className="quiet-button"
-              onClick={() => setShowDisplayModal(true)}
-            >
-              Aa
-            </button>
-            <button className="quiet-button" onClick={() => window.print()}>
-              Print
-            </button>
-          </div>
+        <header className="topbar reader-toolbar">
+          <button className="quiet-button" title="Return to library" onClick={onReturnToLibrary}><Library size={17}/><span>Library</span></button>
+          <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
+          <div className="reader-actions"><div className={timerRemaining<300?'timer low':'timer'}><span>{timeFormatted}</span>{mode==='practice'&&!scored&&!initialSolution&&<button className="timer-button" aria-label={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?'Pause':'Start'}</button>}</div><button className="quiet-button" title="Print or download" onClick={()=>setShowExport(true)}><Printer size={17}/><span>Print</span></button><button className="quiet-button" title="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>setDictionaryWord('')}><BookOpen size={17}/><span>Dictionary</span></button><button className="quiet-button" title="Notes and highlights" onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={17}/><span>Notes</span></button><button className="quiet-button" title="Display settings" onClick={()=>setShowDisplayModal(true)}><Settings2 size={17}/><span>Display</span></button><button className="quiet-button" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}>Report</button></div>
         </header>
-
+        {initialSolution&&!reviewLoaded&&!solutionError&&<p className="studio-callout" role="status">Loading solution guide…</p>}
+        {solutionError&&<div className="studio-callout" role="alert">{solutionError}<button className="quiet-button" onClick={()=>setSolutionRetry(i=>i+1)}>Retry solutions</button></div>}
         {historyError && (
           <div className="history-save-error" role="alert">
             <strong>{historyError}</strong>
@@ -784,55 +733,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           </div>
         )}
 
-        {/* Section Tabs and Timer Toolbar */}
-        <div className="work-toolbar">
-          <nav className="part-tabs">
-            {test.parts.map((p, idx) => (
-              <button
-                key={p.id || idx}
-                className={`part-tab ${idx === currentPartIndex ? "active" : ""}`}
-                onClick={() => setCurrentPartIndex(idx)}
-              >
-                {idx + 1}. {passageTitle(p.passageHtml, p.title, idx)}
-              </button>
-            ))}
-          </nav>
-
-          <div className="review-toggles">
-            {scored && (
-              <>
-                <button
-                  className="toggle"
-                  aria-pressed={showAnswers}
-                  onClick={() => void toggleReview("answers")}
-                >
-                  <span className="switch" />
-                  Answers
-                </button>
-                <button
-                  className="toggle"
-                  aria-pressed={showExplanations}
-                  onClick={() => void toggleReview("explanations")}
-                >
-                  <span className="switch" />
-                  Explanations
-                </button>
-              </>
-            )}
-
-            <div className={`timer ${timerRemaining < 300 ? "low" : ""}`}>
-              <span>{timeFormatted}</span>
-              {mode === "practice" && !scored && (
-                <button
-                  className="timer-button"
-                  onClick={() => setTimerRunning(!timerRunning)}
-                >
-                  {timerRunning ? "Ⅱ" : "▶"}
-                </button>
-              )}
-            </div>
-          </div>
-        </div>
+        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS Academic Reading · Band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setActiveDrawer('review')}>Answer sheet</button></div></section>}
 
         {/* Mobile Tab Toggle for narrow viewports */}
         <div className="mobile-tabs">
@@ -852,6 +753,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
         {/* Split-Screen Main Content */}
         <div
+          ref={splitRef}
+          style={{"--passage-width":paneWidth+"%"} as React.CSSProperties}
           className={`split-view ${showAnswers ? "show-answers" : ""} ${showExplanations ? "show-explanations" : ""}`}
         >
           {/* Left Pane: Passage Content */}
@@ -868,6 +771,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </div>
           </article>
 
+          <div className="pane-resizer" role="separator" aria-label="Resize reading passage" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={paneWidth} tabIndex={0} onKeyDown={e=>{if(e.key==='ArrowLeft'){e.preventDefault();setPaneWidth(w=>Math.max(25,w-2));}if(e.key==='ArrowRight'){e.preventDefault();setPaneWidth(w=>Math.min(75,w+2));}}} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.currentTarget.hasPointerCapture(e.pointerId)||!splitRef.current)return;const r=splitRef.current.getBoundingClientRect();setPaneWidth(Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100)));}} onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)}><span/></div>
           {/* Right Pane: Questions Content */}
           <section
             ref={questionsRef}
@@ -898,48 +802,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 <div key={slot.id}>{renderSlot(slot.id)}</div>
               ))}
 
-              {/* Explanations Section */}
-              {scored && showExplanations && <div className="explanation-section">
-                <h2>Explanations</h2>
-                {part.questions.filter((q) => q.explanationHtml).length ===
-                0 ? (
-                  <p>No explanations stored for this section.</p>
-                ) : (
-                  part.questions.map((q) => {
-                    if (!q.explanationHtml) return null;
-                    return (
-                      <article key={q.number} className="explanation-card">
-                        <div
-                          style={{
-                            display: "flex",
-                            justifyContent: "space-between",
-                            alignItems: "center",
-                          }}
-                        >
-                          <h3>Question {q.number}</h3>
-                          {q.referenceQuote && (
-                            <button
-                              className="studio-quiet"
-                              style={{ fontSize: "10px", padding: "4px 8px" }}
-                              onClick={() =>
-                                handleLocateQuote(q.referenceQuote!)
-                              }
-                            >
-                              Locate quote in passage
-                            </button>
-                          )}
-                        </div>
-                        <p className="solution-answer"><strong>Correct answer:</strong> {q.answer ? q.answer.split("||").join(" / ") : "Not provided"}</p>
-                        <div
-                          dangerouslySetInnerHTML={{
-                            __html: cleanLayout(q.explanationHtml || ""),
-                          }}
-                        />
-                      </article>
-                    );
-                  })
-                )}
-              </div>}
+
             </div>
           </section>
         </div>
@@ -971,21 +834,21 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             <div style={{ display: "flex", gap: "8px", alignItems: "center" }}>
               <button
                 className="studio-primary"
-                disabled={submitting || isLegacyBroken}
-                onClick={() => scored ? setShowResultsModal(true) : setConfirmSubmit(true)}
+                disabled={submitting || isLegacyBroken || (initialSolution&&!reviewLoaded)}
+                onClick={() => scored ? scoreResult ? setShowResultsModal(true) : setActiveDrawer("review") : setConfirmSubmit(true)}
                 style={{ padding: "8px 16px", fontSize: "12px" }}
               >
-                {scored ? "Review Score" : "Submit & Review"}
+                {scored ? scoreResult ? "Review score" : "Answer sheet" : "Submit test"}
               </button>
 
               <button
                 className="quiet-button"
                 disabled={submitting}
                 onClick={() => {
-                  setResetAction("reset");
+                  if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored ? "restart" : "reset");
                 }}
               >
-                Reset responses
+                {scored ? "Retake test" : "Reset responses"}
               </button>
             </div>
           </div>
@@ -1019,16 +882,20 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         </footer>
       </main>
 
+      {dictionaryWord!==null&&<DictionaryPanel initialWord={dictionaryWord} onClose={()=>setDictionaryWord(null)} onSave={onSaveVocabulary}/>}
+      {showExport&&<ExportDialog test={test} onClose={()=>setShowExport(false)} loadKeys={async()=>{if(isPreview)return Object.fromEntries(test.parts.flatMap(p=>p.questions.map(q=>[q.number,q])));const data=await assessmentRequest('/api/test-review',{...submissionPayload(),mode:'practice'});return data.keys||{};}}/>}
       {/* Floating Selection Tools */}
       {selectionBox && (
         <div
           className="selection-tools"
+          onPointerDown={e=>e.preventDefault()}
+          onMouseUp={e=>e.stopPropagation()}
           style={{ left: `${selectionBox.x}px`, top: `${selectionBox.y}px` }}
         >
           <button onClick={handleSelectionHighlight}>Highlight</button>
           <button onClick={handleSelectionNote}>Note</button>
           <button onClick={handleSelectionWord}>Save word</button>
-          <button onClick={handleSelectionDictionary}>Dictionary (AI)</button>
+          <button onClick={handleSelectionDictionary}>Dictionary</button>
         </div>
       )}
 
@@ -1082,7 +949,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 Add Note
               </button>
 
-              <div style={{ display: "grid", gap: "10px" }}>
+              <div className="saved-highlights"><h3>Highlights</h3>{highlights.length===0&&<p>Select passage text, then choose Highlight.</p>}{highlights.map(h=><article key={h.id}><mark>{h.text}</mark><button className="quiet-button" onClick={()=>setHighlights(items=>items.filter(item=>item.id!==h.id))}>Remove</button></article>)}</div><div style={{ display: "grid", gap: "10px" }}>
                 {notes.map((n) => (
                   <article key={n.id} className="study-note">
                     {n.quote && <blockquote>"{n.quote}"</blockquote>}
@@ -1147,7 +1014,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                       }}
                     >
                       <div>
-                        <strong>Question {n}</strong>
+                        <strong>Question {n}</strong>{scored&&<p><b>Correct answer:</b> {reviewKeys[n]?.answer?.split('||').join(' / ')||scoreResult?.rows.find(r=>r.number===n)?.answer||'Not provided'}</p>}
                         <div className="studio-small">
                           {responses[n]
                             ? `Answer: ${responses[n]}`
@@ -1389,21 +1256,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </select>
           </label>
 
-          <label className="studio-field">
-            Theme
-            <select
-              value={profile.theme}
-              onChange={(e) => {
-                document.body.classList.toggle(
-                  "studio-dark",
-                  e.target.value === "dark",
-                );
-              }}
-            >
-              <option value="light">Light Paper</option>
-              <option value="dark">Dark Room</option>
-            </select>
-          </label>
+
 
           <div className="studio-actions" style={{ marginTop: "20px" }}>
             <button

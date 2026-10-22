@@ -10,3 +10,5 @@ import "./portal.css";
 
 
 import "./admin.css";
+
+import "./reader.css";

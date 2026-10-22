@@ -1,3 +1,5 @@
+import {FolderPicker} from "./FolderPicker";
+import {folderLocation,type LibraryFolder} from "../services/folders";
 import {auditTest} from "../services/testAudit";
 import {passageTitle} from "../services/passageTitle";
 import React, { useState } from 'react';
@@ -6,6 +8,7 @@ import { firestoreAdapter } from '../services/firestoreAdapter';
 
 interface TestEditorViewProps {
   test: EditableTest;
+  folders?: LibraryFolder[];
   onSave: (test: EditableTest, status: 'published' | 'draft') => Promise<void>;
   onPreview: (test: EditableTest) => void;
   onClose: () => void;
@@ -14,6 +17,7 @@ interface TestEditorViewProps {
 
 export const TestEditorView: React.FC<TestEditorViewProps> = ({
   test: initialTest,
+  folders=[],
   onSave,
   onPreview,
   onClose,
@@ -183,6 +187,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
     setSaving(true);
     try {
       const copy = { ...test, status };
+      delete copy.contentHash;
       await onSave(copy, status);
       onNotify(status === 'published' ? 'Test published to library.' : 'Draft saved.');
     } catch (err) {
@@ -244,14 +249,8 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             />
           </label>
 
-          <label className="studio-field">
-            Collection / Source
-            <input
-              value={test.source}
-              onChange={(e) => setTest({ ...test, source: e.target.value })}
-              placeholder="e.g. Cambridge 18, Actual Tests 2024"
-            />
-          </label>
+          <FolderPicker folders={folders} value={test.folderId||""} onChange={id=>setTest({...test,folderId:id||null,folderPath:folderLocation(id,folders)})}/>
+
 
           <label className="studio-field">
             Skill
@@ -597,4 +596,5 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
     </div>
   );
 };
+
 

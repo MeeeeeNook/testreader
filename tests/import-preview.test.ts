@@ -25,7 +25,7 @@ test('preview does not import on open and confirmation sends only selected tests
  const root=createRoot(document.getElementById('app')!);
  try{
   await act(async()=>root.render(React.createElement(ImportPreview,{plan,existingIds:new Set([plan.candidates[0].test.id]),onCancel:()=>{cancelled++;},onConfirm:items=>confirmed.push(items)})));
-  assert.equal(confirmed.length,0);assert.ok(document.querySelector('dialog[open]'));assert.equal(document.querySelector('iframe')?.getAttribute('sandbox'),'');
+  assert.equal(confirmed.length,0);assert.ok(document.querySelector('dialog[open]'));assert.equal(document.querySelector('iframe'),null);assert.match(document.querySelector('.preview-reading-layout')!.textContent!,/One source title/);
   const checks=[...document.querySelectorAll<HTMLInputElement>('input[type="checkbox"]')];
   await act(async()=>{checks[1].checked=false;checks[1].dispatchEvent(new window.Event("click",{bubbles:true}));});
   const submit=[...document.querySelectorAll('button')].find(b=>b.textContent?.startsWith('Confirm import'))!;

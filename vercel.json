@@ -14,10 +14,6 @@
       "destination": "/api/index"
     },
     {
-      "source": "/answers/:testId/:sectionId/:slug",
-      "destination": "/api/index"
-    },
-    {
       "source": "/knowledge/:id/:slug",
       "destination": "/api/index"
     },

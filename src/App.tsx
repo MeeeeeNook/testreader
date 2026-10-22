@@ -1,10 +1,13 @@
+import {testLink,resolveTestLink} from "./services/testLinks";
+import {folderLocation,folderDeletion,trashFolders,restoreFolders,type LibraryFolder} from "./services/folders";
+import {contentMatch} from "./services/importIdentity";
 import {AdminSidebar} from './components/AdminSidebar';
 import {ImportPreview} from './components/ImportPreview';
 import {prepareImport,disposeImport,replaceImportAssets,type ImportPlan,type ImportCandidate} from './services/importPreview';
 import { PortalHeader } from "./components/PortalHeader";
 import { HomeView } from "./components/HomeView";
 import { PracticeCatalog } from "./components/PracticeCatalog";
-import { KnowledgeView, ForumView, ContributionView, LoginNotice } from "./components/CommunityViews";
+import { KnowledgeView, ContributionView, LoginNotice } from "./components/CommunityViews";
 import { sectionSummaries } from "./services/portal";
 const ContentAdminView = React.lazy(() => import("./components/ContentAdminView").then(m => ({default:m.ContentAdminView})));
 import { createId } from "./services/ids";
@@ -68,9 +71,11 @@ export default function App() {
   >("local");
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
+  const [catalogLoaded,setCatalogLoaded]=useState(false);
   const [catalogError, setCatalogError] = useState("");
   const [adminDataError, setAdminDataError] = useState("");
   const [sessionId, setSessionId] = useState("");
+  const [activeDirectSlug,setActiveDirectSlug]=useState("");
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"admin" | "student">("student");
   const [suspended, setSuspended] = useState(false);
@@ -106,6 +111,9 @@ export default function App() {
   });
 
   const [tests, setTests] = useState<TestMeta[]>([]);
+  const folders=profile.libraryFolders||[];
+  const folderSaving=useRef(false);
+  const visibleCatalog=tests.map(t=>({...t,originSource:t.source,source:t.folderPath||"Unfiled"}));
   const [attempts, setAttempts] = useState<AttemptRecord[]>([]);
   const [vocabulary, setVocabulary] = useState<VocabularyItem[]>([]);
   const [reports, setReports] = useState<ContentReport[]>([]);
@@ -269,6 +277,7 @@ export default function App() {
             : "Could not load the library.",
         );
     }
+    if(current())setCatalogLoaded(true);
     let words: VocabularyItem[] = [];
     try {
       const saved = JSON.parse(
@@ -336,11 +345,25 @@ export default function App() {
     setPageLoading(false);
     const hydrate = async () => {
       try {
-        if (page.name === "test" && page.id) {
+        if (page.name === "reading" && page.slug) {
+          if(!catalogLoaded){setPageLoading(true);return;}if(catalogError)throw new Error(catalogError);
+          const target=resolveTestLink(page.slug,tests);
+          if(!target)throw new Error("This test link is unavailable. Find the test in the library.");
+          setPageLoading(true);
+          const full=await firestoreAdapter.getTestComplete(target.test.id);
+          if(!alive)return;
+          const section=target.section?(full.parts.find(p=>p.id===target.section!.id)||(!target.test.sectionSummaries?full.parts[target.section.index]:undefined)):null;
+          if(target.section&&!section)throw new Error("This passage is unavailable.");
+          const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],title:section.title}:full;
+          const params=new URL(location,'https://studio.local').searchParams;
+          setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(params.get('mode')==='exam'?'exam':'practice');setActiveDuration(params.has('minutes')?Math.max(0,Math.min(180,Number(params.get('minutes'))||0)):section?20:full.duration||60);setActivePreview(false);
+          setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all"));
+        } else if (page.name === "test" && page.id) {
           setPageLoading(true);
           setSelectedTestFull(null);
           const test = await firestoreAdapter.getTestComplete(page.id);
           if (!alive) return;
+          if(page.solution){navigate(testLink(test,page.section?{id:page.section,title:test.parts.find(p=>p.id===page.section)?.title||test.title}:null,true),true);return;}
           setSelectedTestFull(test);
           setSetupMode("practice");
           setSetupTime(test.duration || 60);
@@ -382,7 +405,7 @@ export default function App() {
               id: `test_${Date.now()}`,
               title: "New IELTS Test",
               skill: "reading",
-              source: "My collection",
+              source: "Unfiled",
               access: "free",
               status: "draft",
               duration: 60,
@@ -416,17 +439,15 @@ export default function App() {
     return () => {
       alive = false;
     };
-  }, [location, authReady, profile.id, userRole]);
+  }, [location, authReady, profile.id, userRole, tests.length, catalogLoaded, catalogError]);
   useEffect(() => {
     document.title = `${route === "test" ? "Test details" : getCrumb()} · IELTS Studio`;
-    if (route !== "workspace") setGuard(false);
+    if (!["workspace","reading"].includes(route)) setGuard(false);
   }, [location, setGuard]);
   useEffect(() => {
     document.body.classList.toggle(
       "hub-exam",
-      route === "workspace" &&
-        Boolean(activeTest) &&
-        page.session === sessionId,
+      Boolean(activeTest) && ((route === "reading" && activeDirectSlug===page.slug) || (route === "workspace" && page.session === sessionId)),
     );
     return () => document.body.classList.remove("hub-exam");
   }, [route, activeTest?.id, page.session, sessionId]);
@@ -442,7 +463,8 @@ export default function App() {
       );
     } catch {}
     if (user) {
-      await firestoreAdapter.put("users", updated);
+      const {libraryFolders,libraryFolderVersion,...personal}=updated;
+      await firestoreAdapter.put("users", personal);
     }
   };
 
@@ -519,6 +541,11 @@ export default function App() {
     durationMinutes: number,
     preview = false,
   ) => {
+    if(!preview&&!testToStart.sourceSections?.length){
+      const parent={id:testToStart.sourceTestId||testToStart.id,title:testToStart.title};
+      const section=testToStart.sectionIds?.length===1?{id:testToStart.sectionIds[0],title:testToStart.parts[0].title}:null;
+      const path=testLink(parent,section);const params=new URLSearchParams();if(modeToUse==='exam')params.set('mode','exam');if(durationMinutes!==(section?20:testToStart.duration||60))params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
+    }
     const launchId = createId();
     const safe = {
       ...testToStart,
@@ -647,6 +674,35 @@ export default function App() {
     }
     if (errors.length) throw new Error(errors.join(" · "));
   };
+
+  const saveFolders=async(next:LibraryFolder[])=>{
+    if(userRole!=="admin")throw new Error("Administrator access required.");
+    if(folderSaving.current)throw new Error("Wait for the current folder change to finish.");
+    folderSaving.current=true;
+    try{
+      const version=await firestoreAdapter.saveLibraryFolders(next,profile.libraryFolderVersion||0);
+      setProfile(prev=>({...prev,libraryFolders:next,libraryFolderVersion:version}));
+      const groups=new Map<string,string[]>();
+      for(const test of tests){const target=folderLocation(test.folderId,next);if(target&&target!==test.folderPath)groups.set(target,[...(groups.get(target)||[]),test.id]);}
+      for(const [folderPath,ids]of groups)await handleTestMeta(ids,{folderPath});
+    }finally{folderSaving.current=false;}
+  };
+  const moveTests=async(ids:string[],id:string)=>{
+    const target=folderLocation(id,folders);
+    if(id&&!target)throw new Error("Choose an existing folder.");
+    await handleTestMeta(ids,{folderId:id||null,folderPath:target});
+    notify(ids.length+" tests moved to "+(target||"Unfiled")+".");
+  };
+  const deleteFolders=async(ids:string[],trashTests:boolean)=>{
+    const affected=folderDeletion(folders,tests,ids);
+    if(trashTests){
+      const groups=new Map<string,string[]>();
+      for(const test of tests.filter(t=>affected.testIds.includes(t.id)))groups.set(test.status,[...(groups.get(test.status)||[]),test.id]);
+      for(const [restoreStatus,testIds]of groups)await handleTestMeta(testIds,{status:"archived",deletedAt:Date.now(),restoreStatus});
+    }else await moveTests(affected.testIds,"");
+    await saveFolders(trashFolders(folders,affected.folderIds));
+    notify("Folders moved to Deleted folders.");
+  };
   const handleDeleteTest = async (id: string) => {
     const test = tests.find((t) => t.id === id);
     if (!test) return;
@@ -659,6 +715,7 @@ export default function App() {
   const handleRestoreTest = async (id: string) => {
     const test = tests.find((t) => t.id === id);
     if (!test) return;
+    if(test.folderId&&!folderLocation(test.folderId,folders))await saveFolders(restoreFolders(folders,test.folderId));
     await handleTestMeta([id], {
       status: test.restoreStatus || "draft",
       deletedAt: null,
@@ -759,6 +816,8 @@ export default function App() {
     setUploadProgress("Preparing local preview…");setUploadReport(null);
     try {
       const plan=await prepareImport(files);
+      const seen=new Map<string,{title:string;folder:string}>();
+      for(const candidate of plan.candidates){const match=contentMatch(candidate.test.contentHash||"",tests);candidate.match=match?{title:match.title,folder:match.folderPath||"Unfiled"}:seen.get(candidate.test.contentHash||"");seen.set(candidate.test.contentHash||"",{title:candidate.test.title,folder:"this upload"});}
       closeImportPreview();importPlanRef.current=plan;setImportPlan(plan);
     }catch(error){notify(error instanceof Error?error.message:String(error));}
     finally{preparingImport.current=false;setUploadProgress(null);}
@@ -767,8 +826,8 @@ export default function App() {
     const plan=importPlanRef.current;
     if(!plan||userRole!=="admin"||importing.current||!items.length)return;
     importing.current=true;setImportPlan(null);setUploadProgress("Uploading images…");
-    let imported=0,duplicates=0,completed=false;
-    const errors=[...plan.errors],seenIds=new Set<string>();
+    let imported=0,duplicates=items.filter(item=>item.match).length,completed=false;
+    const errors=[...plan.errors];
     try {
       const assets=new Map<string,string>();
       const selectedContent=JSON.stringify(items);
@@ -782,36 +841,7 @@ export default function App() {
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          if (seenIds.has(item.test.id)) {
-            duplicates++;
-            continue;
-          }
-          const existing = await firestoreAdapter.get("tests", item.test.id);
-          if (existing) {
-            const full = await firestoreAdapter.getTestComplete(item.test.id);
-            const broken = full.parts.some(
-              (p) =>
-                p.questions.some((q) => !q.missing) &&
-                !Object.keys(p.slots || {}).length,
-            );
-            if (!broken) {
-              seenIds.add(item.test.id);
-              duplicates++;
-              continue;
-            }
-            // Repair the old incomplete importer output, keeping admin catalog settings.
-            item.test = {
-              ...item.test,
-              title: full.title,
-              source: full.source,
-              status: full.status,
-              access: full.access,
-              duration: full.duration,
-              createdAt: full.createdAt,
-            };
-          }
           await firestoreAdapter.saveTestComplete(item.test);
-          seenIds.add(item.test.id);
           imported++;
         } catch (saveErr) {
           errors.push(
@@ -823,7 +853,7 @@ export default function App() {
       setUploadReport({ imported, duplicates, errors });completed=true;
       await loadData();
       notify(
-        `Import complete: ${imported} imported or repaired, ${duplicates} duplicates skipped.`,
+        `Import complete: ${imported} imported, ${duplicates} content matches kept as new copies.`,
       );
     } catch (topErr) {
       if(!completed)setImportPlan(plan);
@@ -873,7 +903,7 @@ export default function App() {
   };
 
   // If in active test workspace:
-  if (route === "workspace" && activeTest && page.session === sessionId) {
+  if (activeTest && !pageLoading && !pageError && ((route === "reading" && activeDirectSlug===page.slug) || (route === "workspace" && page.session === sessionId))) {
     return (
       <>
         {pendingNavigation && (
@@ -883,7 +913,9 @@ export default function App() {
           />
         )}
         <TestWorkspace
-          key={`${profile.id}:${sessionId}`}
+          key={`${profile.id}:${sessionId}:${activeMode}:${page.solution ? "solution" : "test"}`}
+          onRetake={()=>{const t=activeTest;try{localStorage.removeItem(`reading-room:v3:${profile.id}:${sessionId}:practice`);}catch{}navigate(testLink({id:t.sourceTestId||t.id,title:t.title},t.sectionIds?.length===1?{id:t.sectionIds[0],title:t.title}:null));}}
+          initialSolution={page.name === "reading" && Boolean(page.solution)}
           sessionId={sessionId}
           onSessionActive={setGuard}
           onHistorySaved={() =>
@@ -1012,17 +1044,17 @@ export default function App() {
                   </button>
                 </div>
               )}
-            {route === "home" && <HomeView tests={tests} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
-            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={tests} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
+            {route === "home" && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
+            {["library", "practice", "full"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"} category={page.category} location={location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
             {route === "knowledge" && <KnowledgeView profile={profile} location={location} onNavigate={navigate} />}
-            {route === "forum" && <ForumView profile={profile} />}
+
             {route === "contribute" && <ContributionView profile={profile} />}
             {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
             {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={false} text={false ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
             {route === "mock" && (
               <MockBuilderView
-                tests={tests}
+                tests={visibleCatalog}
                 onStartSession={handleStartSession}
                 onNotify={notify}
               />
@@ -1087,11 +1119,11 @@ export default function App() {
                 adminUid={user?.uid || ""}
                 onNewTest={handleNewTest}
                 onDeleteTest={handleDeleteTest}
-                onDeleteFolders={async ids=>{const groups=new Map<string,string[]>();for(const id of ids){const t=tests.find(t=>t.id===id);if(t&&!t.deletedAt)groups.set(t.status,[...(groups.get(t.status)||[]),id]);}for(const [restoreStatus,group] of groups)await handleTestMeta(group,{status:"archived",deletedAt:Date.now(),restoreStatus:restoreStatus as TestMeta["status"]});notify(ids.length+" tests moved to Trash.");}}
+                folders={folders}
+                onFolderChange={saveFolders}
+                onDeleteFolders={deleteFolders}
                 onRestoreTest={handleRestoreTest}
-                onSetCollection={(ids, collection) =>
-                  handleTestMeta(ids, { source: collection })
-                }
+                onSetCollection={moveTests}
                 onRenameTest={(id,title)=>handleTestMeta([id],{title})}
                 onDuplicateTest={async id=>{
                   const original=await firestoreAdapter.getTestComplete(id);
@@ -1136,6 +1168,7 @@ export default function App() {
               editingTest &&
               !pageLoading && (
                 <TestEditorView
+                  folders={folders}
                   test={editingTest}
                   onSave={async (savedTest, status) => {
                     await handleSaveTest(savedTest, status);
@@ -1330,7 +1363,7 @@ export default function App() {
         </dialog>
       )}
 
-      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} existingIds={new Set(tests.map(t=>t.id))} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
+      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} folders={folders} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
       {/* Upload Progress Modal */}
       {(uploadProgress || uploadReport) && (
         <dialog
@@ -1369,9 +1402,7 @@ export default function App() {
           {uploadReport && (
             <div>
               <p>
-                <strong>{uploadReport.imported}</strong> tests imported or
-                repaired · <strong>{uploadReport.duplicates}</strong> duplicates
-                skipped.
+                <strong>{uploadReport.imported}</strong> tests imported · <strong>{uploadReport.duplicates}</strong> content matches imported as copies.
               </p>
 
               {uploadReport.errors.length > 0 && (

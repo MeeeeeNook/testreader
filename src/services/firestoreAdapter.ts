@@ -1,3 +1,5 @@
+import {contentHash} from "./importIdentity";
+import type {LibraryFolder} from "./folders";
 import { sectionSummaries } from "./portal";
 import { passageTitle } from "./passageTitle";
 import { buildPrivateKeys } from "./privateKeys";
@@ -8,6 +10,7 @@ import {
   getDocs,
   setDoc,
   writeBatch,
+  runTransaction,
   deleteDoc,
   query,
   where,
@@ -27,6 +30,18 @@ import {
 import { EditableTest, EditablePart, TestMeta, cleanLayout } from "./importer";
 
 export class FirestoreAdapter {
+  async saveLibraryFolders(folders:LibraryFolder[],expectedVersion:number):Promise<number> {
+    const user=auth.currentUser;if(!user||(await this.getRole())!=="admin")throw new Error("Administrator access required.");
+    if(folders.length>1000)throw new Error("The library supports up to 1000 folders.");
+    const profile=doc(db,"users",user.uid);
+    return runTransaction(db,async transaction=>{
+      const snap=await transaction.get(profile);if(!snap.exists())throw new Error("Your account profile is still loading. Please retry.");
+      const version=snap.data().libraryFolderVersion||0;
+      if(version!==expectedVersion)throw new Error("Folders changed in another tab. Reload before editing them.");
+      transaction.update(profile,{libraryFolders:folders,libraryFolderVersion:version+1});return version+1;
+    });
+  }
+
   private cacheUserId: string | null = null;
   private roleCache: "admin" | "student" | null = null;
   private testCache: Map<string, EditableTest> = new Map();
@@ -115,6 +130,8 @@ export class FirestoreAdapter {
     changes: Partial<TestMeta> & {
       deletedAt?: number | null;
       restoreStatus?: string;
+      folderId?:string|null;
+      folderPath?:string;
     },
   ): Promise<void> {
     if ((await this.getRole()) !== "admin")
@@ -129,6 +146,8 @@ export class FirestoreAdapter {
       "status",
       "deletedAt",
       "restoreStatus",
+      "folderId",
+      "folderPath",
     ] as const)
       if (changes[key] !== undefined) allowed[key] = changes[key];
     await setDoc(doc(db, "tests", id), allowed, { merge: true });
@@ -259,6 +278,7 @@ export class FirestoreAdapter {
         title: meta.title,
         skill: meta.skill,
         source: meta.source,
+        folderId:meta.folderId||null,folderPath:meta.folderPath||"",contentHash:meta.contentHash,
         access: meta.access,
         status: meta.status,
         duration: meta.duration,
@@ -327,6 +347,8 @@ export class FirestoreAdapter {
       createdAt: test.createdAt || now,
       updatedAt: now,
       custom: true,
+      folderId:test.folderId||null,folderPath:test.folderPath||"",
+      contentHash:test.contentHash||await contentHash(test),
     };
 
     try {
@@ -415,3 +437,4 @@ export class FirestoreAdapter {
 }
 
 export const firestoreAdapter = new FirestoreAdapter();
+
