@@ -1,3 +1,5 @@
+import { ConfirmActionDialog } from "./ConfirmActionDialog";
+import { createId } from "../services/ids";
 import { assessmentRequest } from "../services/assessmentClient";
 import React, { useState, useEffect, useRef } from "react";
 import {
@@ -50,7 +52,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
-  const [textSize, setTextSize] = useState(Math.max(18, profile.fontSize || 18));
+  const [resetAction, setResetAction] = useState<"reset" | "restart" | null>(
+    null,
+  );
+  const [textSize, setTextSize] = useState(
+    Math.max(18, profile.fontSize || 18),
+  );
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const sessionKey = `reading-room:v3:${profile.id}:${sessionId}:${mode}${isPreview ? ":preview" : ""}`;
   const [savedSession] = useState(() => {
@@ -350,9 +357,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     setSubmitting(true);
     const wasRunning = timerRunning;
     const submissionOwner = auth.currentUser?.uid || "guest";
-    const attemptId = crypto.randomUUID();
     setTimerRunning(false);
     try {
+      const attemptId = createId();
       // Unsaved editor previews use their own local keys and never create an attempt.
       if (isPreview) {
         const result = scoreTest(
@@ -372,7 +379,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         setShowResultsModal(true);
         return;
       }
-      const data = await assessmentRequest('/api/submit-exam', { ...submissionPayload(), attemptId });
+      const data = await assessmentRequest("/api/submit-exam", {
+        ...submissionPayload(),
+        attemptId,
+      });
       setReviewKeys(data.keys || {});
       setReviewLoaded(true);
       setScoreResult(data.result);
@@ -431,7 +441,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       !reviewLoaded
     ) {
       try {
-        const data = await assessmentRequest('/api/test-review', { ...submissionPayload(), mode: 'practice' });
+        const data = await assessmentRequest("/api/test-review", {
+          ...submissionPayload(),
+          mode: "practice",
+        });
         setReviewKeys(data.keys || {});
         setReviewLoaded(true);
       } catch (error) {
@@ -618,9 +631,45 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   return (
     <div
       className={`app ${mode === "exam" ? "exam-mode" : ""} ${scored ? "exam-finished" : ""}`}
-      style={{'--study-font-size':`${textSize}px`} as React.CSSProperties}
+      style={{ "--study-font-size": `${textSize}px` } as React.CSSProperties}
       onMouseUp={handleMouseUp}
     >
+      {resetAction && (
+        <ConfirmActionDialog
+          title={
+            resetAction === "restart"
+              ? "Restart this test?"
+              : "Reset responses?"
+          }
+          confirmLabel={
+            resetAction === "restart" ? "Restart test" : "Reset responses"
+          }
+          onCancel={() => setResetAction(null)}
+          onConfirm={() => {
+            setResponses({});
+            setFlags([]);
+            setScored(false);
+            setScoreResult(null);
+            setApproxBand(null);
+            setShowResultsModal(false);
+            setShowAnswers(false);
+            setShowExplanations(false);
+            setReviewLoaded(false);
+            setReviewKeys({});
+            if (resetAction === "restart") {
+              setTimerRemaining(Math.max(0, initialDurationMinutes) * 60);
+              setTimerRunning(mode === "exam" || initialDurationMinutes > 0);
+              expired.current = false;
+            }
+            setResetAction(null);
+            setShowDisplayModal(false);
+            onNotify("Responses cleared.");
+          }}
+        >
+          Your current responses will be cleared. Completed history records are
+          kept.
+        </ConfirmActionDialog>
+      )}
       <main className="main">
         {/* Top Header Bar */}
         <header className="topbar">
@@ -927,13 +976,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
               <button
                 className="quiet-button"
+                disabled={submitting}
                 onClick={() => {
-                  if (confirm("Reset all responses for this test?")) {
-                    setResponses({});
-                    setScored(false);
-                    setScoreResult(null);
-                    onNotify("Responses reset.");
-                  }
+                  setResetAction("reset");
                 }}
               >
                 Reset responses
@@ -1332,7 +1377,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               <option value={14}>Compact (14px)</option>
               <option value={16}>Small (16px)</option>
               <option value={18}>Comfortable (18px)</option>
-              <option value={20}>Large (20px)</option><option value={22}>Extra large (22px)</option><option value={24}>Maximum (24px)</option>
+              <option value={20}>Large (20px)</option>
+              <option value={22}>Extra large (22px)</option>
+              <option value={24}>Maximum (24px)</option>
             </select>
           </label>
 
@@ -1362,18 +1409,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             <button
               className="studio-secondary studio-danger"
               onClick={() => {
-                if (
-                  confirm(
-                    "Restart this test from the beginning with empty responses?",
-                  )
-                ) {
-                  setResponses({});
-                  setScored(false);
-                  setScoreResult(null);
-                  setTimerRemaining(initialDurationMinutes * 60);
-                  setShowDisplayModal(false);
-                  onNotify("Test session restarted.");
-                }
+                setResetAction("restart");
               }}
             >
               Restart Test

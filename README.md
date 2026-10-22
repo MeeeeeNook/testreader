@@ -76,3 +76,5 @@ firebase deploy --only firestore --project gen-lang-client-0464915880
 - Submission/review refresh an expired Firebase ID token once. Server/database failures report a service/configuration error instead of falsely saying the user's sign-in expired. Results from successful submissions already contain review keys and do not need a second review request.
 - A verified owner can use existing protected Firestore reads to mark/review their own tests if the API returns 503. Student and guest marking still require the backend's Firebase credentials. Configure Application Default Credentials on Google hosting, or the server-only `FIREBASE_SERVICE_ACCOUNT_JSON` secret on another host. This does not broaden student access to answer keys.
 - Question text, choices, inputs, and passages use the Aa size selector; sessions start at a comfortable 18px minimum.
+
+Browser verification also caught and fixed session-ID generation in preview contexts without `crypto.randomUUID()`. Reset/restart confirmations use visible dialogs; reset is disabled while a submission is in flight.

@@ -1,3 +1,4 @@
+import { createId } from "./services/ids";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { User } from "firebase/auth";
 import { subscribeAuth } from "./services/auth";
@@ -507,7 +508,7 @@ export default function App() {
     durationMinutes: number,
     preview = false,
   ) => {
-    const launchId = crypto.randomUUID();
+    const launchId = createId();
     const safe = {
       ...testToStart,
       parts: testToStart.parts.map((p) => ({
@@ -782,7 +783,7 @@ export default function App() {
           try {
             assets[img.name] = await firestoreAdapter.uploadMedia(
               img.blob,
-              `media/${crypto.randomUUID()}-${img.name}`,
+              `media/${createId()}-${img.name}`,
             );
           } catch {
             errors.push(`${img.name}: diagram upload failed.`);

@@ -407,6 +407,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <div style={{ display: "flex", gap: "6px" }}>
                           <button
                             className="studio-quiet"
+                            disabled={Boolean(t.deletedAt) || busy}
                             onClick={() => onEditTest(t.id)}
                           >
                             Edit
@@ -433,6 +434,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           <button
                             className="studio-quiet"
                             disabled={Boolean(t.deletedAt) || busy}
+                            hidden={tab === "trash"}
                             onClick={() => onArchiveToggle(t.id)}
                           >
                             {t.status === "archived" ? "Restore" : "Archive"}
