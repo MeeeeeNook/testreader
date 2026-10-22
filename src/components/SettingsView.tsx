@@ -1,11 +1,12 @@
-import React, { useState } from 'react';
-import { UserProfile, AttemptRecord, VocabularyItem } from '../types';
+import React, { useState } from "react";
+import { UserProfile, AttemptRecord, VocabularyItem } from "../types";
 
 interface SettingsViewProps {
   profile: UserProfile;
   attempts: AttemptRecord[];
   vocabulary: VocabularyItem[];
   isAdmin: boolean;
+  onViewStudents: () => void;
   onUpdateProfile: (updates: Partial<UserProfile>) => Promise<void>;
   onExportTestBank: () => void;
   onOpenUpload: () => void;
@@ -17,6 +18,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   attempts,
   vocabulary,
   isAdmin,
+  onViewStudents,
   onUpdateProfile,
   onExportTestBank,
   onOpenUpload,
@@ -27,12 +29,12 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
   const [language, setLanguage] = useState(profile.language);
   const [theme, setTheme] = useState(profile.theme);
 
-  const isVi = profile.language === 'vi';
+  const isVi = profile.language === "vi";
 
   const handleSavePreferences = async () => {
     const numTarget = Number(target);
     if (isNaN(numTarget) || numTarget < 0 || numTarget > 9) {
-      onNotify('Please choose a target band between 0 and 9.');
+      onNotify("Please choose a target band between 0 and 9.");
       return;
     }
     await onUpdateProfile({
@@ -41,7 +43,7 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       language,
       theme,
     });
-    onNotify('Preferences saved.');
+    onNotify("Preferences saved.");
   };
 
   const handleExportStudyData = () => {
@@ -51,24 +53,27 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
       attempts: attempts.filter((a) => a.owner === profile.id),
       vocabulary: vocabulary.filter((w) => w.owner === profile.id),
     };
-    const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(data, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `My_IELTS_Study_Data_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    onNotify('Personal study backup downloaded.');
+    onNotify("Personal study backup downloaded.");
   };
 
   return (
-    <div style={{ maxWidth: '850px', paddingBottom: '40px' }}>
+    <div style={{ maxWidth: "850px", paddingBottom: "40px" }}>
       <div className="studio-page-head">
         <div>
           <div className="studio-eyebrow">MAKE YOURSELF AT HOME</div>
           <h1 className="studio-heading">Your preferences.</h1>
           <p className="studio-lead">
-            Configure your reading comfort, adjust your target IELTS score, and manage your portable test data.
+            Configure your reading comfort, adjust your target IELTS score, and
+            manage your portable test data.
           </p>
         </div>
       </div>
@@ -125,21 +130,33 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           </label>
         </div>
 
-        <div className="studio-actions" style={{ marginTop: '16px' }}>
+        <div className="studio-actions" style={{ marginTop: "16px" }}>
           <button className="studio-primary" onClick={handleSavePreferences}>
             Save Preferences
           </button>
         </div>
       </div>
 
+      {isAdmin && (
+        <section className="studio-panel">
+          <h2>Teacher workspace</h2>
+          <p>
+            View your students and their synced attempts, scores, and answers.
+          </p>
+          <button className="studio-primary" onClick={onViewStudents}>
+            Open Students
+          </button>
+        </section>
+      )}
       <div className="studio-panel">
         <h3>Your Data, Your Ownership</h3>
         <p className="studio-lead">
-          Completed test results are saved on this device first. Sign in to sync your history with your
-          account. Session drafts stay on this device. You can export your study data below.
+          Completed test results are saved on this device first. Sign in to sync
+          your history with your account. Session drafts stay on this device.
+          You can export your study data below.
         </p>
 
-        <div className="studio-actions" style={{ marginTop: '20px' }}>
+        <div className="studio-actions" style={{ marginTop: "20px" }}>
           <button className="studio-secondary" onClick={handleExportStudyData}>
             Export My Study Data (JSON)
           </button>
@@ -156,13 +173,13 @@ export const SettingsView: React.FC<SettingsViewProps> = ({
           )}
         </div>
 
-        <div className="studio-callout" style={{ marginTop: '24px' }}>
-          <strong>Secure Administration & Isolation:</strong> Responses, notes, highlights, and vocabulary
-          are strictly partitioned per user account in Firestore. Private answer keys are inaccessible to
-          students before exam submission.
+        <div className="studio-callout" style={{ marginTop: "24px" }}>
+          <strong>Secure Administration & Isolation:</strong> Responses, notes,
+          highlights, and vocabulary are strictly partitioned per user account
+          in Firestore. Private answer keys are inaccessible to students before
+          exam submission.
         </div>
       </div>
     </div>
   );
 };
-

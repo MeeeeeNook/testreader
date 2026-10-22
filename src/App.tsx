@@ -1,3 +1,4 @@
+import { createId } from "./services/ids";
 import React, { useState, useEffect, useRef, useCallback } from "react";
 import { User } from "firebase/auth";
 import { subscribeAuth } from "./services/auth";
@@ -12,6 +13,7 @@ import {
 } from "./types";
 import {
   collectFiles,
+  importJsonTests,
   jsonParts,
   toEditable,
   extractTitle,
@@ -39,8 +41,24 @@ import { usePageRouter } from "./services/usePageRouter";
 import { readAttempts } from "./services/localHistory.js";
 import { syncHistory } from "./services/historySync";
 
+const StudentsView = React.lazy(() =>
+  import("./components/StudentsView").then((m) => ({
+    default: m.StudentsView,
+  })),
+);
+import { LeaveTestDialog } from "./components/LeaveTestDialog";
+
 export default function App() {
-  const { page, location, navigate, setGuard, setRoute } = usePageRouter();
+  const {
+    page,
+    location,
+    navigate,
+    setGuard,
+    setRoute,
+    pendingNavigation,
+    confirmNavigation,
+    cancelNavigation,
+  } = usePageRouter();
   const route = page.name;
   const [authReady, setAuthReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<
@@ -49,6 +67,7 @@ export default function App() {
   const [pageLoading, setPageLoading] = useState(false);
   const [pageError, setPageError] = useState("");
   const [catalogError, setCatalogError] = useState("");
+  const [adminDataError, setAdminDataError] = useState("");
   const [sessionId, setSessionId] = useState("");
   const [user, setUser] = useState<User | null>(null);
   const [userRole, setUserRole] = useState<"admin" | "student">("student");
@@ -267,6 +286,16 @@ export default function App() {
       if (!current()) return;
       if (r.status === "fulfilled") setReports(r.value);
       if (l.status === "fulfilled") setLearners(l.value);
+      setAdminDataError(
+        [r, l]
+          .filter((result) => result.status === "rejected")
+          .map((result) =>
+            result.status === "rejected"
+              ? String(result.reason?.message || result.reason)
+              : "",
+          )
+          .join(" · "),
+      );
     }
   }, [authReady, user?.uid, userRole, profile.id]);
   useEffect(() => {
@@ -479,7 +508,7 @@ export default function App() {
     durationMinutes: number,
     preview = false,
   ) => {
-    const launchId = crypto.randomUUID();
+    const launchId = createId();
     const safe = {
       ...testToStart,
       parts: testToStart.parts.map((p) => ({
@@ -590,14 +619,49 @@ export default function App() {
     await loadData();
   };
 
+  const handleTestMeta = async (ids: string[], changes: any) => {
+    if (userRole !== "admin") throw new Error("Administrator access required.");
+    const errors: string[] = [];
+    for (const id of ids) {
+      try {
+        await firestoreAdapter.updateTestMeta(id, changes);
+        setTests((previous) =>
+          previous.map((t) =>
+            t.id === id ? { ...t, ...changes, updatedAt: Date.now() } : t,
+          ),
+        );
+      } catch (e) {
+        errors.push(`${id}: ${e instanceof Error ? e.message : String(e)}`);
+      }
+    }
+    if (errors.length) throw new Error(errors.join(" · "));
+  };
+  const handleDeleteTest = async (id: string) => {
+    const test = tests.find((t) => t.id === id);
+    if (!test) return;
+    await handleTestMeta([id], {
+      status: "archived",
+      deletedAt: Date.now(),
+      restoreStatus: test.status,
+    });
+  };
+  const handleRestoreTest = async (id: string) => {
+    const test = tests.find((t) => t.id === id);
+    if (!test) return;
+    await handleTestMeta([id], {
+      status: test.restoreStatus || "draft",
+      deletedAt: null,
+    });
+  };
+
   // Admin Archive Toggle
   const handleArchiveToggle = async (testId: string) => {
-    const fullTest = await firestoreAdapter.getTestComplete(testId);
-    const newStatus = fullTest.status === "archived" ? "draft" : "archived";
-    fullTest.status = newStatus;
-    await firestoreAdapter.saveTestComplete(fullTest);
-    notify(`Test marked as ${newStatus}.`);
-    await loadData();
+    const test = tests.find((t) => t.id === testId);
+    if (!test) return;
+    await handleTestMeta([testId], {
+      status: test.status === "archived" ? "draft" : "archived",
+    });
+    notify("Test status updated.");
   };
 
   // Admin Export Single Test
@@ -694,19 +758,8 @@ export default function App() {
       for (const file of files.filter((f) => /\.json$/i.test(f.name))) {
         try {
           const text = await file.text();
-          const data = JSON.parse(text);
-          const testsToImport = Array.isArray(data)
-            ? data
-            : data.format === "ielts-studio-backup"
-              ? data.tests
-              : [data];
-
-          for (let item of testsToImport) {
-            if (item.parts?.[0]?.topic_content) {
-              item = toEditable(item);
-            }
-            candidates.push({ test: item, name: file.name });
-          }
+          for (const test of importJsonTests(text, file.name))
+            candidates.push({ test, name: file.name });
         } catch (err) {
           errors.push(
             `${file.name}: ${err instanceof Error ? err.message : String(err)}`,
@@ -730,7 +783,7 @@ export default function App() {
           try {
             assets[img.name] = await firestoreAdapter.uploadMedia(
               img.blob,
-              `media/${crypto.randomUUID()}-${img.name}`,
+              `media/${createId()}-${img.name}`,
             );
           } catch {
             errors.push(`${img.name}: diagram upload failed.`);
@@ -742,10 +795,24 @@ export default function App() {
         // Parse HTML candidates
         for (const c of htmlCandidates) {
           try {
-            const rawParts = jsonParts(c.source);
-            const title = extractTitle(c.source, c.name);
-            const editable = toEditable({ title, parts: rawParts }, {}, assets);
-            candidates.push({ test: editable, name: c.name });
+            if (/\.json$/i.test(c.name)) {
+              for (const test of importJsonTests(c.source, c.name, assets))
+                candidates.push({ test, name: c.name });
+            } else {
+              const rawParts = jsonParts(c.source);
+              const title = extractTitle(c.source, c.name);
+              const segments = c.name.split("/");
+              const source =
+                segments.length > 1
+                  ? segments[0].replace(/\.zip$/i, "")
+                  : "Imported collection";
+              const editable = toEditable(
+                { title, parts: rawParts },
+                { source },
+                assets,
+              );
+              candidates.push({ test: editable, name: c.name });
+            }
           } catch (err) {
             errors.push(
               `${c.name}: ${err instanceof Error ? err.message : String(err)}`,
@@ -843,6 +910,12 @@ export default function App() {
   if (route === "workspace" && activeTest && page.session === sessionId) {
     return (
       <>
+        {pendingNavigation && (
+          <LeaveTestDialog
+            onStay={cancelNavigation}
+            onLeave={confirmNavigation}
+          />
+        )}
         <TestWorkspace
           key={`${profile.id}:${sessionId}`}
           sessionId={sessionId}
@@ -868,6 +941,12 @@ export default function App() {
 
   return (
     <div id="studioHub" className="studio-hub">
+      {pendingNavigation && (
+        <LeaveTestDialog
+          onStay={cancelNavigation}
+          onLeave={confirmNavigation}
+        />
+      )}
       {/* Sidebar Navigation */}
       <Navigation
         route={route}
@@ -958,7 +1037,9 @@ export default function App() {
             {(pageError ||
               route === "notfound" ||
               (authReady &&
-                (route === "admin" || route === "editor") &&
+                (route === "admin" ||
+                  route === "editor" ||
+                  route === "students") &&
                 userRole !== "admin")) && (
               <div className="studio-panel">
                 <h1>Page unavailable</h1>
@@ -974,6 +1055,19 @@ export default function App() {
                 </button>
               </div>
             )}
+            {userRole === "admin" &&
+              (route === "admin" || route === "students") &&
+              adminDataError && (
+                <div className="studio-callout" role="alert">
+                  Could not load all admin data: {adminDataError}{" "}
+                  <button
+                    className="studio-secondary"
+                    onClick={() => void loadData()}
+                  >
+                    Retry
+                  </button>
+                </div>
+              )}
             {route === "library" && (
               <LibraryView
                 isAdmin={userRole === "admin"}
@@ -1028,12 +1122,21 @@ export default function App() {
                 vocabulary={vocabulary}
                 isAdmin={userRole === "admin"}
                 onUpdateProfile={handleUpdateProfile}
+                onViewStudents={() => setRoute("students")}
                 onExportTestBank={handleExportBank}
                 onOpenUpload={() => fileInputRef.current?.click()}
                 onNotify={notify}
               />
             )}
 
+            {route === "students" && userRole === "admin" && (
+              <StudentsView
+                learners={learners}
+                studentId={page.id}
+                attemptId={page.attempt}
+                onNavigate={navigate}
+              />
+            )}
             {route === "admin" && userRole === "admin" && (
               <AdminView
                 tests={tests}
@@ -1041,11 +1144,19 @@ export default function App() {
                 learners={learners}
                 adminUid={user?.uid || ""}
                 onNewTest={handleNewTest}
+                onDeleteTest={handleDeleteTest}
+                onRestoreTest={handleRestoreTest}
+                onSetCollection={(ids, collection) =>
+                  handleTestMeta(ids, { source: collection })
+                }
+                onSetStatus={(ids, status) => handleTestMeta(ids, { status })}
+                onViewStudents={() => setRoute("students")}
                 onEditTest={handleEditTest}
                 onExportTest={handleExportTest}
                 onArchiveToggle={handleArchiveToggle}
                 onExportBank={handleExportBank}
                 onOpenUpload={() => fileInputRef.current?.click()}
+                onUploadFiles={handleUploadFiles}
                 onToggleReportStatus={handleToggleReportStatus}
                 onToggleLearnerStatus={handleToggleLearnerStatus}
                 onNotify={notify}
@@ -1171,7 +1282,7 @@ export default function App() {
         <input
           ref={fileInputRef}
           type="file"
-          accept=".zip,.html,.htm,.json"
+          accept=".zip,.html,.htm,.json,.png,.jpg,.jpeg,.webp,.gif"
           multiple
           hidden
           onChange={(e) => {
@@ -1304,12 +1415,9 @@ export default function App() {
                     Issues Encountered ({uploadReport.errors.length}):
                   </strong>
                   <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
-                    {uploadReport.errors.slice(0, 10).map((err, i) => (
+                    {uploadReport.errors.map((err, i) => (
                       <li key={i}>{err}</li>
                     ))}
-                    {uploadReport.errors.length > 10 && (
-                      <li>...and {uploadReport.errors.length - 10} more.</li>
-                    )}
                   </ul>
                 </div>
               )}

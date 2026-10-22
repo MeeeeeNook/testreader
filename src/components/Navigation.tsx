@@ -46,6 +46,8 @@ export const Navigation: React.FC<Props> = ({
     { id: "settings", icon: Settings, label: vi ? "Cài đặt" : "Settings" },
   ];
   if (isAdmin)
+    items.push({ id: "students", icon: ShieldCheck, label: "Students" });
+  if (isAdmin)
     items.push({ id: "admin", icon: ShieldCheck, label: "Admin studio" });
   const click = (e: React.MouseEvent, id: string) => {
     if (
