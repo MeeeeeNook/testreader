@@ -21,6 +21,8 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
   onOpenProfileModal,
 }) => {
   const [showAuthMenu, setShowAuthMenu] = useState(false);
+  const [authBusy, setAuthBusy] = useState(false);
+  const [authError, setAuthError] = useState('');
   const isVi = profile.language === 'vi';
 
   const toggleLanguage = () => {
@@ -69,12 +71,14 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
           <button
             className="studio-primary"
             style={{ padding: '7px 14px', fontSize: '11px' }}
-            onClick={() => loginWithGoogle()}
+            disabled={authBusy}
+            onClick={async () => { setAuthBusy(true); setAuthError(''); try { await loginWithGoogle(); } catch { setAuthError('Sign-in did not finish. Please try again. Your local results are safe.'); } finally { setAuthBusy(false); } }}
           >
-            {isVi ? 'Đăng nhập Google' : 'Sign in with Google'}
+            {authBusy ? 'Connecting…' : isVi ? 'Đăng nhập Google' : 'Sign in to sync'}
           </button>
         )}
 
+        {authError && <div className="auth-error" role="alert">{authError}<button aria-label="Dismiss" onClick={() => setAuthError('')}>×</button></div>}
         {showAuthMenu && user && (
           <div
             style={{
@@ -138,3 +142,4 @@ export const TopHeader: React.FC<TopHeaderProps> = ({
     </header>
   );
 };
+

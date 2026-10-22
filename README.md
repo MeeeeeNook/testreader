@@ -37,9 +37,24 @@ Broken legacy question layouts are hidden until repaired, preventing their embed
 
 - Text, select, radio, and multiple-choice controls appear at their actual question placeholders, including heading questions in the passage.
 - Inputs start blank. Answers and explanations appear only when their respective review toggle is enabled; exam review becomes available after successful submission.
-- Both practice and exam submissions use the authenticated server and private keys. Network or configuration errors remain visible and retryable rather than producing a false local score.
+- Both practice and exam submissions use the server (with optional authentication) and private keys. Network or configuration errors remain visible and retryable rather than producing a false local score.
 - Single-section sessions keep source question numbers. Custom mocks retain canonical source references and are marked with the same sequential mapping shown to the student.
-- Practice drafts are scoped to account, test, and mode. Starting a new exam starts with blank responses.
+- Practice and exam drafts are scoped to account and session. Starting a new test creates a blank session; refreshing the current session restores its responses and timer.
 - Unsaved administrator previews use their editable local keys and do not create student attempt records.
 
 `npm test` covers importing, source-feedback removal, control rendering, matching labels, variant marking, multi-select order, missing questions, section selection, and custom mock mappings. Live Firebase access also requires the server configuration above.
+
+
+## Pages and local-first history
+
+The library (`/library`), mock builder (`/mock`), history (`/history`), result review (`/history/:id`), vocabulary, settings, test setup (`/tests/:id`), and active sessions (`/tests/:id/take/:sessionId`) have their own browser URLs. Express serves deep links through its existing SPA fallback. Other hosts must forward these routes to `index.html` while keeping `/api/*` on the Node server.
+
+Only the verified Google account **manhcuong2006ht@gmail.com** can open `/admin` or `/admin/tests/:id`, upload tests, or edit the shared Firebase library. Other accounts and guests can access all published tests. No pricing tiers are shown; new and edited test metadata uses `access: free` for compatibility with older exports.
+
+Completed results are written to versioned, account-scoped local storage before optional Firestore synchronization. Guest results transfer once to the first account that signs in on that browser. Failed cloud uploads remain locally available and retry on reconnect or the history sync button. Stable attempt IDs prevent duplicate records on retry. Full test definitions are not duplicated into each result. Results are personal practice records, not tamper-proof exam certificates.
+
+Active tests use browser confirmation for in-app navigation and Back/Forward within the site, plus the browser's standard beforeunload warning for refresh, closing, or leaving the document. Browsers control the native warning text and require prior interaction. Session drafts and launch details stay on the current device/tab; new sessions start blank. Local storage failures are visible and offer result download.
+
+Deploy **firestore.rules** and the composite indexes in **firestore.indexes.json** to the database named in `firebase-applet-config.json`. These data-service changes are separate from deploying the web app. Existing Firebase credentials and authorized Google sign-in domains are still required. No service-account credentials belong in the browser.
+
+Validation includes deterministic marking/import tests, page rendering, navigation guards, local history migration, account isolation, atomic guest transfer, and cloud retry behavior. Live Google login and Firebase writes need verification in the configured hosting project.

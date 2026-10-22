@@ -1,84 +1,12 @@
 import React from 'react';
-import { UserProfile } from '../types';
-
-interface NavigationProps {
-  route: string;
-  onNavigate: (route: string) => void;
-  isAdmin: boolean;
-  profile: UserProfile;
-  storageConnected: boolean;
-}
-
-export const Navigation: React.FC<NavigationProps> = ({
-  route,
-  onNavigate,
-  isAdmin,
-  profile,
-  storageConnected,
-}) => {
-  const isVi = profile.language === 'vi';
-
-  const navItems = [
-    { id: 'library', symbol: '▤', label: isVi ? 'Thư viện đề thi' : 'Test library' },
-    { id: 'mock', symbol: '◷', label: isVi ? 'Thi thử đầy đủ' : 'Full mock test' },
-    { id: 'progress', symbol: '↗', label: isVi ? 'Tiến độ của tôi' : 'My progress' },
-    { id: 'vocabulary', symbol: 'Aa', label: isVi ? 'Sổ từ vựng' : 'Vocabulary' },
-    { id: 'settings', symbol: '⚙', label: isVi ? 'Cài đặt & dữ liệu' : 'Settings & data' },
-  ];
-
-  if (isAdmin) {
-    navItems.push({
-      id: 'admin',
-      symbol: '◇',
-      label: isVi ? 'Quản trị nội dung' : 'Admin studio',
-    });
-  }
-
-  return (
-    <aside className="studio-nav">
-      <a
-        href="#library"
-        className="studio-brand"
-        onClick={(e) => {
-          e.preventDefault();
-          onNavigate('library');
-        }}
-      >
-        <div className="studio-logo">
-          R<span>•</span>
-        </div>
-        <div>
-          Reading<br />
-          <b>Studio</b>
-        </div>
-      </a>
-
-      <div className="studio-nav-label">
-        {isVi ? 'KHÔNG GIAN HỌC TẬP' : 'YOUR STUDY SPACE'}
-      </div>
-
-      <nav>
-        {navItems.map((item) => (
-          <button
-            key={item.id}
-            className={route === item.id || (route === 'editor' && item.id === 'admin') ? 'active' : ''}
-            onClick={() => onNavigate(item.id)}
-          >
-            <span className="nav-symbol">{item.symbol}</span>
-            {item.label}
-          </button>
-        ))}
-      </nav>
-
-      <div className="studio-nav-bottom">
-        <div>
-          <span className="status-dot"></span>
-          <span>{storageConnected ? 'Cloud Firestore Sync' : 'Local Workspace'}</span>
-        </div>
-        <p style={{ marginTop: '12px', font: '14px/1.5 var(--studio-serif)', color: 'var(--studio-muted)' }}>
-          {isVi ? 'Nhịp độ của bạn.\nChương mới của bạn.' : 'Your own pace.\nYour next chapter.'}
-        </p>
-      </div>
-    </aside>
-  );
+import { BookOpen, LayoutGrid, Timer, TrendingUp, NotebookPen, Settings, ShieldCheck, ArrowUpRight } from 'lucide-react';
+import { routePath } from '../services/browserHistory.js';
+import type { UserProfile } from '../types';
+interface Props { route: string; onNavigate: (route: string) => void; isAdmin: boolean; profile: UserProfile; storageConnected: boolean; }
+export const Navigation: React.FC<Props> = ({ route, onNavigate, isAdmin, profile, storageConnected }) => {
+  const vi = profile.language === 'vi';
+  const items = [{ id: 'library', icon: LayoutGrid, label: vi ? 'Thư viện đề thi' : 'Test library' }, { id: 'mock', icon: Timer, label: vi ? 'Thi thử' : 'Mock builder' }, { id: 'progress', icon: TrendingUp, label: vi ? 'Lịch sử làm bài' : 'My history' }, { id: 'vocabulary', icon: NotebookPen, label: vi ? 'Sổ từ vựng' : 'Vocabulary' }, { id: 'settings', icon: Settings, label: vi ? 'Cài đặt' : 'Settings' }];
+  if (isAdmin) items.push({ id: 'admin', icon: ShieldCheck, label: 'Admin studio' });
+  const click = (e: React.MouseEvent, id: string) => { if (!e.ctrlKey && !e.metaKey && !e.shiftKey && !e.altKey && e.button === 0) { e.preventDefault(); onNavigate(id); } };
+  return <aside className="studio-nav"><a href="/library" className="studio-brand" onClick={e => click(e, 'library')}><span className="studio-logo"><BookOpen size={24}/></span><span>reading<br/><b>studio.</b></span></a><div className="studio-nav-label">YOUR STUDY SPACE</div><nav aria-label="Main navigation">{items.map(({ id, icon: Icon, label }) => { const active = route === id || (route === 'test' && id === 'library') || (route === 'editor' && id === 'admin'); return <a key={id} href={routePath(id)} className={active ? 'active' : ''} aria-current={active ? 'page' : undefined} onClick={e => click(e, id)}><Icon size={19}/><span>{label}</span>{active && <span className="nav-active-dot"/>}</a>; })}</nav><div className="nav-encouragement"><span>✦</span><p>Small steps.<br/>Stronger skills.</p><small>Make a little room for progress today.</small><ArrowUpRight size={20}/></div><div className="studio-nav-bottom"><span className="status-dot"/><div><strong>{storageConnected ? 'Account connected' : 'Your local workspace'}</strong><small>{storageConnected ? 'History sync enabled' : 'Results stay on this device'}</small></div></div></aside>;
 };

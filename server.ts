@@ -1,4 +1,5 @@
 import express from 'express';
+import { randomUUID } from 'node:crypto';
 import path from 'path';
 import { fileURLToPath } from 'url';
 import dotenv from 'dotenv';
@@ -52,7 +53,7 @@ async function optionalCaller(req: express.Request) {
     return { identity, isAdmin, db };
   } catch (error) {
     if (error instanceof AssessmentError) throw error;
-    return { identity: null, isAdmin: false, db };
+    throw new AssessmentError(401, 'Your sign-in has expired. Please sign in again.');
   }
 }
 function apiError(res: express.Response, error: unknown) {
@@ -147,30 +148,13 @@ app.post('/api/test-review', async (req, res) => {
 
 app.post('/api/submit-exam', async (req, res) => {
   try {
-    const { identity, isAdmin, db } = await optionalCaller(req);
+    const { isAdmin, db } = await optionalCaller(req);
     const mode = req.body.mode;
     if (!['exam', 'practice'].includes(mode)) throw new AssessmentError(400, 'Invalid test mode.');
     const assessment = await loadAssessment(assessmentStore(db), req.body, isAdmin);
     const { result, band, responses } = markAssessment(assessment, req.body.responses || {});
-    let attemptId = `att_${Date.now()}`;
-    if (identity) {
-      const attemptRef = db.collection(`users/${identity.uid}/attempts`).doc();
-      attemptId = attemptRef.id;
-      await attemptRef.set({
-        id: attemptRef.id,
-        owner: identity.uid,
-        testId: req.body.testId || 'custom_mock',
-        testTitle: assessment.title,
-        skill: assessment.skill,
-        mode,
-        createdAt: Date.now(),
-        responses,
-        result,
-        band,
-        ...(req.body.sourceSections ? { sourceSections: req.body.sourceSections } : {}),
-        ...(req.body.sectionIds ? { sectionIds: req.body.sectionIds } : {}),
-      });
-    }
+    // Grading succeeds independently of optional cloud history sync.
+    const attemptId = typeof req.body.attemptId === 'string' && /^[\w-]{1,128}$/.test(req.body.attemptId) ? req.body.attemptId : randomUUID();
     res.json({ attemptId, result, band, keys: assessment.keys });
   } catch (error) { apiError(res, error); }
 });
@@ -210,4 +194,5 @@ async function startServer() {
 }
 
 startServer();
+
 

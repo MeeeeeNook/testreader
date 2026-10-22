@@ -1,13 +1,17 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { EditableTest, EditablePart, TestSlot, ScoreResult, ScoreRow, UserProfile, StudyNote, StudyHighlight } from '../types';
+import { EditableTest, EditablePart, TestSlot, ScoreResult, ScoreRow, UserProfile, StudyNote, StudyHighlight, AttemptRecord } from '../types';
 import { AnswerControl, QuestionLayout } from './QuestionLayout';
 import { cleanLayout } from '../services/importer';
+import { saveAttempt } from '../services/localHistory.js';
 import { auth } from '../firebase';
 import { firestoreAdapter } from '../services/firestoreAdapter';
 import { scoreTest, estimatedBand } from '../services/scoring';
 
 interface TestWorkspaceProps {
   test: EditableTest;
+  sessionId: string;
+  onSessionActive: (active: boolean) => void;
+  onHistorySaved: () => void;
   mode: 'practice' | 'exam';
   initialDurationMinutes: number;
   profile: UserProfile;
@@ -19,6 +23,9 @@ interface TestWorkspaceProps {
 
 export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   test,
+  sessionId,
+  onSessionActive,
+  onHistorySaved,
   mode,
   initialDurationMinutes,
   profile,
@@ -28,10 +35,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   onNotify,
 }) => {
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
-  const sessionKey = `reading-room:v2:${profile.id}:${test.id}:${mode}${isPreview ? ':preview' : ''}`;
+  const sessionKey = `reading-room:v3:${profile.id}:${sessionId}:${mode}${isPreview ? ':preview' : ''}`;
   const [savedSession] = useState(() => {
     try {
-      const saved = mode === 'practice' ? JSON.parse(localStorage.getItem(sessionKey) || '{}') : {};
+      const saved = JSON.parse(localStorage.getItem(sessionKey) || '{}');
       return saved && typeof saved === 'object' && !Array.isArray(saved) ? saved : {};
     }
     catch { return {}; }
@@ -43,12 +50,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const [showAnswers, setShowAnswers] = useState(false);
   const [showExplanations, setShowExplanations] = useState(false);
   const [timerRemaining, setTimerRemaining] = useState(
-    mode === 'practice' && Number.isFinite(savedSession.remaining) ? savedSession.remaining : Math.max(0, initialDurationMinutes) * 60
+    Number.isFinite(savedSession.remaining) ? savedSession.remaining : Math.max(0, initialDurationMinutes) * 60
   );
-  const [timerRunning, setTimerRunning] = useState(mode === 'exam' || initialDurationMinutes > 0);
-  const [scored, setScored] = useState(false);
-  const [scoreResult, setScoreResult] = useState<ScoreResult | null>(null);
-  const [approxBand, setApproxBand] = useState<number | null>(null);
+  const [timerRunning, setTimerRunning] = useState(!savedSession.scored && (mode === 'exam' || initialDurationMinutes > 0));
+  const [scored, setScored] = useState(Boolean(savedSession.scored));
+  const [scoreResult, setScoreResult] = useState<ScoreResult | null>(savedSession.result || null);
+  const [approxBand, setApproxBand] = useState<number | null>(savedSession.band ?? null);
   const [showResultsModal, setShowResultsModal] = useState(false);
   const [activeDrawer, setActiveDrawer] = useState<'notes' | 'review' | null>(null);
   const [drawerReviewFilter, setDrawerReviewFilter] = useState<'all' | 'unanswered' | 'flagged'>('all');
@@ -72,30 +79,29 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const passageRef = useRef<HTMLDivElement>(null);
   const questionsRef = useRef<HTMLDivElement>(null);
 
-  const [reviewKeys, setReviewKeys] = useState<Record<number, any>>({});
+  const [reviewKeys, setReviewKeys] = useState<Record<number, any>>(() => Object.fromEntries((savedSession.result?.rows || []).map((row: ScoreRow) => [row.number, { answer: row.answer }])));
   const [submitting, setSubmitting] = useState(false);
   const submissionRef = useRef(false);
+  const pendingAttempt = useRef<AttemptRecord | null>(null);
+  const [historyError, setHistoryError] = useState('');
+  const [reviewLoaded, setReviewLoaded] = useState(false);
+  useEffect(() => { onSessionActive(!isPreview && (!scored || Boolean(historyError))); return () => onSessionActive(false); }, [isPreview, scored, historyError, onSessionActive]);
   const originalPart = test.parts[currentPartIndex] || test.parts[0];
   const part: EditablePart = { ...originalPart, questions: originalPart.questions.map(q => ({ ...q, ...reviewKeys[q.number] })) };
   const allQuestions = test.parts.flatMap((p) => p.questions);
   const allQuestionNumbers = allQuestions.map((q) => q.number).sort((a, b) => a - b);
   const currentPartNumbers = part.questions.map((q) => q.number);
 
-  // Persist the current account's session to local storage.
+  // Save the exact session for refresh/recovery, including completed exams.
   useEffect(() => {
-    const sessionData = {
-      responses,
-      flags,
-      notes,
-      highlights,
-      remaining: timerRemaining,
+    const persist = () => {
+      try {
+        localStorage.setItem(sessionKey, JSON.stringify({ responses, flags, notes, highlights, remaining: timerRemaining, scored, result: scoreResult, band: approxBand }));
+      } catch { onNotify('Your browser could not save this session. Keep the tab open or free up browser storage.'); }
     };
-    try {
-      localStorage.setItem(sessionKey, JSON.stringify(sessionData));
-    } catch {
-      // ignore
-    }
-  }, [sessionKey, responses, flags, notes, highlights, timerRemaining]);
+    persist(); window.addEventListener('pagehide', persist); document.addEventListener('visibilitychange', persist);
+    return () => { window.removeEventListener('pagehide', persist); document.removeEventListener('visibilitychange', persist); };
+  }, [sessionKey, responses, flags, notes, highlights, timerRemaining, scored, scoreResult, approxBand, onNotify]);
 
   // Timer updaters are pure; expiry submission happens once in an effect.
   const submitLatest = useRef<() => Promise<void>>(async () => {});
@@ -115,6 +121,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   // Handle Response Changes
   const handleInputChange = (questionNumber: number, value: string) => {
+    if (submitting || (mode === 'exam' && scored)) return;
+    if (scored) { setScored(false); setScoreResult(null); }
     setResponses((prev) => ({
       ...prev,
       [questionNumber]: value,
@@ -122,11 +130,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   };
 
   const handleMultiChoiceChange = (groupNumbers: number[], value: string, isChecked: boolean) => {
+    if (submitting || (mode === 'exam' && scored)) return;
     const selected = groupNumbers.map(n => responses[n]).filter(Boolean);
     if (isChecked && !selected.includes(value) && selected.length >= groupNumbers.length) {
       onNotify(`Please choose at most ${groupNumbers.length} options.`);
       return;
     }
+    if (scored) { setScored(false); setScoreResult(null); }
     setResponses((prev) => {
       const currentValues = groupNumbers.map((n) => prev[n]).filter(Boolean);
       let nextValues = [...currentValues];
@@ -209,10 +219,13 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   }
   // Both modes use server keys or local deterministic scoring, saving progress to local storage.
   const handleSubmit = async () => {
-    if (mode === 'exam' && scored) { setShowResultsModal(true); return; }
+    if (scored) { setShowResultsModal(true); return; }
     if (submissionRef.current) return;
     submissionRef.current = true;
     setSubmitting(true);
+    const wasRunning = timerRunning;
+    const submissionOwner = auth.currentUser?.uid || 'guest';
+    const attemptId = crypto.randomUUID();
     setTimerRunning(false);
     try {
       // Unsaved editor previews use their own local keys and never create an attempt.
@@ -232,7 +245,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       }
       const response = await fetch('/api/submit-exam', {
         method: 'POST', headers,
-        body: JSON.stringify(submissionPayload()),
+        body: JSON.stringify({ ...submissionPayload(), attemptId }),
       });
       const data = await response.json();
       if (!response.ok) throw new Error(data.error || 'Could not score this test. Please retry.');
@@ -242,28 +255,22 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setScored(true);
       setShowResultsModal(true);
 
-      // Save attempt locally in user's browser storage
-      const attemptRecord = {
-        id: data.attemptId || `att_${Date.now()}`,
-        owner: profile.id,
-        testId: test.sourceTestId || test.id,
-        testTitle: test.title,
-        skill: test.skill,
-        mode,
-        createdAt: Date.now(),
-        responses,
-        result: data.result,
-        band: data.band,
-        definition: test,
+      const attemptRecord: AttemptRecord = {
+        id: data.attemptId || attemptId, owner: submissionOwner, testId: test.sourceTestId || test.id,
+        testTitle: test.title, skill: test.skill, mode, createdAt: Date.now(), responses,
+        result: data.result, band: data.band,
+        ...(test.sectionIds ? { sectionIds: test.sectionIds } : {}),
+        ...(test.sourceSections ? { sourceSections: test.sourceSections } : {}),
       };
+      pendingAttempt.current = attemptRecord;
       try {
-        const key = `reading-room:attempts:${profile.id}`;
-        const stored = JSON.parse(localStorage.getItem(key) || localStorage.getItem('reading-room:attempts') || '[]');
-        const updated = [attemptRecord, ...stored.filter((a: any) => a.id !== attemptRecord.id)];
-        localStorage.setItem(key, JSON.stringify(updated));
-        localStorage.setItem('reading-room:attempts', JSON.stringify(updated));
-      } catch {}
+        saveAttempt(localStorage, submissionOwner, attemptRecord); setHistoryError(''); pendingAttempt.current = null;
+        if ((auth.currentUser?.uid || 'guest') === submissionOwner) {
+          onHistorySaved(); window.dispatchEvent(new Event('study-history-change'));
+        }
+      } catch { setHistoryError('Your score is ready, but browser storage is full or blocked. Retry saving or download your result before leaving.'); }
     } catch (error) {
+      if (wasRunning && timerRemaining > 0) setTimerRunning(true);
       onNotify(error instanceof Error ? error.message : 'Could not score this test. Please retry.');
     } finally {
       submissionRef.current = false;
@@ -274,7 +281,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   const toggleReview = async (kind: 'answers' | 'explanations') => {
     const shown = kind === 'answers' ? showAnswers : showExplanations;
-    if (!shown && !isPreview && mode === 'practice' && Object.keys(reviewKeys).length === 0) {
+    if (!shown && !isPreview && (mode === 'practice' || scored) && !reviewLoaded) {
       try {
         const user = auth.currentUser;
         const headers: Record<string, string> = { 'Content-Type': 'application/json' };
@@ -283,11 +290,11 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         }
         const response = await fetch('/api/test-review', {
           method: 'POST', headers,
-          body: JSON.stringify(submissionPayload()),
+          body: JSON.stringify({ ...submissionPayload(), mode: 'practice' }),
         });
         const data = await response.json();
         if (!response.ok) throw new Error(data.error || 'Could not load solutions.');
-        setReviewKeys(data.keys || {});
+        setReviewKeys(data.keys || {}); setReviewLoaded(true);
       } catch (error) { onNotify(error instanceof Error ? error.message : 'Could not load solutions.'); return; }
     }
     if (kind === 'answers') setShowAnswers(!shown);
@@ -296,7 +303,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const renderSlot = (id: string) => {
     const slot = part.slots[id];
     return slot ? <AnswerControl slot={slot} part={part} responses={responses} showAnswers={showAnswers}
-      disabled={mode === 'exam' && (scored || submitting)} onChange={handleInputChange} onMultiChange={handleMultiChoiceChange} /> :
+      disabled={submitting || (mode === 'exam' && scored)} onChange={handleInputChange} onMultiChange={handleMultiChoiceChange} /> :
       <span role="alert">Question slot missing. Please report this test.</span>;
   };
   const isLegacyBroken = part.questions.some(q => !q.missing) && Object.keys(part.slots || {}).length === 0;
@@ -488,6 +495,15 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           </div>
         </header>
 
+        {historyError && <div className="history-save-error" role="alert"><strong>{historyError}</strong><button className="studio-secondary" onClick={() => {
+          const attempt = pendingAttempt.current; if (!attempt) return;
+          try { saveAttempt(localStorage, attempt.owner, attempt); setHistoryError(''); pendingAttempt.current = null;
+            if ((auth.currentUser?.uid || 'guest') === attempt.owner) { onHistorySaved(); window.dispatchEvent(new Event('study-history-change')); }
+          } catch { onNotify('Storage is still unavailable. Download your result to keep a copy.'); }
+        }}>Retry saving</button><button className="studio-secondary" onClick={() => {
+          const url = URL.createObjectURL(new Blob([JSON.stringify(pendingAttempt.current, null, 2)], { type: 'application/json' }));
+          const link = document.createElement('a'); link.href = url; link.download = 'ielts-result.json'; link.click(); setTimeout(() => URL.revokeObjectURL(url), 10000);
+        }}>Download result</button></div>}
         {/* Listening Audio Strip if audio is present */}
         {part.audio && (
           <div className="audio-strip">
@@ -1030,4 +1046,5 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     </div>
   );
 };
+
 

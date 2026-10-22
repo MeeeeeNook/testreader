@@ -258,17 +258,6 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           </label>
 
           <label className="studio-field">
-            Access Tier
-            <select
-              value={test.access}
-              onChange={(e) => setTest({ ...test, access: e.target.value as any })}
-            >
-              <option value="free">Free Practice</option>
-              <option value="premium">Premium Test</option>
-            </select>
-          </label>
-
-          <label className="studio-field">
             Default Duration (Minutes)
             <input
               type="number"
@@ -597,3 +586,4 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
     </div>
   );
 };
+

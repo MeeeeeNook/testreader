@@ -210,7 +210,7 @@ export class FirestoreAdapter {
       title: test.title,
       skill: test.skill,
       source: test.source || 'My Collection',
-      access: test.access || 'free',
+      access: 'free',
       status: test.status || 'published',
       duration: test.duration || 60,
       passages: test.parts.length,
@@ -324,4 +324,5 @@ export class FirestoreAdapter {
 }
 
 export const firestoreAdapter = new FirestoreAdapter();
+
 

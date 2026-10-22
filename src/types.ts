@@ -114,6 +114,9 @@ export interface AttemptRecord {
   };
   band?: number | null;
   definition?: EditableTest;
+  syncedAt?: number;
+  sectionIds?: string[];
+  sourceSections?: { testId: string; sectionId: string }[];
 }
 
 export interface VocabularyItem {
@@ -156,4 +159,5 @@ export interface ContentReport {
   status: 'open' | 'resolved';
   createdAt: number;
 }
+
 
