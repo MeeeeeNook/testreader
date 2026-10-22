@@ -58,3 +58,11 @@ Active tests use browser confirmation for in-app navigation and Back/Forward wit
 Deploy **firestore.rules** and the composite indexes in **firestore.indexes.json** to the database named in `firebase-applet-config.json`. These data-service changes are separate from deploying the web app. Existing Firebase credentials and authorized Google sign-in domains are still required. No service-account credentials belong in the browser.
 
 Validation includes deterministic marking/import tests, page rendering, navigation guards, local history migration, account isolation, atomic guest transfer, and cloud retry behavior. Live Google login and Firebase writes need verification in the configured hosting project.
+
+With Firebase CLI authenticated to the existing project, deploy the named database configuration with:
+
+```sh
+firebase deploy --only firestore --project gen-lang-client-0464915880
+```
+
+`firebase.json` targets the existing named Firestore database; it does not create a different database or hosting site.

@@ -1,7 +1,7 @@
-import React, { useState, useEffect, useRef, useCallback } from 'react';
-import { User } from 'firebase/auth';
-import { subscribeAuth } from './services/auth';
-import { firestoreAdapter } from './services/firestoreAdapter';
+import React, { useState, useEffect, useRef, useCallback } from "react";
+import { User } from "firebase/auth";
+import { subscribeAuth } from "./services/auth";
+import { firestoreAdapter } from "./services/firestoreAdapter";
 import {
   TestMeta,
   EditableTest,
@@ -9,60 +9,78 @@ import {
   AttemptRecord,
   VocabularyItem,
   ContentReport,
-} from './types';
-import { collectFiles, jsonParts, toEditable, extractTitle, fingerprint } from './services/importer';
+} from "./types";
+import {
+  collectFiles,
+  jsonParts,
+  toEditable,
+  extractTitle,
+  fingerprint,
+} from "./services/importer";
 
-import { Navigation } from './components/Navigation';
-import { TopHeader } from './components/TopHeader';
-import { LibraryView } from './components/LibraryView';
-import { MockBuilderView } from './components/MockBuilderView';
-import { ProgressView } from './components/ProgressView';
-import { VocabularyView } from './components/VocabularyView';
-import { SettingsView } from './components/SettingsView';
-const AdminView = React.lazy(() => import('./components/AdminView').then(m => ({ default: m.AdminView })));
-const TestEditorView = React.lazy(() => import('./components/TestEditorView').then(m => ({ default: m.TestEditorView })));
-import { TestWorkspace } from './components/TestWorkspace';
+import { Navigation } from "./components/Navigation";
+import { TopHeader } from "./components/TopHeader";
+import { LibraryView } from "./components/LibraryView";
+import { MockBuilderView } from "./components/MockBuilderView";
+import { ProgressView } from "./components/ProgressView";
+import { VocabularyView } from "./components/VocabularyView";
+import { SettingsView } from "./components/SettingsView";
+const AdminView = React.lazy(() =>
+  import("./components/AdminView").then((m) => ({ default: m.AdminView })),
+);
+const TestEditorView = React.lazy(() =>
+  import("./components/TestEditorView").then((m) => ({
+    default: m.TestEditorView,
+  })),
+);
+import { TestWorkspace } from "./components/TestWorkspace";
 
-import { usePageRouter } from './services/usePageRouter';
-import { readAttempts } from './services/localHistory.js';
-import { syncHistory } from './services/historySync';
+import { usePageRouter } from "./services/usePageRouter";
+import { readAttempts } from "./services/localHistory.js";
+import { syncHistory } from "./services/historySync";
 
 export default function App() {
   const { page, location, navigate, setGuard, setRoute } = usePageRouter();
   const route = page.name;
   const [authReady, setAuthReady] = useState(false);
-  const [syncStatus, setSyncStatus] = useState<'local' | 'syncing' | 'synced' | 'offline'>('local');
+  const [syncStatus, setSyncStatus] = useState<
+    "local" | "syncing" | "synced" | "offline"
+  >("local");
   const [pageLoading, setPageLoading] = useState(false);
-  const [pageError, setPageError] = useState('');
-  const [catalogError, setCatalogError] = useState('');
-  const [sessionId, setSessionId] = useState('');
+  const [pageError, setPageError] = useState("");
+  const [catalogError, setCatalogError] = useState("");
+  const [sessionId, setSessionId] = useState("");
   const [user, setUser] = useState<User | null>(null);
-  const [userRole, setUserRole] = useState<'admin' | 'student'>('student');
+  const [userRole, setUserRole] = useState<"admin" | "student">("student");
   const [suspended, setSuspended] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(() => {
     try {
-      const saved = JSON.parse(localStorage.getItem('reading-room:profile:guest') || '{}');
+      const saved = JSON.parse(
+        localStorage.getItem("reading-room:profile:guest") || "{}",
+      );
       return {
-        name: 'Learner',
+        name: "Learner",
         target: 7.5,
-        language: 'en',
-        theme: 'light',
+        language: "en",
+        theme: "light",
         fontSize: 16,
         favorites: [],
         ...saved,
-        id: 'guest', email: '', status: 'active',
+        id: "guest",
+        email: "",
+        status: "active",
       };
     } catch {
       return {
-        id: 'guest',
-        email: '',
-        name: 'Learner',
+        id: "guest",
+        email: "",
+        name: "Learner",
         target: 7.5,
-        language: 'en',
-        theme: 'light',
+        language: "en",
+        theme: "light",
         fontSize: 16,
         favorites: [],
-        status: 'active',
+        status: "active",
       };
     }
   });
@@ -75,7 +93,7 @@ export default function App() {
 
   // Active test workspace state
   const [activeTest, setActiveTest] = useState<EditableTest | null>(null);
-  const [activeMode, setActiveMode] = useState<'practice' | 'exam'>('practice');
+  const [activeMode, setActiveMode] = useState<"practice" | "exam">("practice");
   const [activeDuration, setActiveDuration] = useState(60);
   const [activePreview, setActivePreview] = useState(false);
 
@@ -84,16 +102,20 @@ export default function App() {
 
   // Dialog & modal states
   const [showProfileModal, setShowProfileModal] = useState(false);
-  const [showTestSetupModal, setShowTestSetupModal] = useState(false);
-  const [selectedTestId, setSelectedTestId] = useState<string | null>(null);
-  const [setupMode, setSetupMode] = useState<'practice' | 'exam'>('practice');
+  const [setupMode, setSetupMode] = useState<"practice" | "exam">("practice");
   const [setupTime, setSetupTime] = useState(60);
-  const [setupSection, setSetupSection] = useState<'all' | number>('all');
-  const [selectedTestFull, setSelectedTestFull] = useState<EditableTest | null>(null);
+  const [setupSection, setSetupSection] = useState<"all" | number>("all");
+  const [selectedTestFull, setSelectedTestFull] = useState<EditableTest | null>(
+    null,
+  );
 
   // Upload progress modal
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
-  const [uploadReport, setUploadReport] = useState<{ imported: number; duplicates: number; errors: string[] } | null>(null);
+  const [uploadReport, setUploadReport] = useState<{
+    imported: number;
+    duplicates: number;
+    errors: string[];
+  } | null>(null);
 
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
@@ -111,22 +133,53 @@ export default function App() {
   useEffect(() => {
     const unsubscribe = subscribeAuth((state) => {
       if (state.loading) return;
-      if (previousUser.current !== undefined && previousUser.current !== (state.user?.uid || null)) {
-
-        setActiveTest(null); setEditingTest(null); setSelectedTestFull(null); setShowTestSetupModal(false);
-        setGuard(false); setRoute('library'); setAttempts([]); setVocabulary([]); setReports([]); setLearners([]);
-        document.body.classList.remove('hub-exam');
+      if (
+        previousUser.current !== undefined &&
+        previousUser.current !== (state.user?.uid || null)
+      ) {
+        setActiveTest(null);
+        setEditingTest(null);
+        setSelectedTestFull(null);
+        setGuard(false);
+        setRoute("library");
+        setAttempts([]);
+        setVocabulary([]);
+        setReports([]);
+        setLearners([]);
+        document.body.classList.remove("hub-exam");
       }
       previousUser.current = state.user?.uid || null;
       setAuthReady(true);
       setUser(state.user);
-      setUserRole(state.role === 'admin' && state.user?.email === 'manhcuong2006ht@gmail.com' && state.user.emailVerified ? 'admin' : 'student');
+      setUserRole(
+        state.role === "admin" &&
+          state.user?.email === "manhcuong2006ht@gmail.com" &&
+          state.user.emailVerified
+          ? "admin"
+          : "student",
+      );
       setSuspended(state.suspended);
       if (state.profile) {
         setProfile(state.profile);
       } else {
-        let prefs = {}; try { prefs = JSON.parse(localStorage.getItem('reading-room:profile:guest') || '{}'); } catch {}
-        setProfile({ name: 'Learner', target: 7.5, language: 'en', theme: 'light', fontSize: 16, favorites: [], ...prefs, id: 'guest', email: '', status: 'active' });
+        let prefs = {};
+        try {
+          prefs = JSON.parse(
+            localStorage.getItem("reading-room:profile:guest") || "{}",
+          );
+        } catch {}
+        setProfile({
+          name: "Learner",
+          target: 7.5,
+          language: "en",
+          theme: "light",
+          fontSize: 16,
+          favorites: [],
+          ...prefs,
+          id: "guest",
+          email: "",
+          status: "active",
+        });
       }
     });
     return unsubscribe;
@@ -134,20 +187,32 @@ export default function App() {
 
   // Sync theme, font size, language with document root
   useEffect(() => {
-    document.body.classList.toggle('studio-dark', profile.theme === 'dark');
-    document.documentElement.style.setProperty('--study-font-size', `${profile.fontSize}px`);
+    document.body.classList.toggle("studio-dark", profile.theme === "dark");
+    document.documentElement.style.setProperty(
+      "--study-font-size",
+      `${profile.fontSize}px`,
+    );
     document.documentElement.lang = profile.language;
   }, [profile.theme, profile.fontSize, profile.language]);
 
   const runHistorySync = useCallback(async () => {
     const uid = user?.uid;
-    if (!uid) { setSyncStatus('local'); return; }
-    setSyncStatus('syncing');
+    if (!uid) {
+      setSyncStatus("local");
+      return;
+    }
+    setSyncStatus("syncing");
     try {
       const records = await syncHistory(uid);
-      if (previousUser.current === uid) { setAttempts(records); setSyncStatus('synced'); }
+      if (previousUser.current === uid) {
+        setAttempts(records);
+        setSyncStatus("synced");
+      }
     } catch {
-      if (previousUser.current === uid) { setAttempts(readAttempts(localStorage, uid)); setSyncStatus('offline'); }
+      if (previousUser.current === uid) {
+        setAttempts(readAttempts(localStorage, uid));
+        setSyncStatus("offline");
+      }
     }
   }, [user?.uid]);
 
@@ -157,75 +222,174 @@ export default function App() {
     const current = () => previousUser.current === uid;
     setAttempts(readAttempts(localStorage, profile.id));
     try {
-      let cursor; const catalog: TestMeta[] = [];
+      let cursor;
+      const catalog: TestMeta[] = [];
       do {
-        const batch = await firestoreAdapter.listTests({ pageSize: 100, lastDoc: cursor });
+        const batch = await firestoreAdapter.listTests({
+          pageSize: 100,
+          lastDoc: cursor,
+        });
         if (!current()) return;
-        catalog.push(...batch.tests); cursor = batch.tests.length === 100 ? batch.lastDoc : undefined;
+        catalog.push(...batch.tests);
+        cursor = batch.tests.length === 100 ? batch.lastDoc : undefined;
       } while (cursor);
-      setTests(catalog); setCatalogError('');
-    } catch (error) { if (current()) setCatalogError(error instanceof Error ? error.message : 'Could not load the library.'); }
+      setTests(catalog);
+      setCatalogError("");
+    } catch (error) {
+      if (current())
+        setCatalogError(
+          error instanceof Error
+            ? error.message
+            : "Could not load the library.",
+        );
+    }
     let words: VocabularyItem[] = [];
-    try { const saved = JSON.parse(localStorage.getItem(`reading-room:vocabulary:${profile.id}`) || '[]'); if (Array.isArray(saved)) words = saved; } catch {}
+    try {
+      const saved = JSON.parse(
+        localStorage.getItem(`reading-room:vocabulary:${profile.id}`) || "[]",
+      );
+      if (Array.isArray(saved)) words = saved;
+    } catch {}
     if (user) {
       try {
-        const cloud = await firestoreAdapter.list('vocabulary');
-        const ids = new Set(cloud.map(w => w.id)); words = [...cloud, ...words.filter(w => !ids.has(w.id))];
+        const cloud = await firestoreAdapter.list("vocabulary");
+        const ids = new Set(cloud.map((w) => w.id));
+        words = [...cloud, ...words.filter((w) => !ids.has(w.id))];
       } catch {}
     }
     if (!current()) return;
     setVocabulary(words);
-    if (userRole === 'admin') {
-      const [r, l] = await Promise.allSettled([firestoreAdapter.list('reports'), firestoreAdapter.list('users')]);
+    if (userRole === "admin") {
+      const [r, l] = await Promise.allSettled([
+        firestoreAdapter.list("reports"),
+        firestoreAdapter.list("users"),
+      ]);
       if (!current()) return;
-      if (r.status === 'fulfilled') setReports(r.value);
-      if (l.status === 'fulfilled') setLearners(l.value);
+      if (r.status === "fulfilled") setReports(r.value);
+      if (l.status === "fulfilled") setLearners(l.value);
     }
   }, [authReady, user?.uid, userRole, profile.id]);
-  useEffect(() => { void loadData(); }, [loadData]);
+  useEffect(() => {
+    void loadData();
+  }, [loadData]);
   useEffect(() => {
     if (!authReady) return;
     void runHistorySync();
-    const refresh = () => { setAttempts(readAttempts(localStorage, profile.id)); void runHistorySync(); };
-    window.addEventListener('study-history-change', refresh);
-    window.addEventListener('online', refresh);
-    return () => { window.removeEventListener('study-history-change', refresh); window.removeEventListener('online', refresh); };
+    const refresh = () => {
+      setAttempts(readAttempts(localStorage, profile.id));
+      void runHistorySync();
+    };
+    window.addEventListener("study-history-change", refresh);
+    const storageChanged = (event: StorageEvent) => {
+      if (event.key === "reading-room:history:v3")
+        setAttempts(readAttempts(localStorage, profile.id));
+    };
+    window.addEventListener("online", refresh);
+    window.addEventListener("storage", storageChanged);
+    return () => {
+      window.removeEventListener("study-history-change", refresh);
+      window.removeEventListener("online", refresh);
+      window.removeEventListener("storage", storageChanged);
+    };
   }, [authReady, profile.id, runHistorySync]);
 
   useEffect(() => {
     if (!authReady) return;
     let alive = true;
-    setPageError(''); setPageLoading(false);
+    setPageError("");
+    setPageLoading(false);
     const hydrate = async () => {
       try {
-        if (page.name === 'test' && page.id) {
-          setPageLoading(true); setSelectedTestFull(null);
+        if (page.name === "test" && page.id) {
+          setPageLoading(true);
+          setSelectedTestFull(null);
           const test = await firestoreAdapter.getTestComplete(page.id);
           if (!alive) return;
-          setSelectedTestId(test.id); setSelectedTestFull(test); setSetupMode('practice'); setSetupTime(test.duration || 60); setSetupSection('all');
-        } else if (page.name === 'workspace' && page.session && page.session !== sessionId) {
-          const launch = JSON.parse(sessionStorage.getItem(`reading-room:launch:${profile.id}:${page.session}`) || 'null');
-          if (!launch?.test?.parts?.length || (launch.test.sourceTestId || launch.test.id) !== page.id) throw new Error('This session is unavailable on this device. Open the test from your library to start again.');
-          setActiveTest(launch.test); setActiveMode(launch.mode); setActiveDuration(launch.minutes); setActivePreview(false); setSessionId(page.session);
-        } else if (page.name === 'editor' && page.id && userRole === 'admin') {
-          if (page.id !== 'new') {
-            setPageLoading(true); setEditingTest(null);
+          setSelectedTestFull(test);
+          setSetupMode("practice");
+          setSetupTime(test.duration || 60);
+          setSetupSection("all");
+        } else if (
+          page.name === "workspace" &&
+          page.session &&
+          page.session !== sessionId
+        ) {
+          const launch = JSON.parse(
+            sessionStorage.getItem(
+              `reading-room:launch:${profile.id}:${page.session}`,
+            ) || "null",
+          );
+          if (
+            !launch?.test?.parts?.length ||
+            (launch.test.sourceTestId || launch.test.id) !== page.id
+          )
+            throw new Error(
+              "This session is unavailable on this device. Open the test from your library to start again.",
+            );
+          setActiveTest(launch.test);
+          setActiveMode(launch.mode);
+          setActiveDuration(launch.minutes);
+          setActivePreview(false);
+          setSessionId(page.session);
+        } else if (page.name === "editor" && page.id && userRole === "admin") {
+          if (page.id !== "new") {
+            setPageLoading(true);
+            setEditingTest(null);
             const test = await firestoreAdapter.getTestComplete(page.id);
             if (alive) setEditingTest(test);
           } else if (!editingTest) {
-            setEditingTest({ schemaVersion: 1, id: `test_${Date.now()}`, title: 'New IELTS Test', skill: 'reading', source: 'My collection', access: 'free', status: 'draft', duration: 60, createdAt: Date.now(), updatedAt: Date.now(), parts: [{ id: 'p0', title: 'Passage 1', passageHtml: '<p>Write your passage here.</p>', questionHtml: '', slots: {}, questions: [] }] });
+            setEditingTest({
+              schemaVersion: 1,
+              id: `test_${Date.now()}`,
+              title: "New IELTS Test",
+              skill: "reading",
+              source: "My collection",
+              access: "free",
+              status: "draft",
+              duration: 60,
+              createdAt: Date.now(),
+              updatedAt: Date.now(),
+              parts: [
+                {
+                  id: "p0",
+                  title: "Passage 1",
+                  passageHtml: "<p>Write your passage here.</p>",
+                  questionHtml: "",
+                  slots: {},
+                  questions: [],
+                },
+              ],
+            });
           }
         }
-      } catch (error) { if (alive) setPageError(error instanceof Error ? error.message : 'Could not open this page.'); }
-      finally { if (alive) setPageLoading(false); }
+      } catch (error) {
+        if (alive)
+          setPageError(
+            error instanceof Error
+              ? error.message
+              : "Could not open this page.",
+          );
+      } finally {
+        if (alive) setPageLoading(false);
+      }
     };
     void hydrate();
-    return () => { alive = false; };
+    return () => {
+      alive = false;
+    };
   }, [location, authReady, profile.id, userRole]);
-  useEffect(() => { document.title = `${route === 'test' ? 'Test details' : getCrumb()} · Reading Studio`; if (route !== 'workspace') setGuard(false); }, [location, setGuard]);
   useEffect(() => {
-    document.body.classList.toggle('hub-exam', route === 'workspace' && Boolean(activeTest) && page.session === sessionId);
-    return () => document.body.classList.remove('hub-exam');
+    document.title = `${route === "test" ? "Test details" : getCrumb()} · Reading Studio`;
+    if (route !== "workspace") setGuard(false);
+  }, [location, setGuard]);
+  useEffect(() => {
+    document.body.classList.toggle(
+      "hub-exam",
+      route === "workspace" &&
+        Boolean(activeTest) &&
+        page.session === sessionId,
+    );
+    return () => document.body.classList.remove("hub-exam");
   }, [route, activeTest?.id, page.session, sessionId]);
 
   // Profile update handler
@@ -233,11 +397,13 @@ export default function App() {
     const updated = { ...profile, ...updates };
     setProfile(updated);
     try {
-      localStorage.setItem(`reading-room:profile:${profile.id}`, JSON.stringify(updated));
-
+      localStorage.setItem(
+        `reading-room:profile:${profile.id}`,
+        JSON.stringify(updated),
+      );
     } catch {}
     if (user) {
-      await firestoreAdapter.put('users', updated);
+      await firestoreAdapter.put("users", updated);
     }
   };
 
@@ -247,23 +413,28 @@ export default function App() {
     const item: VocabularyItem = {
       id,
       owner: profile.id,
-      word: word.word?.trim() || '',
-      meaning: word.meaning?.trim() || '',
-      example: word.example?.trim() || '',
-      partOfSpeech: word.partOfSpeech || 'noun',
+      word: word.word?.trim() || "",
+      meaning: word.meaning?.trim() || "",
+      example: word.example?.trim() || "",
+      partOfSpeech: word.partOfSpeech || "noun",
       archived: word.archived || false,
       createdAt: word.createdAt || Date.now(),
       updatedAt: Date.now(),
     };
     if (user) {
-      try { await firestoreAdapter.put('vocabulary', item); } catch {}
+      try {
+        await firestoreAdapter.put("vocabulary", item);
+      } catch {}
     }
     setVocabulary((prev) => {
       const idx = prev.findIndex((w) => w.id === id);
-      const next = idx >= 0 ? prev.map(w => w.id === id ? item : w) : [item, ...prev];
+      const next =
+        idx >= 0 ? prev.map((w) => (w.id === id ? item : w)) : [item, ...prev];
       try {
-        localStorage.setItem(`reading-room:vocabulary:${profile.id}`, JSON.stringify(next));
-
+        localStorage.setItem(
+          `reading-room:vocabulary:${profile.id}`,
+          JSON.stringify(next),
+        );
       } catch {}
       return next;
     });
@@ -274,13 +445,17 @@ export default function App() {
     if (target) {
       const updated = { ...target, archived: true };
       if (user) {
-        try { await firestoreAdapter.put('vocabulary', updated); } catch {}
+        try {
+          await firestoreAdapter.put("vocabulary", updated);
+        } catch {}
       }
       setVocabulary((prev) => {
         const next = prev.map((w) => (w.id === wordId ? updated : w));
         try {
-          localStorage.setItem(`reading-room:vocabulary:${profile.id}`, JSON.stringify(next));
-  
+          localStorage.setItem(
+            `reading-room:vocabulary:${profile.id}`,
+            JSON.stringify(next),
+          );
         } catch {}
         return next;
       });
@@ -298,24 +473,62 @@ export default function App() {
   };
 
   // Start Test Workspace Session
-  const handleStartSession = (testToStart: EditableTest, modeToUse: 'practice' | 'exam', durationMinutes: number, preview = false) => {
+  const handleStartSession = (
+    testToStart: EditableTest,
+    modeToUse: "practice" | "exam",
+    durationMinutes: number,
+    preview = false,
+  ) => {
     const launchId = crypto.randomUUID();
-    const safe = { ...testToStart, parts: testToStart.parts.map(p => ({ ...p, questions: p.questions.map(q => ({ ...q, answer: '', explanationHtml: '', referenceQuote: '' })) })) };
-    try { if (!preview) sessionStorage.setItem(`reading-room:launch:${profile.id}:${launchId}`, JSON.stringify({ test: safe, mode: modeToUse, minutes: durationMinutes })); }
-    catch { notify('Browser storage is unavailable. Keep this tab open to retain the session.'); }
-    if (!navigate(`/tests/${encodeURIComponent(testToStart.sourceTestId || testToStart.id)}/take/${launchId}`)) return;
-    setSessionId(launchId); setActivePreview(preview); setActiveTest(preview ? testToStart : safe);
-    setActiveMode(modeToUse); setActiveDuration(durationMinutes);
+    const safe = {
+      ...testToStart,
+      parts: testToStart.parts.map((p) => ({
+        ...p,
+        questions: p.questions.map((q) => ({
+          ...q,
+          answer: "",
+          explanationHtml: "",
+          referenceQuote: "",
+        })),
+      })),
+    };
+    try {
+      if (!preview)
+        sessionStorage.setItem(
+          `reading-room:launch:${profile.id}:${launchId}`,
+          JSON.stringify({
+            test: safe,
+            mode: modeToUse,
+            minutes: durationMinutes,
+          }),
+        );
+    } catch {
+      notify(
+        "Browser storage is unavailable. Keep this tab open to retain the session.",
+      );
+    }
+    if (
+      !navigate(
+        `/tests/${encodeURIComponent(testToStart.sourceTestId || testToStart.id)}/take/${launchId}`,
+      )
+    )
+      return;
+    setSessionId(launchId);
+    setActivePreview(preview);
+    setActiveTest(preview ? testToStart : safe);
+    setActiveMode(modeToUse);
+    setActiveDuration(durationMinutes);
   };
 
-  const handleSelectTest = (testId: string) => { navigate(`/tests/${encodeURIComponent(testId)}`); };
+  const handleSelectTest = (testId: string) => {
+    navigate(`/tests/${encodeURIComponent(testId)}`);
+  };
 
   const handleConfirmStartTest = () => {
     if (!selectedTestFull) return;
-    setShowTestSetupModal(false);
 
     let chosen = JSON.parse(JSON.stringify(selectedTestFull)) as EditableTest;
-    if (setupSection !== 'all') {
+    if (setupSection !== "all") {
       const sectionPart = chosen.parts[setupSection];
       if (sectionPart) {
         chosen.sourceTestId = selectedTestFull.id;
@@ -326,7 +539,7 @@ export default function App() {
       }
     }
 
-    const duration = setupMode === 'exam' ? (chosen.duration || 60) : setupTime;
+    const duration = setupMode === "exam" ? chosen.duration || 60 : setupTime;
     handleStartSession(chosen, setupMode, duration);
   };
 
@@ -335,36 +548,44 @@ export default function App() {
     const newTest: EditableTest = {
       schemaVersion: 1,
       id: `test_${Date.now()}`,
-      title: 'New IELTS Test',
-      skill: 'reading',
-      source: 'Internal Authoring',
-      access: 'free',
-      status: 'draft',
+      title: "New IELTS Test",
+      skill: "reading",
+      source: "Internal Authoring",
+      access: "free",
+      status: "draft",
       duration: 60,
       createdAt: Date.now(),
       updatedAt: Date.now(),
       parts: [
         {
-          id: 'p0',
-          title: 'Passage 1',
-          passageHtml: '<h2>Reading Passage Title</h2><p>Write or paste your reading passage here.</p>',
-          questionHtml: '<h3>Questions 1–13</h3><p>Read the passage and answer the questions below.</p>',
+          id: "p0",
+          title: "Passage 1",
+          passageHtml:
+            "<h2>Reading Passage Title</h2><p>Write or paste your reading passage here.</p>",
+          questionHtml:
+            "<h3>Questions 1–13</h3><p>Read the passage and answer the questions below.</p>",
           slots: {},
           questions: [],
-          audio: '',
+          audio: "",
         },
       ],
     };
     setEditingTest(newTest);
-    navigate('/admin/new');
+    navigate("/admin/new");
   };
 
   // Admin Edit Test
-  const handleEditTest = (testId: string) => { navigate(`/admin/tests/${encodeURIComponent(testId)}`); };
+  const handleEditTest = (testId: string) => {
+    navigate(`/admin/tests/${encodeURIComponent(testId)}`);
+  };
 
   // Admin Save Test
-  const handleSaveTest = async (testToSave: EditableTest, status: 'published' | 'draft') => {
-    testToSave.status = status; testToSave.access = 'free';
+  const handleSaveTest = async (
+    testToSave: EditableTest,
+    status: "published" | "draft",
+  ) => {
+    testToSave.status = status;
+    testToSave.access = "free";
     await firestoreAdapter.saveTestComplete(testToSave);
     await loadData();
   };
@@ -372,7 +593,7 @@ export default function App() {
   // Admin Archive Toggle
   const handleArchiveToggle = async (testId: string) => {
     const fullTest = await firestoreAdapter.getTestComplete(testId);
-    const newStatus = fullTest.status === 'archived' ? 'draft' : 'archived';
+    const newStatus = fullTest.status === "archived" ? "draft" : "archived";
     fullTest.status = newStatus;
     await firestoreAdapter.saveTestComplete(fullTest);
     notify(`Test marked as ${newStatus}.`);
@@ -382,33 +603,37 @@ export default function App() {
   // Admin Export Single Test
   const handleExportTest = async (testId: string) => {
     const fullTest = await firestoreAdapter.getTestComplete(testId);
-    const blob = new Blob([JSON.stringify(fullTest, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(fullTest, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
-    a.download = `${fullTest.title.replace(/[^a-zA-Z0-9_-]/g, '_')}.json`;
+    a.download = `${fullTest.title.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
     a.click();
     setTimeout(() => URL.revokeObjectURL(url), 10000);
-    notify('Test JSON exported.');
+    notify("Test JSON exported.");
   };
 
   // Admin Export Complete Test Bank
   const handleExportBank = async () => {
-    notify('Preparing complete test bank export…');
+    notify("Preparing complete test bank export…");
     const fullBank: EditableTest[] = [];
     for (const meta of tests) {
       const full = await firestoreAdapter.getTestComplete(meta.id);
       fullBank.push(full);
     }
     const backup = {
-      format: 'ielts-studio-backup',
+      format: "ielts-studio-backup",
       version: 1,
       exportedAt: new Date().toISOString(),
       tests: fullBank,
     };
-    const blob = new Blob([JSON.stringify(backup, null, 2)], { type: 'application/json' });
+    const blob = new Blob([JSON.stringify(backup, null, 2)], {
+      type: "application/json",
+    });
     const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
+    const a = document.createElement("a");
     a.href = url;
     a.download = `IELTS_Test_Bank_${new Date().toISOString().slice(0, 10)}.json`;
     a.click();
@@ -418,18 +643,24 @@ export default function App() {
 
   // Admin Toggle Report Status
   const handleToggleReportStatus = async (report: ContentReport) => {
-    const newStatus = report.status === 'resolved' ? 'open' : 'resolved';
+    const newStatus = report.status === "resolved" ? "open" : "resolved";
     const updated = { ...report, status: newStatus as any };
-    await firestoreAdapter.put('reports', updated);
+    await firestoreAdapter.put("reports", updated);
     setReports((prev) => prev.map((r) => (r.id === report.id ? updated : r)));
     notify(`Report marked as ${newStatus}.`);
   };
 
   // Admin Toggle Learner Status
-  const handleToggleLearnerStatus = async (targetUserId: string, newStatus: 'active' | 'suspended') => {
-    const res = await fetch('/api/admin/user-status', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${await user?.getIdToken()}` },
+  const handleToggleLearnerStatus = async (
+    targetUserId: string,
+    newStatus: "active" | "suspended",
+  ) => {
+    const res = await fetch("/api/admin/user-status", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${await user?.getIdToken()}`,
+      },
       body: JSON.stringify({
         targetUserId,
         newStatus,
@@ -437,17 +668,19 @@ export default function App() {
       }),
     });
     if (!res.ok) {
-      throw new Error('Failed to update learner status on server.');
+      throw new Error("Failed to update learner status on server.");
     }
     setLearners((prev) =>
-      prev.map((l) => (l.id === targetUserId ? { ...l, status: newStatus } : l))
+      prev.map((l) =>
+        l.id === targetUserId ? { ...l, status: newStatus } : l,
+      ),
     );
   };
 
   // Admin Upload Files Handler (ZIP, HTML, JSON)
   const handleUploadFiles = async (files: File[]) => {
-    if (!files.length || userRole !== 'admin') return;
-    setUploadProgress('Analyzing and unpacking files…');
+    if (!files.length || userRole !== "admin") return;
+    setUploadProgress("Analyzing and unpacking files…");
     setUploadReport(null);
 
     let imported = 0;
@@ -464,9 +697,9 @@ export default function App() {
           const data = JSON.parse(text);
           const testsToImport = Array.isArray(data)
             ? data
-            : data.format === 'ielts-studio-backup'
-            ? data.tests
-            : [data];
+            : data.format === "ielts-studio-backup"
+              ? data.tests
+              : [data];
 
           for (let item of testsToImport) {
             if (item.parts?.[0]?.topic_content) {
@@ -475,24 +708,35 @@ export default function App() {
             candidates.push({ test: item, name: file.name });
           }
         } catch (err) {
-          errors.push(`${file.name}: ${err instanceof Error ? err.message : String(err)}`);
+          errors.push(
+            `${file.name}: ${err instanceof Error ? err.message : String(err)}`,
+          );
         }
       }
 
       // 2. ZIP and HTML files
       const nonJsonFiles = files.filter((f) => !/\.json$/i.test(f.name));
       if (nonJsonFiles.length > 0) {
-        const { candidates: htmlCandidates, images, errors: parseErrors } = await collectFiles(nonJsonFiles);
+        const {
+          candidates: htmlCandidates,
+          images,
+          errors: parseErrors,
+        } = await collectFiles(nonJsonFiles);
         errors.push(...parseErrors);
 
         const assets: Record<string, string> = {};
         // Upload any diagrams/images to Firebase Storage
         for (const img of images) {
           try {
-            assets[img.name] = await firestoreAdapter.uploadMedia(img.blob, `media/${crypto.randomUUID()}-${img.name}`);
+            assets[img.name] = await firestoreAdapter.uploadMedia(
+              img.blob,
+              `media/${crypto.randomUUID()}-${img.name}`,
+            );
           } catch {
             errors.push(`${img.name}: diagram upload failed.`);
-          } finally { URL.revokeObjectURL(img.url); }
+          } finally {
+            URL.revokeObjectURL(img.url);
+          }
         }
 
         // Parse HTML candidates
@@ -503,7 +747,9 @@ export default function App() {
             const editable = toEditable({ title, parts: rawParts }, {}, assets);
             candidates.push({ test: editable, name: c.name });
           } catch (err) {
-            errors.push(`${c.name}: ${err instanceof Error ? err.message : String(err)}`);
+            errors.push(
+              `${c.name}: ${err instanceof Error ? err.message : String(err)}`,
+            );
           }
         }
       }
@@ -512,29 +758,54 @@ export default function App() {
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          if (seenIds.has(item.test.id)) { duplicates++; continue; }
-          const existing = await firestoreAdapter.get('tests', item.test.id);
+          if (seenIds.has(item.test.id)) {
+            duplicates++;
+            continue;
+          }
+          const existing = await firestoreAdapter.get("tests", item.test.id);
           if (existing) {
             const full = await firestoreAdapter.getTestComplete(item.test.id);
-            const broken = full.parts.some(p => p.questions.some(q => !q.missing) && !Object.keys(p.slots || {}).length);
-            if (!broken) { seenIds.add(item.test.id); duplicates++; continue; }
+            const broken = full.parts.some(
+              (p) =>
+                p.questions.some((q) => !q.missing) &&
+                !Object.keys(p.slots || {}).length,
+            );
+            if (!broken) {
+              seenIds.add(item.test.id);
+              duplicates++;
+              continue;
+            }
             // Repair the old incomplete importer output, keeping admin catalog settings.
-            item.test = { ...item.test, title: full.title, source: full.source, status: full.status,
-              access: full.access, duration: full.duration, createdAt: full.createdAt };
+            item.test = {
+              ...item.test,
+              title: full.title,
+              source: full.source,
+              status: full.status,
+              access: full.access,
+              duration: full.duration,
+              createdAt: full.createdAt,
+            };
           }
           await firestoreAdapter.saveTestComplete(item.test);
           seenIds.add(item.test.id);
           imported++;
         } catch (saveErr) {
-          errors.push(`${item.name}: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`);
+          errors.push(
+            `${item.name}: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+          );
         }
       }
 
       setUploadReport({ imported, duplicates, errors });
       await loadData();
-      notify(`Import complete: ${imported} imported or repaired, ${duplicates} duplicates skipped.`);
+      notify(
+        `Import complete: ${imported} imported or repaired, ${duplicates} duplicates skipped.`,
+      );
     } catch (topErr) {
-      notify('Upload failed: ' + (topErr instanceof Error ? topErr.message : String(topErr)));
+      notify(
+        "Upload failed: " +
+          (topErr instanceof Error ? topErr.message : String(topErr)),
+      );
     } finally {
       setUploadProgress(null);
     }
@@ -543,43 +814,49 @@ export default function App() {
   // Breadcrumb generation
   const getCrumb = () => {
     switch (route) {
-      case 'library':
-        return profile.language === 'vi' ? 'Thư viện đề thi' : 'Test library';
-      case 'mock':
-        return profile.language === 'vi' ? 'Thi thử đầy đủ' : 'Full mock test';
-      case 'progress':
-        return profile.language === 'vi' ? 'Tiến độ của tôi' : 'My progress';
-      case 'vocabulary':
-        return profile.language === 'vi' ? 'Sổ từ vựng' : 'Vocabulary notebook';
-      case 'settings':
-        return profile.language === 'vi' ? 'Cài đặt & dữ liệu' : 'Settings & data';
-      case 'admin':
-        return profile.language === 'vi' ? 'Quản trị nội dung' : 'Content administration';
-      case 'editor':
-        return 'Test Editor';
-      case 'workspace':
-        return activeTest?.title || 'Exam workspace';
+      case "library":
+        return profile.language === "vi" ? "Thư viện đề thi" : "Test library";
+      case "mock":
+        return profile.language === "vi" ? "Thi thử đầy đủ" : "Full mock test";
+      case "progress":
+        return profile.language === "vi" ? "Tiến độ của tôi" : "My progress";
+      case "vocabulary":
+        return profile.language === "vi" ? "Sổ từ vựng" : "Vocabulary notebook";
+      case "settings":
+        return profile.language === "vi"
+          ? "Cài đặt & dữ liệu"
+          : "Settings & data";
+      case "admin":
+        return profile.language === "vi"
+          ? "Quản trị nội dung"
+          : "Content administration";
+      case "editor":
+        return "Test Editor";
+      case "workspace":
+        return activeTest?.title || "Exam workspace";
       default:
-        return 'Reading Studio';
+        return "Reading Studio";
     }
   };
 
   // If in active test workspace:
-  if (route === 'workspace' && activeTest && page.session === sessionId) {
+  if (route === "workspace" && activeTest && page.session === sessionId) {
     return (
       <>
         <TestWorkspace
           key={`${profile.id}:${sessionId}`}
           sessionId={sessionId}
           onSessionActive={setGuard}
-          onHistorySaved={() => setAttempts(readAttempts(localStorage, profile.id))}
+          onHistorySaved={() =>
+            setAttempts(readAttempts(localStorage, profile.id))
+          }
           test={activeTest}
           mode={activeMode}
           initialDurationMinutes={activeDuration}
           profile={profile}
           isPreview={activePreview}
           onReturnToLibrary={() => {
-            setRoute('library');
+            setRoute("library");
           }}
           onSaveVocabulary={handleSaveWord}
           onNotify={notify}
@@ -595,13 +872,13 @@ export default function App() {
       <Navigation
         route={route}
         onNavigate={(newRoute) => {
-          if (newRoute === 'admin' && userRole !== 'admin') {
-            notify('Administrator access required.');
+          if (newRoute === "admin" && userRole !== "admin") {
+            notify("Administrator access required.");
             return;
           }
           setRoute(newRoute as any);
         }}
-        isAdmin={userRole === 'admin'}
+        isAdmin={userRole === "admin"}
         profile={profile}
         storageConnected={Boolean(user)}
       />
@@ -621,181 +898,265 @@ export default function App() {
         {suspended && (
           <div
             style={{
-              padding: '12px 36px',
-              background: '#faf0ed',
-              borderBottom: '1px solid #e8c8c0',
-              color: '#842f1f',
-              fontSize: '13px',
+              padding: "12px 36px",
+              background: "#faf0ed",
+              borderBottom: "1px solid #e8c8c0",
+              color: "#842f1f",
+              fontSize: "13px",
             }}
           >
-            <strong>Account Notice:</strong> Your student account is currently suspended. Practice
-            history and vocabulary saves are disabled. Contact an administrator to restore access.
+            <strong>Account Notice:</strong> Your student account is currently
+            suspended. Practice history and vocabulary saves are disabled.
+            Contact an administrator to restore access.
           </div>
         )}
 
         <main id="studioContent">
-          <React.Suspense fallback={<div className="studio-empty">Loading page…</div>}>
-          {!authReady && <div className="studio-callout" role="status">Connecting your account… You can browse as a guest.</div>}
-          {authReady && <div className="history-sync" role="status">{syncStatus === 'local' ? 'Saved on this device · Sign in to sync your results.' : syncStatus === 'syncing' ? 'Syncing your history…' : syncStatus === 'synced' ? 'History synced with your account.' : 'History is safe on this device. Cloud sync will retry when connected.'}{syncStatus === 'offline' && <button className="studio-quiet" onClick={() => void runHistorySync()}>Retry sync</button>}</div>}
-          {catalogError && route === 'library' && <div className="studio-callout" role="alert">Library unavailable: {catalogError} <button className="studio-secondary" onClick={() => void loadData()}>Retry</button></div>}
-          {pageLoading && <div className="studio-empty" role="status">Opening page…</div>}
-          {(pageError || route === 'notfound' || (authReady && (route === 'admin' || route === 'editor') && userRole !== 'admin')) && <div className="studio-panel"><h1>Page unavailable</h1><p>{pageError || 'This page does not exist or requires the library owner account.'}</p><button className="studio-primary" onClick={() => setRoute('library')}>Go to library</button></div>}
-          {route === 'library' && (
-            <LibraryView
-              isAdmin={userRole === 'admin'}
-              tests={tests}
-              attempts={attempts}
-              profile={profile}
-              onSelectTest={handleSelectTest}
-              onToggleFavorite={handleToggleFavorite}
-              onNavigateToMock={() => setRoute('mock')}
-              onNavigateToAdmin={() => setRoute('admin')}
-            />
-          )}
+          <React.Suspense
+            fallback={<div className="studio-empty">Loading page…</div>}
+          >
+            {!authReady && (
+              <div className="studio-callout" role="status">
+                Connecting your account… You can browse as a guest.
+              </div>
+            )}
+            {authReady && (
+              <div className="history-sync" role="status">
+                {syncStatus === "local"
+                  ? "Saved on this device · Sign in to sync your results."
+                  : syncStatus === "syncing"
+                    ? "Syncing your history…"
+                    : syncStatus === "synced"
+                      ? "History synced with your account."
+                      : "History is safe on this device. Cloud sync will retry when connected."}
+                {syncStatus === "offline" && (
+                  <button
+                    className="studio-quiet"
+                    onClick={() => void runHistorySync()}
+                  >
+                    Retry sync
+                  </button>
+                )}
+              </div>
+            )}
+            {catalogError && route === "library" && (
+              <div className="studio-callout" role="alert">
+                Library unavailable: {catalogError}{" "}
+                <button
+                  className="studio-secondary"
+                  onClick={() => void loadData()}
+                >
+                  Retry
+                </button>
+              </div>
+            )}
+            {pageLoading && (
+              <div className="studio-empty" role="status">
+                Opening page…
+              </div>
+            )}
+            {(pageError ||
+              route === "notfound" ||
+              (authReady &&
+                (route === "admin" || route === "editor") &&
+                userRole !== "admin")) && (
+              <div className="studio-panel">
+                <h1>Page unavailable</h1>
+                <p>
+                  {pageError ||
+                    "This page does not exist or requires the library owner account."}
+                </p>
+                <button
+                  className="studio-primary"
+                  onClick={() => setRoute("library")}
+                >
+                  Go to library
+                </button>
+              </div>
+            )}
+            {route === "library" && (
+              <LibraryView
+                isAdmin={userRole === "admin"}
+                tests={tests}
+                attempts={attempts}
+                profile={profile}
+                onSelectTest={handleSelectTest}
+                onToggleFavorite={handleToggleFavorite}
+                onNavigateToMock={() => setRoute("mock")}
+                onNavigateToAdmin={() => setRoute("admin")}
+              />
+            )}
 
-          {route === 'mock' && (
-            <MockBuilderView
-              tests={tests}
-              onStartSession={handleStartSession}
-              onNotify={notify}
-            />
-          )}
+            {route === "mock" && (
+              <MockBuilderView
+                tests={tests}
+                onStartSession={handleStartSession}
+                onNotify={notify}
+              />
+            )}
 
-          {route === 'progress' && (
-            <ProgressView
-              attempts={attempts}
-              profile={profile}
-              onOpenProfileModal={() => setShowProfileModal(true)}
-              selectedAttemptId={page.id}
-              onSelectAttempt={id => navigate(`/history/${encodeURIComponent(id)}`)}
-              onBack={() => setRoute('progress')}
-              onReopenAttempt={(att) => {
-                handleSelectTest(att.testId);
-              }}
-            />
-          )}
+            {route === "progress" && (
+              <ProgressView
+                attempts={attempts}
+                profile={profile}
+                onOpenProfileModal={() => setShowProfileModal(true)}
+                selectedAttemptId={page.id}
+                onSelectAttempt={(id) =>
+                  navigate(`/history/${encodeURIComponent(id)}`)
+                }
+                onBack={() => setRoute("progress")}
+                onReopenAttempt={(att) => {
+                  handleSelectTest(att.testId);
+                }}
+              />
+            )}
 
-          {route === 'vocabulary' && (
-            <VocabularyView
-              vocabulary={vocabulary}
-              profile={profile}
-              onSaveWord={handleSaveWord}
-              onArchiveWord={handleArchiveWord}
-              onNotify={notify}
-            />
-          )}
+            {route === "vocabulary" && (
+              <VocabularyView
+                vocabulary={vocabulary}
+                profile={profile}
+                onSaveWord={handleSaveWord}
+                onArchiveWord={handleArchiveWord}
+                onNotify={notify}
+              />
+            )}
 
-          {route === 'settings' && (
-            <SettingsView
-              profile={profile}
-              attempts={attempts}
-              vocabulary={vocabulary}
-              isAdmin={userRole === 'admin'}
-              onUpdateProfile={handleUpdateProfile}
-              onExportTestBank={handleExportBank}
-              onOpenUpload={() => fileInputRef.current?.click()}
-              onNotify={notify}
-            />
-          )}
+            {route === "settings" && (
+              <SettingsView
+                profile={profile}
+                attempts={attempts}
+                vocabulary={vocabulary}
+                isAdmin={userRole === "admin"}
+                onUpdateProfile={handleUpdateProfile}
+                onExportTestBank={handleExportBank}
+                onOpenUpload={() => fileInputRef.current?.click()}
+                onNotify={notify}
+              />
+            )}
 
-          {route === 'admin' && userRole === 'admin' && (
-            <AdminView
-              tests={tests}
-              reports={reports}
-              learners={learners}
-              adminUid={user?.uid || ''}
-              onNewTest={handleNewTest}
-              onEditTest={handleEditTest}
-              onExportTest={handleExportTest}
-              onArchiveToggle={handleArchiveToggle}
-              onExportBank={handleExportBank}
-              onOpenUpload={() => fileInputRef.current?.click()}
-              onToggleReportStatus={handleToggleReportStatus}
-              onToggleLearnerStatus={handleToggleLearnerStatus}
-              onNotify={notify}
-            />
-          )}
+            {route === "admin" && userRole === "admin" && (
+              <AdminView
+                tests={tests}
+                reports={reports}
+                learners={learners}
+                adminUid={user?.uid || ""}
+                onNewTest={handleNewTest}
+                onEditTest={handleEditTest}
+                onExportTest={handleExportTest}
+                onArchiveToggle={handleArchiveToggle}
+                onExportBank={handleExportBank}
+                onOpenUpload={() => fileInputRef.current?.click()}
+                onToggleReportStatus={handleToggleReportStatus}
+                onToggleLearnerStatus={handleToggleLearnerStatus}
+                onNotify={notify}
+              />
+            )}
 
-          {route === 'editor' && userRole === 'admin' && editingTest && !pageLoading && (
-            <TestEditorView
-              test={editingTest}
-              onSave={async (savedTest, status) => {
-                await handleSaveTest(savedTest, status);
-                setRoute('admin');
-              }}
-              onPreview={(testToPreview) => {
-                handleStartSession(testToPreview, 'practice', 0, true);
-              }}
-              onClose={() => setRoute('admin')}
-              onNotify={notify}
-            />
-          )}
-      {/* Test Setup / Launch Modal */}
-      {route === 'test' && selectedTestFull && !pageLoading && (
-        <section className="studio-panel test-launch-page">
-          <div className="studio-modal-heading">
-            <h2>{selectedTestFull.title}</h2>
-            <button className="studio-quiet" onClick={() => setRoute('library')}>
-              ✕
-            </button>
-          </div>
+            {route === "editor" &&
+              userRole === "admin" &&
+              editingTest &&
+              !pageLoading && (
+                <TestEditorView
+                  test={editingTest}
+                  onSave={async (savedTest, status) => {
+                    await handleSaveTest(savedTest, status);
+                    setRoute("admin");
+                  }}
+                  onPreview={(testToPreview) => {
+                    handleStartSession(testToPreview, "practice", 0, true);
+                  }}
+                  onClose={() => setRoute("admin")}
+                  onNotify={notify}
+                />
+              )}
+            {/* Dedicated test setup page */}
+            {route === "test" && selectedTestFull && !pageLoading && (
+              <section className="studio-panel test-launch-page">
+                <div className="studio-modal-heading">
+                  <h2>{selectedTestFull.title}</h2>
+                  <button
+                    className="studio-quiet"
+                    onClick={() => setRoute("library")}
+                  >
+                    ✕
+                  </button>
+                </div>
 
-          <p>Configure your practice session. Your results are saved on this device. Sign in to sync your history across devices.</p>
+                <p>
+                  Configure your practice session. Your results are saved on
+                  this device. Sign in to sync your history across devices.
+                </p>
 
-          <label className="studio-field">
-            Session Mode
-            <select
-              value={setupMode}
-              onChange={(e) => setSetupMode(e.target.value as any)}
-            >
-              <option value="practice">Practice Mode — Flexible timing & independent answer toggles</option>
-              <option value="exam">Official Exam Mode — Timed, solutions hidden until submission</option>
-            </select>
-          </label>
+                <label className="studio-field">
+                  Session Mode
+                  <select
+                    value={setupMode}
+                    onChange={(e) => setSetupMode(e.target.value as any)}
+                  >
+                    <option value="practice">
+                      Practice Mode — Flexible timing & independent answer
+                      toggles
+                    </option>
+                    <option value="exam">
+                      Official Exam Mode — Timed, solutions hidden until
+                      submission
+                    </option>
+                  </select>
+                </label>
 
-          <label className="studio-field">
-            Test Section
-            <select
-              value={setupSection}
-              onChange={(e) => {
-                const val = e.target.value;
-                setSetupSection(val === 'all' ? 'all' : Number(val));
-              }}
-            >
-              <option value="all">Complete Test (All {selectedTestFull.parts.length} sections)</option>
-              {selectedTestFull.parts.map((p, idx) => (
-                <option key={idx} value={idx}>
-                  Section {idx + 1}: {p.title}
-                </option>
-              ))}
-            </select>
-          </label>
+                <label className="studio-field">
+                  Test Section
+                  <select
+                    value={setupSection}
+                    onChange={(e) => {
+                      const val = e.target.value;
+                      setSetupSection(val === "all" ? "all" : Number(val));
+                    }}
+                  >
+                    <option value="all">
+                      Complete Test (All {selectedTestFull.parts.length}{" "}
+                      sections)
+                    </option>
+                    {selectedTestFull.parts.map((p, idx) => (
+                      <option key={idx} value={idx}>
+                        Section {idx + 1}: {p.title}
+                      </option>
+                    ))}
+                  </select>
+                </label>
 
-          <label className="studio-field">
-            Time Limit
-            <select
-              disabled={setupMode === 'exam'}
-              value={setupTime}
-              onChange={(e) => setSetupTime(Number(e.target.value))}
-            >
-              <option value={15}>15 Minutes</option>
-              <option value={20}>20 Minutes (Standard single passage)</option>
-              <option value={60}>60 Minutes (Standard full test)</option>
-              <option value={0}>Untimed Practice</option>
-            </select>
-          </label>
+                <label className="studio-field">
+                  Time Limit
+                  <select
+                    disabled={setupMode === "exam"}
+                    value={setupTime}
+                    onChange={(e) => setSetupTime(Number(e.target.value))}
+                  >
+                    <option value={15}>15 Minutes</option>
+                    <option value={20}>
+                      20 Minutes (Standard single passage)
+                    </option>
+                    <option value={60}>60 Minutes (Standard full test)</option>
+                    <option value={0}>Untimed Practice</option>
+                  </select>
+                </label>
 
-          <div className="studio-actions" style={{ marginTop: '20px' }}>
-            <button className="studio-primary" onClick={handleConfirmStartTest}>
-              Start Session →
-            </button>
-            <button className="studio-secondary" onClick={() => setRoute('library')}>
-              Cancel
-            </button>
-          </div>
-        </section>
-      )}
-
+                <div className="studio-actions" style={{ marginTop: "20px" }}>
+                  <button
+                    className="studio-primary"
+                    onClick={handleConfirmStartTest}
+                  >
+                    Start Session →
+                  </button>
+                  <button
+                    className="studio-secondary"
+                    onClick={() => setRoute("library")}
+                  >
+                    Cancel
+                  </button>
+                </div>
+              </section>
+            )}
           </React.Suspense>
         </main>
 
@@ -806,30 +1167,41 @@ export default function App() {
       </div>
 
       {/* Hidden File Input for Admin Imports */}
-      {userRole === 'admin' && <input
-        ref={fileInputRef}
-        type="file"
-        accept=".zip,.html,.htm,.json"
-        multiple
-        hidden
-        onChange={(e) => {
-          if (e.target.files) {
-            handleUploadFiles(Array.from(e.target.files));
-          }
-          e.target.value = '';
-        }}
-      />}
+      {userRole === "admin" && (
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept=".zip,.html,.htm,.json"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) {
+              handleUploadFiles(Array.from(e.target.files));
+            }
+            e.target.value = "";
+          }}
+        />
+      )}
 
       {/* Profile / Target Band Modal */}
       {showProfileModal && (
         <dialog
           className="studio-modal"
           open
-          style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 120 }}
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 120,
+          }}
         >
           <div className="studio-modal-heading">
             <h2>Your Study Profile</h2>
-            <button className="studio-quiet" onClick={() => setShowProfileModal(false)}>
+            <button
+              className="studio-quiet"
+              onClick={() => setShowProfileModal(false)}
+            >
               ✕
             </button>
           </div>
@@ -850,22 +1222,30 @@ export default function App() {
               min="0"
               max="9"
               value={profile.target}
-              onChange={(e) => setProfile({ ...profile, target: Number(e.target.value) })}
+              onChange={(e) =>
+                setProfile({ ...profile, target: Number(e.target.value) })
+              }
             />
           </label>
 
-          <div className="studio-actions" style={{ marginTop: '20px' }}>
+          <div className="studio-actions" style={{ marginTop: "20px" }}>
             <button
               className="studio-primary"
               onClick={async () => {
-                await handleUpdateProfile({ name: profile.name, target: profile.target });
+                await handleUpdateProfile({
+                  name: profile.name,
+                  target: profile.target,
+                });
                 setShowProfileModal(false);
-                notify('Profile updated.');
+                notify("Profile updated.");
               }}
             >
               Save Profile
             </button>
-            <button className="studio-secondary" onClick={() => setShowProfileModal(false)}>
+            <button
+              className="studio-secondary"
+              onClick={() => setShowProfileModal(false)}
+            >
               Cancel
             </button>
           </div>
@@ -877,12 +1257,21 @@ export default function App() {
         <dialog
           className="studio-modal"
           open
-          style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 130 }}
+          style={{
+            position: "fixed",
+            top: "50%",
+            left: "50%",
+            transform: "translate(-50%, -50%)",
+            zIndex: 130,
+          }}
         >
           <div className="studio-modal-heading">
-            <h2>{uploadReport ? 'Upload Report' : 'Importing Tests'}</h2>
+            <h2>{uploadReport ? "Upload Report" : "Importing Tests"}</h2>
             {uploadReport && (
-              <button className="studio-quiet" onClick={() => setUploadReport(null)}>
+              <button
+                className="studio-quiet"
+                onClick={() => setUploadReport(null)}
+              >
                 ✕
               </button>
             )}
@@ -891,21 +1280,30 @@ export default function App() {
           {uploadProgress && (
             <div className="studio-drop">
               <strong>{uploadProgress}</strong>
-              <p>Unpacking ZIP archives, sanitizing markup, and verifying answer keys…</p>
+              <p>
+                Unpacking ZIP archives, sanitizing markup, and verifying answer
+                keys…
+              </p>
             </div>
           )}
 
           {uploadReport && (
             <div>
               <p>
-                <strong>{uploadReport.imported}</strong> tests imported or repaired ·{' '}
-                <strong>{uploadReport.duplicates}</strong> duplicates skipped.
+                <strong>{uploadReport.imported}</strong> tests imported or
+                repaired · <strong>{uploadReport.duplicates}</strong> duplicates
+                skipped.
               </p>
 
               {uploadReport.errors.length > 0 && (
-                <div className="studio-callout" style={{ color: '#842f1f', background: '#faf0ed' }}>
-                  <strong>Issues Encountered ({uploadReport.errors.length}):</strong>
-                  <ul style={{ margin: '6px 0 0', paddingLeft: '18px' }}>
+                <div
+                  className="studio-callout"
+                  style={{ color: "#842f1f", background: "#faf0ed" }}
+                >
+                  <strong>
+                    Issues Encountered ({uploadReport.errors.length}):
+                  </strong>
+                  <ul style={{ margin: "6px 0 0", paddingLeft: "18px" }}>
                     {uploadReport.errors.slice(0, 10).map((err, i) => (
                       <li key={i}>{err}</li>
                     ))}
@@ -916,8 +1314,17 @@ export default function App() {
                 </div>
               )}
 
-              <div style={{ marginTop: '16px', display: 'flex', justifyContent: 'flex-end' }}>
-                <button className="studio-primary" onClick={() => setUploadReport(null)}>
+              <div
+                style={{
+                  marginTop: "16px",
+                  display: "flex",
+                  justifyContent: "flex-end",
+                }}
+              >
+                <button
+                  className="studio-primary"
+                  onClick={() => setUploadReport(null)}
+                >
                   Done
                 </button>
               </div>
@@ -931,5 +1338,3 @@ export default function App() {
     </div>
   );
 }
-
-

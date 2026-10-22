@@ -1,35 +1,287 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import { readAttempts, saveAttempt, claimGuestAttempts, syncHistoryRecords, mergeAttempts } from '../src/services/localHistory.js';
-import { createBrowserHistory, parseRoute } from '../src/services/browserHistory.js';
-function memory() { const data = new Map<string, string>(); return { getItem: (key: string) => data.get(key) ?? null, setItem: (key: string, value: string) => { data.set(key, value); } }; }
-function attempt(id = 'one', owner = 'guest') { return { id, owner, testId: 'test1', testTitle: 'A test', createdAt: 1, result: { rows: [] } }; }
-test('guest and account results persist independently', () => { const s = memory(); saveAttempt(s, 'guest', attempt()); saveAttempt(s, 'alice', attempt('two', 'alice')); assert.deepEqual(readAttempts(s).map(a => a.id), ['one']); assert.deepEqual(readAttempts(s, 'alice').map(a => a.id), ['two']); assert.deepEqual(readAttempts(s, 'bob'), []); });
-test('guest results transfer once to the first signed-in account', () => { const s = memory(); saveAttempt(s, 'guest', attempt()); claimGuestAttempts(s, 'alice'); claimGuestAttempts(s, 'bob'); assert.equal(readAttempts(s, 'alice')[0].owner, 'alice'); assert.deepEqual(readAttempts(s), []); assert.deepEqual(readAttempts(s, 'bob'), []); });
-test('legacy shared cache is filtered by owner and claimed guests do not reappear', () => { const s = memory(); s.setItem('reading-room:attempts', JSON.stringify([attempt(), attempt('private', 'bob')])); assert.deepEqual(readAttempts(s).map(a => a.id), ['one']); assert.deepEqual(readAttempts(s, 'alice'), []); claimGuestAttempts(s, 'alice'); assert.deepEqual(readAttempts(s), []); assert.deepEqual(readAttempts(s, 'bob').map(a => a.id), ['private']); });
-test('stable IDs deduplicate records and avoid retaining full test definitions', () => { const s = memory(); saveAttempt(s, 'guest', { ...attempt(), definition: { very: 'large' } }); saveAttempt(s, 'guest', { ...attempt(), createdAt: 3 }); const rows = readAttempts(s); assert.equal(rows.length, 1); assert.equal(rows[0].definition, undefined); assert.equal(mergeAttempts(rows, rows).length, 1); });
-test('failed guest claim is atomic and leaves original history recoverable', () => { const s = memory(); saveAttempt(s, 'guest', attempt()); const failing = { getItem: s.getItem, setItem: () => { throw new Error('quota'); } }; assert.throws(() => claimGuestAttempts(failing, 'alice')); assert.equal(readAttempts(s).length, 1); assert.equal(readAttempts(s, 'alice').length, 0); });
-test('corrupt storage recovers without breaking the history page', () => { const s = memory(); s.setItem('reading-room:history:v3', 'not json'); assert.deepEqual(readAttempts(s), []); saveAttempt(s, 'guest', attempt()); assert.equal(readAttempts(s).length, 1); });
-test('page URLs parse deep links, sessions, editor IDs and malformed input', () => { assert.deepEqual(parseRoute('/history/saved%20test'), { name: 'progress', id: 'saved test' }); assert.deepEqual(parseRoute('/tests/t/take/session'), { name: 'workspace', id: 't', session: 'session' }); assert.equal(parseRoute('/admin/new').name, 'editor'); assert.equal(parseRoute('/tests/%E0%A4%A').name, 'notfound'); assert.equal(parseRoute('/unknown').name, 'notfound'); });
-function fakeWindow() {
-  const listeners = new Map<string, Set<(e: any) => void>>(); const entries: { path: string; state: any }[] = [{ path: '/library', state: null }]; let position = 0;
-  const win: any = { location: new URL('https://reading.local/library'), accept: false, confirms: 0,
-    addEventListener(name: string, handler: (e: any) => void) { if (!listeners.has(name)) listeners.set(name, new Set()); listeners.get(name)!.add(handler); },
-    removeEventListener(name: string, handler: (e: any) => void) { listeners.get(name)?.delete(handler); },
-    emit(name: string, event: any) { listeners.get(name)?.forEach(fn => fn(event)); },
-    confirm() { win.confirms++; return win.accept; }
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import {
+  readAttempts,
+  saveAttempt,
+  claimGuestAttempts,
+  syncHistoryRecords,
+  mergeAttempts,
+} from "../src/services/localHistory.js";
+import {
+  createBrowserHistory,
+  parseRoute,
+} from "../src/services/browserHistory.js";
+function memory() {
+  const data = new Map<string, string>();
+  return {
+    getItem: (key: string) => data.get(key) ?? null,
+    setItem: (key: string, value: string) => {
+      data.set(key, value);
+    },
   };
-  win.history = { get state() { return entries[position].state; },
-    replaceState(state: any, _: string, path: string) { entries[position] = { state, path }; win.location = new URL(path, win.location); },
-    pushState(state: any, _: string, path: string) { entries.splice(position + 1); entries.push({ state, path }); position++; win.location = new URL(path, win.location); },
-    go(delta: number) { position += delta; win.location = new URL(entries[position].path, win.location); win.emit('popstate', { state: entries[position].state }); },
-    get length() { return entries.length; }
-  }; return win;
 }
-test('cancelling Back restores the exact session URL and active warning', () => { const win = fakeWindow(), changed: string[] = []; const h = createBrowserHistory(win, (p: string) => changed.push(p)); h.navigate('/tests/t/take/s'); h.guard(true); win.history.go(-1); assert.equal(win.location.pathname, '/tests/t/take/s'); assert.deepEqual(changed, ['/tests/t/take/s']); win.history.go(-1); assert.equal(win.confirms, 2); h.destroy(); });
-test('accepting Back navigates and removes the leave guard', () => { const win = fakeWindow(); const h = createBrowserHistory(win, () => {}); h.navigate('/tests/t/take/s'); h.guard(true); win.accept = true; win.history.go(-1); assert.equal(win.location.pathname, '/library'); const event = { prevented: false, preventDefault() { this.prevented = true; } }; win.emit('beforeunload', event); assert.equal(event.prevented, false); h.destroy(); });
-test('refresh and closing trigger the native beforeunload warning only in an active test', () => { const win = fakeWindow(); const h = createBrowserHistory(win, () => {}); h.guard(true); const e: any = { prevented: false, preventDefault() { this.prevented = true; } }; win.emit('beforeunload', e); assert.equal(e.prevented, true); assert.equal(e.returnValue, true); h.guard(false); const next = { prevented: false, preventDefault() { this.prevented = true; } }; win.emit('beforeunload', next); assert.equal(next.prevented, false); h.destroy(); });
-test('cancelled internal navigation adds no history entry', () => { const win = fakeWindow(); const h = createBrowserHistory(win, () => {}); h.guard(true); assert.equal(h.navigate('/settings'), false); assert.equal(win.history.length, 1); assert.equal(win.location.pathname, '/library'); h.destroy(); });
-test('cloud failure preserves local results and retries the same document ID', async () => { const s = memory(); saveAttempt(s, 'guest', attempt()); const puts: string[] = []; let fail = true; const remote = { list: async () => [], put: async (a: any) => { puts.push(a.id); if (fail) throw new Error('offline'); } }; await assert.rejects(syncHistoryRecords(s, 'alice', remote)); assert.equal(readAttempts(s, 'alice').length, 1); fail = false; await syncHistoryRecords(s, 'alice', remote); assert.deepEqual(puts, ['one', 'one']); assert.ok(readAttempts(s, 'alice')[0].syncedAt); });
-test('account changes abort in-flight history sync', async () => { const s = memory(); saveAttempt(s, 'alice', attempt('a', 'alice')); let current = true, writes = 0; await assert.rejects(syncHistoryRecords(s, 'alice', { list: async () => { current = false; return []; }, put: async () => { writes++; } }, () => current)); assert.equal(writes, 0); assert.deepEqual(readAttempts(s, 'bob'), []); });
-test('new results created during cloud upload remain in local history', async () => { const s = memory(); saveAttempt(s, 'alice', attempt('first', 'alice')); await syncHistoryRecords(s, 'alice', { list: async () => [], put: async () => { saveAttempt(s, 'alice', attempt('second', 'alice')); } }); assert.deepEqual(new Set(readAttempts(s, 'alice').map(a => a.id)), new Set(['first', 'second'])); });
+function attempt(id = "one", owner = "guest") {
+  return {
+    id,
+    owner,
+    testId: "test1",
+    testTitle: "A test",
+    createdAt: 1,
+    result: { rows: [] },
+  };
+}
+test("guest and account results persist independently", () => {
+  const s = memory();
+  saveAttempt(s, "guest", attempt());
+  saveAttempt(s, "alice", attempt("two", "alice"));
+  assert.deepEqual(
+    readAttempts(s).map((a) => a.id),
+    ["one"],
+  );
+  assert.deepEqual(
+    readAttempts(s, "alice").map((a) => a.id),
+    ["two"],
+  );
+  assert.deepEqual(readAttempts(s, "bob"), []);
+});
+test("guest results transfer once to the first signed-in account", () => {
+  const s = memory();
+  saveAttempt(s, "guest", attempt());
+  claimGuestAttempts(s, "alice");
+  claimGuestAttempts(s, "bob");
+  assert.equal(readAttempts(s, "alice")[0].owner, "alice");
+  assert.deepEqual(readAttempts(s), []);
+  assert.deepEqual(readAttempts(s, "bob"), []);
+});
+test("legacy shared cache is filtered by owner and claimed guests do not reappear", () => {
+  const s = memory();
+  s.setItem(
+    "reading-room:attempts",
+    JSON.stringify([attempt(), attempt("private", "bob")]),
+  );
+  assert.deepEqual(
+    readAttempts(s).map((a) => a.id),
+    ["one"],
+  );
+  assert.deepEqual(readAttempts(s, "alice"), []);
+  claimGuestAttempts(s, "alice");
+  assert.deepEqual(readAttempts(s), []);
+  assert.deepEqual(
+    readAttempts(s, "bob").map((a) => a.id),
+    ["private"],
+  );
+});
+test("stable IDs deduplicate records and avoid retaining full test definitions", () => {
+  const s = memory();
+  saveAttempt(s, "guest", { ...attempt(), definition: { very: "large" } });
+  saveAttempt(s, "guest", { ...attempt(), createdAt: 3 });
+  const rows = readAttempts(s);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].definition, undefined);
+  assert.equal(mergeAttempts(rows, rows).length, 1);
+});
+test("failed guest claim is atomic and leaves original history recoverable", () => {
+  const s = memory();
+  saveAttempt(s, "guest", attempt());
+  const failing = {
+    getItem: s.getItem,
+    setItem: () => {
+      throw new Error("quota");
+    },
+  };
+  assert.throws(() => claimGuestAttempts(failing, "alice"));
+  assert.equal(readAttempts(s).length, 1);
+  assert.equal(readAttempts(s, "alice").length, 0);
+});
+test("corrupt storage recovers without breaking the history page", () => {
+  const s = memory();
+  s.setItem("reading-room:history:v3", "not json");
+  assert.deepEqual(readAttempts(s), []);
+  saveAttempt(s, "guest", attempt());
+  assert.equal(readAttempts(s).length, 1);
+});
+test("page URLs parse deep links, sessions, editor IDs and malformed input", () => {
+  assert.deepEqual(parseRoute("/history/saved%20test"), {
+    name: "progress",
+    id: "saved test",
+  });
+  assert.deepEqual(parseRoute("/tests/t/take/session"), {
+    name: "workspace",
+    id: "t",
+    session: "session",
+  });
+  assert.equal(parseRoute("/admin/new").name, "editor");
+  assert.equal(parseRoute("/tests/%E0%A4%A").name, "notfound");
+  assert.equal(parseRoute("/unknown").name, "notfound");
+});
+function fakeWindow() {
+  const listeners = new Map<string, Set<(e: any) => void>>();
+  const entries: { path: string; state: any }[] = [
+    { path: "/library", state: null },
+  ];
+  let position = 0;
+  const win: any = {
+    location: new URL("https://reading.local/library"),
+    accept: false,
+    confirms: 0,
+    addEventListener(name: string, handler: (e: any) => void) {
+      if (!listeners.has(name)) listeners.set(name, new Set());
+      listeners.get(name)!.add(handler);
+    },
+    removeEventListener(name: string, handler: (e: any) => void) {
+      listeners.get(name)?.delete(handler);
+    },
+    emit(name: string, event: any) {
+      listeners.get(name)?.forEach((fn) => fn(event));
+    },
+    confirm() {
+      win.confirms++;
+      return win.accept;
+    },
+  };
+  win.history = {
+    get state() {
+      return entries[position].state;
+    },
+    replaceState(state: any, _: string, path: string) {
+      entries[position] = { state, path };
+      win.location = new URL(path, win.location);
+    },
+    pushState(state: any, _: string, path: string) {
+      entries.splice(position + 1);
+      entries.push({ state, path });
+      position++;
+      win.location = new URL(path, win.location);
+    },
+    go(delta: number) {
+      position += delta;
+      win.location = new URL(entries[position].path, win.location);
+      win.emit("popstate", { state: entries[position].state });
+    },
+    get length() {
+      return entries.length;
+    },
+  };
+  return win;
+}
+test("cancelling Back restores the exact session URL and active warning", () => {
+  const win = fakeWindow(),
+    changed: string[] = [];
+  const h = createBrowserHistory(win, (p: string) => changed.push(p));
+  h.navigate("/tests/t/take/s");
+  h.guard(true);
+  win.history.go(-1);
+  assert.equal(win.location.pathname, "/tests/t/take/s");
+  assert.deepEqual(changed, ["/tests/t/take/s"]);
+  win.history.go(-1);
+  assert.equal(win.confirms, 2);
+  h.destroy();
+});
+test("accepting Back navigates and removes the leave guard", () => {
+  const win = fakeWindow();
+  const h = createBrowserHistory(win, () => {});
+  h.navigate("/tests/t/take/s");
+  h.guard(true);
+  win.accept = true;
+  win.history.go(-1);
+  assert.equal(win.location.pathname, "/library");
+  const event = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  win.emit("beforeunload", event);
+  assert.equal(event.prevented, false);
+  h.destroy();
+});
+test("refresh and closing trigger the native beforeunload warning only in an active test", () => {
+  const win = fakeWindow();
+  const h = createBrowserHistory(win, () => {});
+  h.guard(true);
+  const e: any = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  win.emit("beforeunload", e);
+  assert.equal(e.prevented, true);
+  assert.equal(e.returnValue, true);
+  h.guard(false);
+  const next = {
+    prevented: false,
+    preventDefault() {
+      this.prevented = true;
+    },
+  };
+  win.emit("beforeunload", next);
+  assert.equal(next.prevented, false);
+  h.destroy();
+});
+test("cancelled internal navigation adds no history entry", () => {
+  const win = fakeWindow();
+  const h = createBrowserHistory(win, () => {});
+  h.guard(true);
+  assert.equal(h.navigate("/settings"), false);
+  assert.equal(win.history.length, 1);
+  assert.equal(win.location.pathname, "/library");
+  h.destroy();
+});
+test("cloud failure preserves local results and retries the same document ID", async () => {
+  const s = memory();
+  saveAttempt(s, "guest", attempt());
+  const puts: string[] = [];
+  let fail = true;
+  const remote = {
+    list: async () => [],
+    put: async (a: any) => {
+      puts.push(a.id);
+      if (fail) throw new Error("offline");
+    },
+  };
+  await assert.rejects(syncHistoryRecords(s, "alice", remote));
+  assert.equal(readAttempts(s, "alice").length, 1);
+  fail = false;
+  await syncHistoryRecords(s, "alice", remote);
+  assert.deepEqual(puts, ["one", "one"]);
+  assert.ok(readAttempts(s, "alice")[0].syncedAt);
+});
+test("account changes abort in-flight history sync", async () => {
+  const s = memory();
+  saveAttempt(s, "alice", attempt("a", "alice"));
+  let current = true,
+    writes = 0;
+  await assert.rejects(
+    syncHistoryRecords(
+      s,
+      "alice",
+      {
+        list: async () => {
+          current = false;
+          return [];
+        },
+        put: async () => {
+          writes++;
+        },
+      },
+      () => current,
+    ),
+  );
+  assert.equal(writes, 0);
+  assert.deepEqual(readAttempts(s, "bob"), []);
+});
+test("new results created during cloud upload remain in local history", async () => {
+  const s = memory();
+  saveAttempt(s, "alice", attempt("first", "alice"));
+  await syncHistoryRecords(s, "alice", {
+    list: async () => [],
+    put: async () => {
+      saveAttempt(s, "alice", attempt("second", "alice"));
+    },
+  });
+  assert.deepEqual(
+    new Set(readAttempts(s, "alice").map((a) => a.id)),
+    new Set(["first", "second"]),
+  );
+});

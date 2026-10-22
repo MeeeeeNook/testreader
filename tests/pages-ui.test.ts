@@ -1,14 +1,111 @@
-import { test } from 'node:test';
-import assert from 'node:assert/strict';
-import React from 'react';
-import { renderToStaticMarkup } from 'react-dom/server';
-import { LibraryView } from '../src/components/LibraryView.tsx';
-import { Navigation } from '../src/components/Navigation.tsx';
-import { ProgressView } from '../src/components/ProgressView.tsx';
-import type { UserProfile, TestMeta, AttemptRecord } from '../src/types.ts';
-const profile: UserProfile = { id: 'guest', name: 'Learner', email: '', target: 7, language: 'en', theme: 'light', favorites: [], status: 'active', fontSize: 16 };
-const meta: TestMeta = { id: 'test-one', title: 'A reading test', skill: 'reading', access: 'premium', source: 'Collection', status: 'published', duration: 60, passages: 3, questions: 40, updatedAt: 1 };
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import React from "react";
+import { renderToStaticMarkup } from "react-dom/server";
+import { LibraryView } from "../src/components/LibraryView.tsx";
+import { Navigation } from "../src/components/Navigation.tsx";
+import { ProgressView } from "../src/components/ProgressView.tsx";
+import type { UserProfile, TestMeta, AttemptRecord } from "../src/types.ts";
+const profile: UserProfile = {
+  id: "guest",
+  name: "Learner",
+  email: "",
+  target: 7,
+  language: "en",
+  theme: "light",
+  favorites: [],
+  status: "active",
+  fontSize: 16,
+};
+const meta: TestMeta = {
+  id: "test-one",
+  title: "A reading test",
+  skill: "reading",
+  access: "premium",
+  source: "Collection",
+  status: "published",
+  duration: 60,
+  passages: 3,
+  questions: 40,
+  updatedAt: 1,
+};
 const noop = () => {};
-test('library has real test URLs and no tiers or upload instructions for students', () => { const html = renderToStaticMarkup(React.createElement(LibraryView, { tests: [meta], attempts: [], profile, isAdmin: false, onSelectTest: noop, onToggleFavorite: noop, onNavigateToMock: noop, onNavigateToAdmin: noop })); assert.match(html, /href="\/tests\/test-one"/); assert.doesNotMatch(html, /Premium|Free Practice|Admin studio|Upload tests/); });
-test('navigation exposes actual page links and only the owner gets admin links', () => { const props = { route: 'library', profile, storageConnected: false, onNavigate: noop, isAdmin: false }; const html = renderToStaticMarkup(React.createElement(Navigation, props)); assert.match(html, /href="\/history"/); assert.match(html, /Results stay on this device/); assert.doesNotMatch(html, /href="\/admin"/); assert.match(renderToStaticMarkup(React.createElement(Navigation, { ...props, isAdmin: true })), /href="\/admin"/); });
-test('result review is a full page with the answer breakdown', () => { const attempt: AttemptRecord = { id: 'one', owner: 'guest', testId: 'test-one', testTitle: 'A reading test', skill: 'reading', mode: 'exam', createdAt: 1, responses: { 1: 'my response' }, result: { rows: [{ number: 1, response: 'my response', answer: 'accepted key', status: 'incorrect' }], correct: 0, total: 1, gradable: 1, incorrect: 1, blank: 0, ungraded: 0 }, band: null }; const html = renderToStaticMarkup(React.createElement(ProgressView, { attempts: [attempt], profile, selectedAttemptId: 'one', onSelectAttempt: noop, onBack: noop, onOpenProfileModal: noop, onReopenAttempt: noop })); assert.match(html, /my response/); assert.match(html, /accepted key/); assert.match(html, /Question breakdown/); assert.doesNotMatch(html, /<dialog/); });
+test("library has real test URLs and no tiers or upload instructions for students", () => {
+  const html = renderToStaticMarkup(
+    React.createElement(LibraryView, {
+      tests: [meta],
+      attempts: [],
+      profile,
+      isAdmin: false,
+      onSelectTest: noop,
+      onToggleFavorite: noop,
+      onNavigateToMock: noop,
+      onNavigateToAdmin: noop,
+    }),
+  );
+  assert.match(html, /href="\/tests\/test-one"/);
+  assert.doesNotMatch(html, /Premium|Free Practice|Admin studio|Upload tests/);
+});
+test("navigation exposes actual page links and only the owner gets admin links", () => {
+  const props = {
+    route: "library",
+    profile,
+    storageConnected: false,
+    onNavigate: noop,
+    isAdmin: false,
+  };
+  const html = renderToStaticMarkup(React.createElement(Navigation, props));
+  assert.match(html, /href="\/history"/);
+  assert.match(html, /Results stay on this device/);
+  assert.doesNotMatch(html, /href="\/admin"/);
+  assert.match(
+    renderToStaticMarkup(
+      React.createElement(Navigation, { ...props, isAdmin: true }),
+    ),
+    /href="\/admin"/,
+  );
+});
+test("result review is a full page with the answer breakdown", () => {
+  const attempt: AttemptRecord = {
+    id: "one",
+    owner: "guest",
+    testId: "test-one",
+    testTitle: "A reading test",
+    skill: "reading",
+    mode: "exam",
+    createdAt: 1,
+    responses: { 1: "my response" },
+    result: {
+      rows: [
+        {
+          number: 1,
+          response: "my response",
+          answer: "accepted key",
+          status: "incorrect",
+        },
+      ],
+      correct: 0,
+      total: 1,
+      gradable: 1,
+      incorrect: 1,
+      blank: 0,
+      ungraded: 0,
+    },
+    band: null,
+  };
+  const html = renderToStaticMarkup(
+    React.createElement(ProgressView, {
+      attempts: [attempt],
+      profile,
+      selectedAttemptId: "one",
+      onSelectAttempt: noop,
+      onBack: noop,
+      onOpenProfileModal: noop,
+      onReopenAttempt: noop,
+    }),
+  );
+  assert.match(html, /my response/);
+  assert.match(html, /accepted key/);
+  assert.match(html, /Question breakdown/);
+  assert.doesNotMatch(html, /<dialog/);
+});
