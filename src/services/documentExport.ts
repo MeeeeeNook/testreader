@@ -1,6 +1,6 @@
 import type {EditableTest,EditablePart} from '../types';
 import {cleanLayout} from './importer';
-export interface ExportOptions {includeAnswers:boolean;includeExplanations:boolean;transcriptOnly?:boolean}
+export interface ExportOptions {includeAnswers:boolean;includeExplanations:boolean;transcriptOnly?:boolean;includeQuestions?:boolean;includeTranscript?:boolean}
 export interface ExportRun{text:string;bold?:boolean;italic?:boolean;underline?:boolean}
 export type ExportBlock={kind:'text';text:string;runs?:ExportRun[];heading?:boolean;center?:boolean;align?:'left'|'center'|'right'|'justify';pageBreakBefore?:boolean}|{kind:'table';rows:string[][];answerTable?:boolean;pageBreakBefore?:boolean}|{kind:'image';url:string;alt:string};
 const normalize=(s:string)=>s.replace(/\s+/g,' ').trim().toLowerCase();
@@ -26,13 +26,16 @@ export function htmlBlocks(root:Element):ExportBlock[]{
 function passageRoot(part:EditablePart){const root=printableHtml(part.passageHtml,part);for(const el of Array.from(root.querySelectorAll('h1,h2,h3,h4,p,div')).slice(0,8)){if(el.querySelector('p,div,table'))continue;const text=normalize(el.textContent||'');if(text===normalize(part.title)||/^(?:part|passage|reading passage)\s*\d+$/.test(text))el.remove();}root.querySelectorAll('p').forEach(p=>{const children=Array.from(p.children);if(children.length===1&&['STRONG','B'].includes(children[0].tagName)&&normalize(children[0].textContent||'')===normalize(p.textContent||''))children[0].replaceWith(...Array.from(children[0].childNodes));});return root;}
 export function readingDocument(test:EditableTest,options:ExportOptions={includeAnswers:true,includeExplanations:true}):ExportBlock[]{
  const blocks:ExportBlock[]=[{kind:'text',text:test.title,heading:true,center:true}];for(const [i,part]of test.parts.entries()){
+  if(options.includeQuestions===false&&!options.includeTranscript&&!options.transcriptOnly)break;
   if(test.parts.length>1)blocks.push({kind:'text',text:part.title||`Passage ${i+1}`,heading:true,center:true,pageBreakBefore:i>0});
-   if(test.skill==='reading'||options.transcriptOnly)blocks.push(...htmlBlocks(passageRoot(part)));
-   if(options.transcriptOnly)continue;
+   if(test.skill==='listening'&&options.includeTranscript)blocks.push({kind:'text',text:'Transcript',heading:true});
+   if((test.skill==='reading'&&options.includeQuestions!==false)||options.transcriptOnly||options.includeTranscript)blocks.push(...htmlBlocks(passageRoot(part)));
+   if(options.transcriptOnly||options.includeQuestions===false)continue;
+   if(test.skill==='listening'&&options.includeTranscript)blocks.push({kind:'text',text:'Questions',heading:true});
    const questions=htmlBlocks(printableHtml(part.questionHtml,part));if(test.skill==='reading'&&questions[0]&&questions[0].kind!=='image')questions[0].pageBreakBefore=true;blocks.push(...questions);
   for(const slot of Object.values(part.slots)){if(![part.passageHtml,part.questionHtml].some(h=>h.includes(`data-slot="${slot.id}"`)||h.includes(`data-slot='${slot.id}'`)))blocks.push(...htmlBlocks(printableHtml(`<span data-slot="${slot.id}"></span>`,part)));}
  }
- if(options.includeAnswers) {blocks.push({kind:'text',text:options.includeExplanations?'Answers and explanations':'Answer key',heading:true,pageBreakBefore:true});blocks.push({kind:'table',answerTable:true,rows:[options.includeExplanations?['Question','Answer','Explanation']:['Question','Answer'],...test.parts.flatMap(p=>p.questions.map(q=>{const el=document.createElement('div');el.innerHTML=cleanLayout(q.explanationHtml||'');const row=[String(q.number),q.answer?.split('||').join(' / ')||''];return options.includeExplanations?[...row,plain(el)]:row;}))]});}return blocks;
+ if(options.includeAnswers||options.includeExplanations) {blocks.push({kind:'text',text:options.includeExplanations?(options.includeAnswers?'Answers and explanations':'Explanations'):'Answer key',heading:true,pageBreakBefore:true});blocks.push({kind:'table',answerTable:true,rows:[options.includeExplanations?(options.includeAnswers?['Question','Answer','Explanation']:['Question','Explanation']):['Question','Answer'],...test.parts.flatMap(p=>p.questions.map(q=>{const el=document.createElement('div');el.innerHTML=cleanLayout(q.explanationHtml||'');const row=[String(q.number),q.answer?.split('||').join(' / ')||''];return options.includeExplanations?(options.includeAnswers?[...row,plain(el)]:[String(q.number),plain(el)]):row;}))]});}return blocks;
 }
 async function imageData(url:string){const response=await fetch(url,{signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error('A test diagram could not download. Please retry the export.');const blob=await response.blob(),objectUrl=URL.createObjectURL(blob);try{const img=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('A test diagram could not be read.'));image.src=objectUrl;});const canvas=document.createElement('canvas');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;canvas.getContext('2d')!.drawImage(img,0,0);return {data:canvas.toDataURL('image/png'),width:img.naturalWidth,height:img.naturalHeight};}finally{URL.revokeObjectURL(objectUrl);}}
 function download(blob:Blob,name:string){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}

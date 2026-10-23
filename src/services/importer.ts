@@ -907,7 +907,7 @@ export function toEditable(
     source: meta.source || "Imported Collection",
     access: meta.access || "free",
     status: meta.status || "published",
-    duration: meta.duration || (meta.skill==='listening' ? (rawParts.length===4?30:rawParts.length*10) : rawParts.length === 1 ? 20 : 60),
+    duration: meta.duration || (meta.skill==='listening' ? (rawParts.length===4?40:rawParts.length*10) : rawParts.length === 1 ? 20 : 60),
     parts,
     createdAt: meta.createdAt || Date.now(),
     updatedAt: Date.now(),

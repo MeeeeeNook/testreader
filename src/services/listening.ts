@@ -26,7 +26,7 @@ export function assignImportedAudio(test:EditableTest,files:ListeningRecording[]
       if(!named||Number(named[1])===(p.position||i+1))assignments[i]=matches[0];
     });
   }
-  return {...test,skill:'listening',audioFiles:files,duration:test.parts.length===4?30:test.parts.length*10,parts:test.parts.map((p,i)=>({...p,audio:assignments[i]?.url||'',audioName:assignments[i]?.name||''}))};
+  return {...test,skill:'listening',audioFiles:files,duration:test.parts.length===4?40:test.parts.length*10,parts:test.parts.map((p,i)=>({...p,audio:assignments[i]?.url||'',audioName:assignments[i]?.name||''}))};
 }
 export interface ListeningTrack {src:string;name:string;partIds:string[];label:string;start:number;end?:number}
 export function listeningTracks(parts:EditablePart[]):ListeningTrack[]{
