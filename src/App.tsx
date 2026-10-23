@@ -366,7 +366,7 @@ export default function App() {
           if(!alive)return;
           const section=target.section?(full.parts.find(p=>p.id===target.section!.id)||(!target.test.sectionSummaries?full.parts[target.section.index]:undefined)):null;
           if(target.section&&!section)throw new Error("This passage is unavailable.");
-          const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],title:section.title}:full;
+          const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],duration:full.skill==='listening'?10:full.duration,title:section.title}:full;
           const params=new URL(location,'https://studio.local').searchParams;
           const settings=directSession(params,chosen);setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(settings.mode);setActiveDuration(settings.minutes);setActivePreview(false);
           const attempt=params.get("attempt");setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all")+(attempt&&/^[\w-]{1,128}$/.test(attempt)?":"+attempt:""));
