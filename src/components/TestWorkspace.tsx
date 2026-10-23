@@ -5,6 +5,7 @@ import {requestJson} from "../services/apiRequest";
 import {ListeningAudio} from "./ListeningAudio";
 import {Select} from "./Select";
 import {paintHighlights,selectionOffsets} from "../services/highlights";
+import {lookupVocabulary} from "../services/dictionary";
 import {DictionaryPanel} from "./DictionaryPanel";
 import {ExportDialog} from "./ExportDialog";
 import {testLink} from "../services/testLinks";
@@ -583,7 +584,20 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     if(saveIntent&&!auth.currentUser){onNotify('Sign in to save vocabulary.');setSelectionBox(null);return;}
     setDictionaryContext(selectionBox.context);setDictionarySaveIntent(saveIntent);setDictionaryWord(selectionBox.text);setSelectionBox(null);
   };
-  const handleSelectionWord=()=>openSelectionDictionary(true);
+  const savingWord=useRef(false);
+  const handleSelectionWord=async()=>{
+    if(!selectionBox||savingWord.current)return;
+    if(mode==='exam'&&!scored){onNotify('Dictionary is disabled during an active exam.');return;}
+    if(!auth.currentUser){onNotify('Sign in to save vocabulary.');setSelectionBox(null);return;}
+    const selected=selectionBox,owner=auth.currentUser.uid;
+    savingWord.current=true;setSelectionBox(null);onNotify('Looking up “'+selected.text+'”…');
+    try {
+      const item=await lookupVocabulary(selected.text,selected.context);
+      if(auth.currentUser?.uid!==owner)return;
+      await onSaveVocabulary(item);
+    }catch(error){onNotify(error instanceof Error?error.message:'Could not save this word. Please retry.');}
+    finally{savingWord.current=false;}
+  };
   const handleSelectionDictionary=()=>openSelectionDictionary(false);
 
   // Content Report submission

@@ -1,6 +1,6 @@
-import {DictionaryPanel} from "./DictionaryPanel";
+import {lookupVocabulary} from "../services/dictionary";
 import {Select} from "./Select";
-import React, { useState, useMemo } from 'react';
+import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { VocabularyItem, UserProfile } from '../types';
 
 interface VocabularyViewProps {
@@ -19,7 +19,29 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
   onNotify,
 }) => {
   const [search, setSearch] = useState('');
-  const [lookupWord,setLookupWord]=useState<VocabularyItem|null>(null);
+  const [definitions,setDefinitions]=useState<Record<string,string>>({});
+  const jobs=useRef(new Set<string>()),tried=useRef(new Set<string>());
+  const latest=useRef({owner:profile.id,vocabulary,onSaveWord});latest.current={owner:profile.id,vocabulary,onSaveWord};
+  const mounted=useRef(false);
+  useEffect(()=>{mounted.current=true;return()=>{mounted.current=false;};},[]);
+  useEffect(()=>{
+    const owner=profile.id;
+    if(owner==='guest')return;
+    for(const item of vocabulary){
+      const key=owner+':'+item.id+':'+item.word;
+      if(jobs.current.size>=3)break;
+      if(item.archived||item.meaning.trim()||tried.current.has(key)||jobs.current.has(key))continue;
+      tried.current.add(key);jobs.current.add(key);
+      setDefinitions(previous=>({...previous,[item.id]:'Looking up meaning…'}));
+      void lookupVocabulary(item.word,item.example).then(async definition=>{
+        const current=latest.current.vocabulary.find(word=>word.id===item.id);
+        if(!mounted.current||latest.current.owner!==owner||!current||current.archived||current.meaning.trim()||current.word!==item.word)return;
+        await latest.current.onSaveWord({...current,...definition});
+      }).then(()=>{if(mounted.current)setDefinitions(previous=>({...previous,[item.id]:''}));})
+      .catch(error=>{if(mounted.current&&latest.current.owner===owner)setDefinitions(previous=>({...previous,[item.id]:error instanceof Error?error.message:'Could not look up this word.'}));})
+      .finally(()=>{jobs.current.delete(key);if(mounted.current)setDefinitions(previous=>({...previous}));});
+    }
+  },[vocabulary,profile.id,definitions]);
   const [saveError,setSaveError]=useState('');
   const [editingWord, setEditingWord] = useState<Partial<VocabularyItem> | null>(null);
 
@@ -123,7 +145,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
             <article key={item.id} className="test-card" style={{ minHeight: '190px' }}>
               <div className="card-top">
                 <span className="studio-tag" style={{ textTransform: 'uppercase' }}>
-                  {item.meaning.trim()?item.partOfSpeech||'term':'Needs definition'}
+                  {item.meaning.trim()?item.partOfSpeech||'term':'Dictionary'}
                 </span>
                 <button
                   className="studio-quiet"
@@ -136,9 +158,9 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
 
               <h3 style={{ margin: '14px 0 8px', fontSize: '20px' }}>{item.word}</h3>
 
-              <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--studio-ink)', lineHeight: '1.6' }}>
-                {item.meaning||'No definition saved.'}
-              </p>{!item.meaning.trim()&&<button className="quiet-button" onClick={()=>setLookupWord(item)}>Look up definition</button>}
+              <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--studio-ink)', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
+                {item.meaning||definitions[item.id]||'Looking up meaning…'}
+              </p>{!item.meaning.trim()&&definitions[item.id]&&definitions[item.id]!=='Looking up meaning…'&&<button className="quiet-button" onClick={()=>{tried.current.delete(profile.id+':'+item.id+':'+item.word);setDefinitions(previous=>({...previous,[item.id]:''}));}}>Retry lookup</button>}
 
               {item.example && (
                 <p
@@ -182,7 +204,6 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
         </div>
       )}
 
-      {lookupWord&&<DictionaryPanel initialWord={lookupWord.word} sourceContext={lookupWord.example} saveIntent onClose={()=>setLookupWord(null)} onSave={async entry=>{await onSaveWord({...lookupWord,...entry});}}/>}
       {/* Add / Edit Word Modal */}
       {editingWord && (
         <dialog

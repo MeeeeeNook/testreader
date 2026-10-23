@@ -69,6 +69,7 @@ export interface TestMeta {
   coverImage?: string;
   contentBytes?: number;
   fullTestMenuFolders?: import('./services/folders').MenuFolder[];
+  folderPages?: import('./services/folders').PublicFolder[];
   originSource?:string;
   folderId?: string|null;
   folderPath?: string;

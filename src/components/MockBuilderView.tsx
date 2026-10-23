@@ -1,3 +1,4 @@
+import {BookOpen,Headphones,Shuffle,ArrowRight,Check,Clock,Layers,ShieldCheck,SlidersHorizontal} from 'lucide-react';
 import {Select} from "./Select";
 import React, { useState, useEffect } from 'react';
 import { TestMeta, EditableTest, EditablePart } from '../types';
@@ -16,8 +17,9 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
 }) => {
   const [skill, setSkill] = useState<'reading' | 'listening'>('reading');
   const [mode, setMode] = useState<'practice' | 'exam'>('exam');
+  const [busy,setBusy]=useState(false),[error,setError]=useState('');
 
-  const published = tests.filter((t) => t.status === 'published' && t.skill === skill);
+  const published = tests.filter((t) => t.status === 'published' && !t.deletedAt && t.skill === skill);
   const count = skill === 'listening' ? 4 : 3;
 
   // Selected tests and part indices for each section
@@ -32,7 +34,7 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
   useEffect(() => {
     setSelections(prev => Array.from({ length: count }, (_, i) => {
       const selected = prev[i];
-      return published.some(t => t.id === selected?.testId) ? selected : { testId: published[i % (published.length || 1)]?.id || '', partIndex: 0 };
+      return published.some(t => t.id === selected?.testId && selected.partIndex<(t.passages||1)) ? selected : { testId: published[i % (published.length || 1)]?.id || '', partIndex: 0 };
     }));
   }, [publishedKey, count]);
 
@@ -68,27 +70,26 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
 
   const handleRandomize = () => {
     if (!published.length) {
-      onNotify('Upload tests in Admin Studio first.');
+      onNotify('There are no published tests for this skill yet.');
       return;
     }
-    const next = Array.from({ length: count }, () => {
-      const randomTest = published[Math.floor(Math.random() * published.length)];
-      const maxPart = Math.max(0, (randomTest.passages || 1) - 1);
-      const randomPart = Math.floor(Math.random() * (maxPart + 1));
-      return { testId: randomTest.id, partIndex: randomPart };
-    });
+    const pool=published.flatMap(test=>Array.from({length:test.passages||1},(_,partIndex)=>({testId:test.id,partIndex})));
+    for(let i=pool.length-1;i>0;i--){const j=Math.floor(Math.random()*(i+1));[pool[i],pool[j]]=[pool[j],pool[i]];}
+    if(pool.length<count){onNotify('There are not enough different sections for a full mock yet.');return;}
+    const next=pool.slice(0,count);
     setSelections(next);
     onNotify('Sections randomized.');
   };
 
   const handleStartMock = async () => {
+    if(busy)return;
     if (!published.length) {
       onNotify('No published tests available to build a mock.');
       return;
     }
 
+    setBusy(true);setError('');
     try {
-      onNotify('Compiling full mock test…');
       const compiledParts: EditablePart[] = [];
       const sourceSections: { testId: string; sectionId: string }[] = [];
       const usedKeys = new Set<string>();
@@ -160,129 +161,27 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
         updatedAt: Date.now(),
       };
 
-      onStartSession(mockTest, mode, mockTest.duration);
+      onStartSession(mockTest, mode, mode==='practice'?0:mockTest.duration);
     } catch (err) {
-      onNotify(err instanceof Error ? err.message : String(err));
-    }
+      setError(err instanceof Error ? err.message : String(err));
+    }finally{setBusy(false);}
   };
 
-  return (
-    <div style={{ maxWidth: '850px', paddingBottom: '40px' }}>
-      <div className="studio-page-head">
-        <div>
-          <div className="studio-eyebrow">MAKE IT YOUR OWN</div>
-          <h1 className="studio-heading">Build a full mock test.</h1>
-          <p className="studio-lead">
-            Combine individual passages from your library, or let the studio generate a balanced exam.
-            Questions and slot layouts are automatically renumbered from 1 to 40.
-          </p>
-        </div>
-      </div>
-
-      <div className="studio-panel">
-        <div className="studio-form-grid">
-          <label className="studio-field">
-            Test Skill
-            <Select
-              value={skill}
-              onChange={(e) => setSkill(e.target.value as any)}
-            >
-              <option value="reading">Reading — 3 passages (60 min)</option>
-              <option value="listening">Listening — 4 sections (30 min)</option>
-            </Select>
-          </label>
-
-          <label className="studio-field">
-            Exam Mode
-            <Select
-              value={mode}
-              onChange={(e) => setMode(e.target.value as any)}
-            >
-              <option value="exam">Official Exam Simulation (Strict timing, hidden keys)</option>
-              <option value="practice">Practice Mode (Answers & explanations toggleable)</option>
-            </Select>
-          </label>
-        </div>
-
-        <div style={{ margin: '24px 0 16px', borderTop: '1px solid var(--studio-border)', paddingTop: '20px' }}>
-          <h4 style={{ margin: '0 0 16px', fontSize: '15px' }}>Section Breakdown</h4>
-
-          {published.length === 0 ? (
-            <div className="studio-empty">
-              No published {skill} tests found in your library. Upload some in Admin Studio first.
-            </div>
-          ) : (
-            Array.from({ length: count }).map((_, idx) => {
-              const currentSel = selections[idx] || { testId: published[0]?.id || '', partIndex: 0 };
-              const currentTest = published.find((t) => t.id === currentSel.testId) || published[0];
-              const passageCount = currentTest?.passages || 1;
-
-              return (
-                <div
-                  key={idx}
-                  className="studio-form-grid"
-                  style={{
-                    marginBottom: '16px',
-                    padding: '14px',
-                    background: '#fafbf8',
-                    border: '1px solid var(--studio-border)',
-                    borderRadius: '8px',
-                  }}
-                >
-                  <label className="studio-field" style={{ margin: 0 }}>
-                    Section {idx + 1} — Select Test
-                    <Select
-                      value={currentSel.testId}
-                      onChange={(e) => handleTestChange(idx, e.target.value)}
-                    >
-                      {published.map((t) => (
-                        <option key={t.id} value={t.id}>
-                          {t.title} ({t.source || 'General'})
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-
-                  <label className="studio-field" style={{ margin: 0 }}>
-                    Section {idx + 1} — Choose Passage
-                    <Select
-                      value={currentSel.partIndex}
-                      onChange={(e) => handlePartChange(idx, Number(e.target.value))}
-                    >
-                      {Array.from({ length: passageCount }).map((_, pIdx) => (
-                        <option key={pIdx} value={pIdx}>
-                          {pIdx + 1}. {passageNames[currentSel.testId]?.[pIdx] || currentTest?.passageTitles?.[pIdx] || `Passage ${pIdx + 1}`}
-                        </option>
-                      ))}
-                    </Select>
-                  </label>
-                </div>
-              );
-            })
-          )}
-        </div>
-
-        <div className="studio-actions" style={{ marginTop: '24px' }}>
-          <button className="studio-secondary" onClick={handleRandomize}>
-            ↻ Randomise sections
-          </button>
-          <button
-            className="studio-primary"
-            onClick={handleStartMock}
-            disabled={published.length === 0}
-          >
-            Start full mock →
-          </button>
-        </div>
-
-        <p className="studio-small" style={{ marginTop: '16px' }}>
-          Section lengths vary across collections. The real question total is preserved, and approximate
-          IELTS band estimates are shown when exactly 40 gradable questions are completed.
-        </p>
-      </div>
-    </div>
-  );
+  const minutes=skill==='reading'?60:30,unit=skill==='reading'?'Passage':'Section';
+  return <div className="mock-builder">
+    <header className="mock-page-heading"><span className="portal-eyebrow">YOUR TEST, YOUR WAY</span><h1>Make room for your next milestone.</h1><p>Bring your favourite passages together in one focused IELTS session.</p></header>
+    <div className="mock-layout"><div className="mock-main">
+      <section className="mock-settings" aria-label="Test settings"><div className="mock-section-heading"><span>01</span><div><h2>Set your focus</h2><p>A little practice, or the full challenge.</p></div></div>
+        <div className="mock-skill-options">{(['reading','listening'] as const).map(value=><button key={value} aria-pressed={skill===value} className={skill===value?'selected':''} onClick={()=>{setSkill(value);setError('');}}>{value==='reading'?<BookOpen size={22}/>:<Headphones size={22}/>}<span><strong>{value==='reading'?'Academic Reading':'Listening'}</strong><small>{value==='reading'?'3 passages · 60 minutes':'4 sections · 30 minutes'}</small></span>{skill===value&&<Check size={17}/>}</button>)}</div>
+        <div className="mock-mode-options" aria-label="Session mode">{(['practice','exam'] as const).map(value=><button key={value} aria-pressed={mode===value} className={mode===value?'selected':''} onClick={()=>setMode(value)}>{value==='practice'?<SlidersHorizontal size={18}/>:<ShieldCheck size={18}/>}<span><strong>{value==='practice'?'Practice':'Exam'}</strong><small>{value==='practice'?'Unlimited time, reading tools on':'Timed, with exam conditions'}</small></span></button>)}</div>
+      </section>
+      <section className="mock-passages" aria-label="Choose passages"><div className="mock-section-heading"><span>02</span><div><h2>Choose your {skill==='reading'?'passages':'sections'}</h2><p>Pick from the library, or let us surprise you.</p></div><button className="mock-shuffle" disabled={!published.length||busy} onClick={handleRandomize}><Shuffle size={15}/>Shuffle</button></div>
+        {!published.length?<div className="portal-empty"><BookOpen size={30}/><p>No published {skill} tests yet. Try the other skill.</p></div>:Array.from({length:count},(_,index)=>{
+          const selection=selections[index],test=published.find(test=>test.id===selection?.testId);
+          const title=passageNames[selection?.testId]?.[selection?.partIndex]||test?.passageTitles?.[selection?.partIndex];
+          return <article className="mock-passage-card" key={skill+index}><div className="mock-passage-heading"><span>{String(index+1).padStart(2,'0')}</span><div><small>{unit.toUpperCase()} {index+1}</small><h3>{title||'Choose a '+unit.toLowerCase()}</h3></div></div><div className="mock-passage-fields"><label>From test<Select aria-label={unit+' '+(index+1)+' test'} value={selection?.testId||''} onChange={event=>handleTestChange(index,event.target.value)}>{published.map(test=><option key={test.id} value={test.id}>{test.title} · {test.folderPath||test.source||'Library'}</option>)}</Select></label><label>{unit}<Select aria-label={unit+' '+(index+1)+' selection'} value={selection?.partIndex??0} onChange={event=>handlePartChange(index,Number(event.target.value))}>{Array.from({length:test?.passages||1},(_,part)=><option key={part} value={part}>{part+1}. {passageNames[selection?.testId]?.[part]||test?.passageTitles?.[part]||unit+' '+(part+1)}</option>)}</Select></label></div></article>;
+        })}
+      </section>
+    </div><aside className="mock-summary"><span className="mock-summary-icon"><Layers size={26}/></span><span className="portal-eyebrow">READY WHEN YOU ARE</span><h2>Your next<br/><em>challenge.</em></h2><dl><div><dt>Focus</dt><dd>{skill==='reading'?'Academic Reading':'Listening'}</dd></div><div><dt>Format</dt><dd>{count} {unit.toLowerCase()}s</dd></div><div><dt>Time</dt><dd><Clock size={14}/>{mode==='practice'?'Unlimited':minutes+' minutes'}</dd></div><div><dt>Mode</dt><dd>{mode==='practice'?'Practice':'Exam'}</dd></div></dl><button className="studio-primary" disabled={busy||!published.length} onClick={()=>void handleStartMock()}>{busy?'Preparing your test…':'Start '+(mode==='practice'?'practice':'mock test')}<ArrowRight size={17}/></button>{error&&<p role="alert" className="mock-error">{error}</p>}<p className="mock-summary-note">{mode==='practice'?'Take your time. Look up words, pause and review your answers when you finish.':'Your timer starts when the test opens. Answers and explanations appear after you submit.'}</p><small>Question totals follow your chosen passages. Band estimates are available for tests with 40 questions.</small></aside></div>
+  </div>;
 };
-
-
-
