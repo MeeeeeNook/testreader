@@ -314,6 +314,16 @@ export class FirestoreAdapter {
     }
   }
 
+  // Calculate and persist test content bytes to metadata (admin only)
+  async measureTestContent(testId: string): Promise<number> {
+    if ((await this.getRole()) !== "admin")
+      throw new Error("Administrator access required.");
+    const full = await this.getTestComplete(testId);
+    const size = new TextEncoder().encode(JSON.stringify(full)).length;
+    await this.updateTestMeta(testId, { contentBytes: size });
+    return size;
+  }
+
   // Lightweight title repair never reads answer keys. Cache by test revision.
   private summaryRequests = new Map<string, Promise<Partial<TestMeta>>>();
   getCatalogSummary(test: TestMeta): Promise<Partial<TestMeta>> {

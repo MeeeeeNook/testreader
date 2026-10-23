@@ -52,7 +52,10 @@ function parseServiceAccount(raw: string) {
 }
 
 function getFirebaseCredential() {
-  const rawKey = process.env.FIREBASE_SERVICE_ACCOUNT_JSON;
+  const rawKey =
+    process.env.FIREBASE_SERVICE_ACCOUNT_JSON ||
+    process.env.FIREBASE_SERVICE_ACCOUNT ||
+    process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
   if (rawKey) {
     try {
       const account = parseServiceAccount(rawKey);
@@ -76,9 +79,13 @@ function backend() {
       },
       "READING_SERVER",
     );
+  const bucketName =
+    process.env.FIREBASE_STORAGE_BUCKET ||
+    firebaseConfig.storageBucket ||
+    `${firebaseConfig.projectId}.firebasestorage.app`;
   return {
     auth: getAuth(instance),
-    bucket: getStorage(instance).bucket(),
+    bucket: getStorage(instance).bucket(bucketName),
     db: getFirestore(
       instance,
       firebaseConfig.firestoreDatabaseId || "(default)",
@@ -324,18 +331,83 @@ app.post("/api/admin/storage-usage", async (req,res)=>{
   try {
     const {isAdmin}=await caller(req);
     if(!isAdmin)throw new AssessmentError(403,"Administrator access required.");
+    const { bucket } = backend();
+    let targetBucket = bucket;
     const files:{name:string;size:number}[]=[];
     let query:any={autoPaginate:false,maxResults:1000};
-    do {
-      const [page,next]=await backend().bucket.getFiles(query);
-      files.push(...page.map(file=>({name:file.name,size:Number(file.metadata.size)||0})));
-      query=next;
-    }while(query&&files.length<10000);
-    res.json({...summarizeFiles(files),truncated:Boolean(query),scannedAt:Date.now()});
+    try {
+      do {
+        const [page,next]=await targetBucket.getFiles(query);
+        files.push(...page.map(file=>({name:file.name,size:Number(file.metadata.size)||0})));
+        query=next;
+      }while(query&&files.length<10000);
+    } catch (primaryErr: any) {
+      if ((primaryErr?.code === 404 || primaryErr?.message?.includes("does not exist")) && targetBucket.name.endsWith(".firebasestorage.app")) {
+        const fallbackBucket = getStorage(getApps().find(a => a.name === "READING_SERVER")!).bucket(`${firebaseConfig.projectId}.appspot.com`);
+        try {
+          query = { autoPaginate: false, maxResults: 1000 };
+          do {
+            const [page, next] = await fallbackBucket.getFiles(query);
+            files.push(...page.map(file => ({ name: file.name, size: Number(file.metadata.size) || 0 })));
+            query = next;
+          } while (query && files.length < 10000);
+          targetBucket = fallbackBucket;
+        } catch {
+          throw primaryErr;
+        }
+      } else {
+        throw primaryErr;
+      }
+    }
+    res.json({
+      ...summarizeFiles(files),
+      truncated:Boolean(query),
+      scannedAt:Date.now(),
+      bucket: targetBucket.name,
+    });
   }catch(error){
-    console.error("Storage inventory failed",error);
-    const message=error instanceof AssessmentError?error.message:"Uploaded file sizes are unavailable. The owner needs to configure server Firebase credentials with Storage Object Viewer access. Test content can still be measured below.";
-    res.status(error instanceof AssessmentError?error.status:503).json({error:message});
+    console.error("Storage inventory failed:", error);
+    if (error instanceof AssessmentError) {
+      return res.status(error.status).json({ error: error.message });
+    }
+    const err = error as { code?: number | string; message?: string; details?: string };
+    const code = err?.code;
+    const message = err?.message || "";
+    const details = err?.details || "";
+
+    const bucketName = firebaseConfig.storageBucket || `${firebaseConfig.projectId}.firebasestorage.app`;
+    let userMessage = "Uploaded file sizes are unavailable. The owner needs to configure server Firebase credentials with Storage Object Viewer access. Test content can still be measured below.";
+    let diagnosticCode = "STORAGE_UNAVAILABLE";
+
+    if (code === 404 || message.includes("The specified bucket does not exist") || message.includes("Not Found")) {
+      userMessage = `Storage bucket '${bucketName}' was not found. Please ensure Cloud Storage is initialized in Firebase Console for project '${firebaseConfig.projectId}'.`;
+      diagnosticCode = "BUCKET_NOT_FOUND";
+    } else if (
+      code === 403 ||
+      code === 7 ||
+      code === "permission-denied" ||
+      code === "PERMISSION_DENIED" ||
+      message.includes("PERMISSION_DENIED") ||
+      message.includes("permission") ||
+      details.includes("storage.objects.list") ||
+      details.includes("PERMISSION_DENIED")
+    ) {
+      userMessage = `Service account does not have permission to list objects in bucket '${bucketName}'. Grant the 'Storage Object Viewer' (roles/storage.objectViewer) role in Google Cloud IAM.`;
+      diagnosticCode = "STORAGE_PERMISSION_DENIED";
+    } else if (
+      message.includes("Could not load the default credentials") ||
+      message.includes("FIREBASE_SERVICE_ACCOUNT_JSON") ||
+      message.includes("credential")
+    ) {
+      userMessage = "Firebase Admin credentials missing or invalid on server. Ensure FIREBASE_SERVICE_ACCOUNT_JSON is set in Vercel environment variables.";
+      diagnosticCode = "CREDENTIALS_MISSING";
+    }
+
+    res.status(503).json({
+      error: userMessage,
+      code: diagnosticCode,
+      bucket: bucketName,
+    });
   }
 });
 
