@@ -23,9 +23,9 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={get currentUser(){return globalThis.__workspaceUser||null}};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const variant of ['practice','exam','solution','member','listening','listening-solution']) {
-      const listening=variant.startsWith('listening');
-      const mode=variant==='listening'?'practice':variant==='listening-solution'?'solution':variant;
+    for (const variant of ['practice','exam','solution','member','listening','listening-solution','practice-expiry','exam-expiry']) {
+      const listening=variant.startsWith('listening'),expiry=variant.endsWith('-expiry');
+      const mode=expiry?variant.split('-')[0]:variant==='listening'?'practice':variant==='listening-solution'?'solution':variant;
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
       Object.assign(window.HTMLElement.prototype,{load(){},pause(){},play(){return Promise.resolve()}});
       const storage=new Map<string,string>();
@@ -34,7 +34,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       const numbers=questions.map(q=>q.number);
       const keys=Object.fromEntries(questions.map(q=>[q.number,q]));
       const owner=mode==='member'?'student-one':'guest',actualMode=mode==='member'?'practice':mode;
-      storage.set(`reading-room:v4:${owner}:${mode}:${actualMode}`, JSON.stringify({responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
+      storage.set(`reading-room:v4:${owner}:${mode}:${actualMode}`, JSON.stringify({...(expiry?{remaining:0}:{}),responses:Object.fromEntries(numbers.slice(0,30).map(n=>[n,'yes']))}));
       Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true,
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
         __workspaceUser:mode==='member'?{uid:owner}:null,
@@ -54,6 +54,11 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
           await act(async()=>root.unmount());root=createRoot(document.getElementById('root')!);
           await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:'practice',initialSolution:false,sessionId:mode,initialDurationMinutes:0,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
           assert.equal(requests,1,'practice must not request solutions after visiting the answer page');assert.equal(document.querySelector('.solution-score-banner'),null);assert.equal((document.querySelector('.fill-input') as HTMLInputElement).disabled,false);continue;
+        }
+        if(expiry){
+          if(actualMode==='exam'){assert.equal(requests,1,'test expiry automatically submits once');assert.ok(document.querySelector('.result-page-dialog[open]'));}
+          else{assert.equal(requests,0,'practice expiry waits for the learner');assert.match(document.querySelector('.leave-test-dialog')!.textContent!,/Practice time is up/);const keep=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Keep practising')!;await act(async()=>keep.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(requests,0);assert.equal(document.querySelector('.leave-test-dialog'),null);assert.equal((document.querySelector('.fill-input') as HTMLInputElement).disabled,false);}
+          continue;
         }
         assert.equal(requests,0,'opening a test must not fetch solutions');
         if(listening){assert.equal(document.querySelector('.passage-pane'),null);assert.equal(document.body.textContent!.includes('PRIVATE LISTENING TRANSCRIPT'),false);}
@@ -79,8 +84,15 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         const confirm=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Confirm submission')!;
         await act(async()=>confirm.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,1);
+        assert.ok(document.querySelector('.result-page-dialog[open]'),'submission opens the dedicated result screen');
+        assert.match(document.querySelector('.result-session-meta')!.textContent!,actualMode==='exam'?/Test mode/:/Practice mode/);
+        assert.ok(document.querySelector('.reader-footer-actions .answer-sheet-trigger'),'answer sheet sits beside submit');
+        const review=[...document.querySelectorAll('.result-page-actions button')].find(b=>b.textContent!.includes('Review my answers'))!;
+        await act(async()=>review.dispatchEvent(new window.Event('click',{bubbles:true})));
+        assert.equal(document.querySelector('.result-page-dialog'),null);
+        if(owner!=='guest'){const record=readAttempts(localStorage,owner)[0];assert.equal(record.mode,'practice');assert.equal(typeof record.elapsedSeconds,'number');assert.ok(record.startedAt);assert.ok(record.completedAt)}
         if(listening)assert.match(document.querySelector('.passage-pane')!.textContent!,/PRIVATE LISTENING TRANSCRIPT/);
-        assert.equal(document.querySelector('.results-panel'),null,'submission reveals answers without a blocking score modal');
+        assert.equal(document.querySelector('.results-panel'),null,'legacy results modal is replaced by the dedicated score screen');
         assert.match(document.querySelector('.solution-score-banner')!.textContent!,/Estimated band 7\.0/);
         assert.equal(readAttempts(localStorage,owner).length,mode==='member'?1:0,'only signed-in results save quietly in history');
         assert.equal(document.querySelectorAll('.solution-score-banner button[aria-pressed]').length,2);

@@ -1158,7 +1158,9 @@ export default function App() {
 
             {route === "students" && userRole === "admin" && (
               <StudentsView
-                learners={learners}
+                onToggleStatus={handleToggleLearnerStatus}
+                onDeleted={uid=>setLearners(previous=>previous.filter(p=>p.id!==uid))}
+                learners={learners.filter(p=>!p.deletedAt)}
                 studentId={page.id}
                 attemptId={page.attempt}
                 onNavigate={navigate}
@@ -1171,7 +1173,7 @@ export default function App() {
                 onNavigate={navigate}
                 tests={tests}
                 reports={reports}
-                learners={learners}
+                learners={learners.filter(p=>!p.deletedAt)}
                 adminUid={user?.uid || ""}
                 onNewTest={handleNewTest}
                 onDeleteTest={handleDeleteTest}

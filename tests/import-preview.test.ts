@@ -18,7 +18,7 @@ test('preparing mixed uploads only parses local tests and preserves errors for r
  const ready=replaceImportAssets(original,new Map([['blob:local','https://storage.example/image.png']]));
  assert.match(ready.parts[0].passageHtml,/https:\/\/storage.example/);assert.match(original.parts[0].passageHtml,/blob:local/);disposeImport(plan);
 });
-test('preview does not import on open and confirmation sends only selected tests as drafts',async()=>{
+test('preview does not import on open and confirmation sends only selected tests as published by default',async()=>{
  const {window}=parseHTML('<html><body><div id="app"></div></body></html>');Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true});
  const plan=await prepareImport(['One','Two'].map(title=>new File([JSON.stringify({title,parts:[{topic_content:`<h2>${title} source title</h2>`,question_content:'',questions:[]}]})],title+'.json')));
  const confirmed:ImportCandidate[][]=[];let cancelled=0;
@@ -30,7 +30,7 @@ test('preview does not import on open and confirmation sends only selected tests
   await act(async()=>{checks[1].checked=false;checks[1].dispatchEvent(new window.Event("click",{bubbles:true}));});
   const submit=[...document.querySelectorAll('button')].find(b=>b.textContent?.startsWith('Confirm import'))!;
   await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
-  assert.equal(confirmed.length,1);assert.equal(confirmed[0].length,1);assert.equal(confirmed[0][0].test.status,'draft');assert.equal(confirmed[0][0].test.id,plan.candidates[0].test.id);
+  assert.equal(confirmed.length,1);assert.equal(confirmed[0].length,1);assert.equal(confirmed[0][0].test.status,'published');assert.equal(confirmed[0][0].test.id,plan.candidates[0].test.id);
   const cancel=[...document.querySelectorAll('button')].find(b=>b.textContent==='Cancel import')!;
   await act(async()=>cancel.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(cancelled,1);
  }finally{await act(async()=>root.unmount());disposeImport(plan);}

@@ -1,3 +1,241 @@
+// src/services/scoring.ts
+function normalizeAnswer(value) {
+  return String(value ?? "").normalize("NFKC").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[‐‑–—]/g, "-").replace(/\s+/g, " ").trim().toLowerCase();
+}
+function answerMatches(response, key) {
+  const value = normalizeAnswer(response);
+  if (!value) return false;
+  return String(key.answer || "").split("||").some((variant) => {
+    const answer = normalizeAnswer(variant);
+    if (["matching_features", "matching_names", "heading"].includes(key.kind || "")) {
+      const letter = /^([a-z]|[ivxlcdm]+)(?:\s*[.\-—–•·]\s*|\s+|$)/i.exec(answer);
+      if (letter && value === letter[1].toLowerCase()) return true;
+    }
+    return value === answer;
+  });
+}
+function scoreTest(parts, responses) {
+  const rows = /* @__PURE__ */ new Map();
+  for (const part of parts) {
+    const isMap = part.keys instanceof Map;
+    const getKey = (n) => (isMap ? part.keys.get(n) : part.keys[n]) || { answer: "" };
+    const missingSet = part.missing instanceof Set ? part.missing : new Set(part.missing || []);
+    for (const n of part.numbers) {
+      const key = getKey(n);
+      const response = String(responses[n] || "");
+      const status = missingSet.has(n) || key.missing || !key.answer ? "ungraded" : !normalizeAnswer(response) ? "blank" : answerMatches(response, key) ? "correct" : "incorrect";
+      rows.set(n, {
+        number: n,
+        response,
+        answer: key.answer || "",
+        status
+      });
+    }
+    for (const group of part.multiGroups || []) {
+      if (group.some((n) => rows.get(n)?.status === "ungraded")) {
+        for (const n of group) {
+          if (rows.has(n)) rows.get(n).status = "ungraded";
+        }
+        continue;
+      }
+      const remaining = group.map((n) => ({ ...getKey(n) }));
+      for (const n of group) {
+        const row = rows.get(n);
+        if (!row) continue;
+        if (!normalizeAnswer(row.response)) {
+          row.status = "blank";
+          continue;
+        }
+        const index = remaining.findIndex((k) => answerMatches(row.response, k));
+        row.status = index < 0 ? "incorrect" : "correct";
+        if (index >= 0) {
+          row.answer = remaining.splice(index, 1)[0].answer;
+        }
+      }
+    }
+  }
+  const sortedRows = Array.from(rows.values()).sort((a, b) => a.number - b.number);
+  const result = {
+    rows: sortedRows,
+    total: sortedRows.length,
+    correct: 0,
+    incorrect: 0,
+    blank: 0,
+    ungraded: 0,
+    gradable: 0
+  };
+  for (const row of result.rows) {
+    result[row.status]++;
+  }
+  result.gradable = result.total - result.ungraded;
+  return result;
+}
+function estimatedBand(result, skill = "reading") {
+  if (result.total !== 40 || result.ungraded > 0 || !Number.isInteger(result.correct) || result.correct < 0 || result.correct > 40 || result.gradable !== void 0 && result.gradable !== 40) return null;
+  const bounds = skill === "listening" ? [
+    [39, 9],
+    [37, 8.5],
+    [35, 8],
+    [32, 7.5],
+    [30, 7],
+    [26, 6.5],
+    [23, 6],
+    [18, 5.5],
+    [16, 5],
+    [13, 4.5],
+    [10, 4],
+    [8, 3.5],
+    [6, 3],
+    [4, 2.5],
+    [3, 2],
+    [2, 1.5],
+    [1, 1],
+    [0, 0]
+  ] : [
+    [39, 9],
+    [37, 8.5],
+    [35, 8],
+    [33, 7.5],
+    [30, 7],
+    [27, 6.5],
+    [23, 6],
+    [19, 5.5],
+    [15, 5],
+    [13, 4.5],
+    [10, 4],
+    [8, 3.5],
+    [6, 3],
+    [4, 2.5],
+    [3, 2],
+    [2, 1.5],
+    [1, 1],
+    [0, 0]
+  ];
+  const match = bounds.find(([threshold]) => result.correct >= threshold);
+  return match ? match[1] : null;
+}
+
+// server/assessment.ts
+var AssessmentError = class extends Error {
+  constructor(status, message) {
+    super(message);
+    this.status = status;
+  }
+};
+var validId = (id) => typeof id === "string" && /^[\w-]{1,128}$/.test(id);
+async function loadAssessment(store, request, admin) {
+  const custom = request.sourceSections !== void 0;
+  if (custom && (!Array.isArray(request.sourceSections) || !request.sourceSections.length || request.sourceSections.length > 4)) {
+    throw new AssessmentError(400, "Choose between one and four source sections.");
+  }
+  const sources = custom ? request.sourceSections : [{ testId: request.testId }];
+  const cache = /* @__PURE__ */ new Map();
+  const keys = {};
+  const parts = [];
+  const transcripts = {};
+  const seenSections = /* @__PURE__ */ new Set();
+  let next = 1;
+  let skill;
+  for (const source of sources) {
+    if (!validId(source.testId) || custom && !validId(source.sectionId)) throw new AssessmentError(400, "Invalid test or section identifier.");
+    let data = cache.get(source.testId);
+    if (!data) {
+      const meta = await store.test(source.testId);
+      if (!meta || !admin && meta.status !== "published") throw new AssessmentError(404, "This test is unavailable.");
+      const [sections, keyData] = await Promise.all([store.sections(source.testId), store.keys(source.testId)]);
+      if (!keyData) throw new AssessmentError(409, "Answer keys are missing. Ask an administrator to re-import this test.");
+      data = { meta, sections: sections.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), keyData };
+      cache.set(source.testId, data);
+    }
+    if (skill && skill !== data.meta.skill) throw new AssessmentError(400, "A mock must use the same test skill throughout.");
+    skill = data.meta.skill;
+    let selected = data.sections;
+    if (custom) selected = selected.filter((p) => p.id === source.sectionId);
+    else if (request.sectionIds !== void 0) {
+      if (!Array.isArray(request.sectionIds) || !request.sectionIds.length || request.sectionIds.some((id) => !validId(id))) throw new AssessmentError(400, "Invalid section selection.");
+      selected = selected.filter((p) => request.sectionIds.includes(p.id));
+      if (selected.length !== new Set(request.sectionIds).size) throw new AssessmentError(404, "A selected section no longer exists.");
+    }
+    if (!selected.length) throw new AssessmentError(404, "No questions found in the selected sections.");
+    for (const section of selected) {
+      const identity = source.testId + ":" + section.id;
+      if (seenSections.has(identity)) throw new AssessmentError(400, "Choose distinct source sections.");
+      seenSections.add(identity);
+      if (skill === "listening") transcripts[custom ? "p" + parts.length : section.id] = data.keyData.transcripts?.[section.id] ?? section.passageHtml ?? "";
+      const questions = section.questions || [];
+      const slots = Object.values(section.slots || {});
+      if (questions.some((q) => !q.missing && !slots.some((s) => s.numbers.includes(q.number)))) {
+        throw new AssessmentError(409, "This test has broken answer controls. Re-upload the original ZIP or HTML file to repair it.");
+      }
+      const mapping = /* @__PURE__ */ new Map();
+      for (const q of questions) {
+        if (!Number.isInteger(q.number) || q.number < 1 || mapping.has(q.number)) throw new AssessmentError(409, "The test has invalid question numbers.");
+        const n = custom ? next++ : q.number;
+        if (keys[n]) throw new AssessmentError(409, "The test contains duplicate question numbers.");
+        mapping.set(q.number, n);
+        const key = data.keyData.keys?.[q.number] || { answer: "" };
+        keys[n] = { ...key, missing: Boolean(q.missing || key.missing) };
+      }
+      const groups = slots.filter((s) => s.type === "multi").map((s) => s.numbers.map((n) => mapping.get(n)));
+      if (groups.some((g) => g.some((n) => n === void 0))) throw new AssessmentError(409, "A multiple-choice group is incomplete.");
+      parts.push({ numbers: [...mapping.values()], keys, missing: [...mapping.values()].filter((n) => keys[n].missing), multiGroups: groups });
+    }
+  }
+  if (!parts.some((p) => p.numbers.length)) throw new AssessmentError(409, "This test has no questions.");
+  const first = cache.values().next().value;
+  return { parts, keys, transcripts, title: custom ? "Custom Mock" : first.meta.title, skill };
+}
+function markAssessment(assessment, responses) {
+  if (!responses || typeof responses !== "object" || Array.isArray(responses)) throw new AssessmentError(400, "Answers must be an object.");
+  const clean = {};
+  for (const [number, value] of Object.entries(responses)) {
+    if (!/^\d+$/.test(number) || !Object.hasOwn(assessment.keys, number) || typeof value !== "string" || value.length > 1e3) {
+      throw new AssessmentError(400, "An answer is invalid or belongs to another test.");
+    }
+    clean[Number(number)] = value;
+  }
+  const result = scoreTest(assessment.parts, clean);
+  return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
+}
+
+// server/studentRoutes.ts
+var valid = (uid) => typeof uid === "string" && /^[\w-]{1,128}$/.test(uid);
+function registerStudentRoutes(app2, authorize, backend2, fail) {
+  const owner = async (req) => {
+    const caller2 = await authorize(req);
+    if (!caller2.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+    if (!valid(req.body.targetUserId)) throw new AssessmentError(400, "Invalid student ID.");
+    return caller2;
+  };
+  app2.post("/api/admin/student-details", async (req, res) => {
+    try {
+      await owner(req);
+      const user = await backend2().auth.getUser(req.body.targetUserId);
+      res.json({ uid: user.uid, email: user.email || "", createdAt: Date.parse(user.metadata.creationTime) || null, lastSignInAt: Date.parse(user.metadata.lastSignInTime) || null, disabled: user.disabled, emailVerified: user.emailVerified, providers: user.providerData.map((p) => p.providerId) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+  app2.post("/api/admin/student-delete", async (req, res) => {
+    try {
+      const caller2 = await owner(req), { auth, db } = backend2(), uid = req.body.targetUserId;
+      const user = await auth.getUser(uid);
+      if (uid === caller2.identity.uid || user.email?.toLowerCase() === "manhcuong2006ht@gmail.com") throw new AssessmentError(403, "The owner account cannot be deleted.");
+      if (!user.email || req.body.confirmEmail !== user.email) throw new AssessmentError(400, "Type the student email exactly to confirm deletion.");
+      const ref = db.doc("users/" + uid);
+      await ref.set({ id: uid, status: "suspended", updatedAt: Date.now() }, { merge: true });
+      await auth.updateUser(uid, { disabled: true });
+      await auth.revokeRefreshTokens(uid);
+      for (const name of ["attempts", "vocabulary"]) await db.recursiveDelete(ref.collection(name));
+      await auth.deleteUser(uid);
+      await ref.set({ id: uid, status: "suspended", deletedAt: Date.now() });
+      res.json({ success: true, uid });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+}
+
 // server/r2Storage.ts
 import { createHash, createHmac } from "node:crypto";
 var MediaStorageError = class extends Error {
@@ -165,213 +403,13 @@ var answerPath = (id, sectionId, title) => `/answers/${encodeURIComponent(id)}/$
 // server/portalRoutes.ts
 import { createHash as createHash2, randomUUID } from "node:crypto";
 
-// src/services/scoring.ts
-function normalizeAnswer(value) {
-  return String(value ?? "").normalize("NFKC").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[‐‑–—]/g, "-").replace(/\s+/g, " ").trim().toLowerCase();
-}
-function answerMatches(response, key) {
-  const value = normalizeAnswer(response);
-  if (!value) return false;
-  return String(key.answer || "").split("||").some((variant) => {
-    const answer = normalizeAnswer(variant);
-    if (["matching_features", "matching_names", "heading"].includes(key.kind || "")) {
-      const letter = /^([a-z]|[ivxlcdm]+)(?:\s*[.\-—–•·]\s*|\s+|$)/i.exec(answer);
-      if (letter && value === letter[1].toLowerCase()) return true;
-    }
-    return value === answer;
-  });
-}
-function scoreTest(parts, responses) {
-  const rows = /* @__PURE__ */ new Map();
-  for (const part of parts) {
-    const isMap = part.keys instanceof Map;
-    const getKey = (n) => (isMap ? part.keys.get(n) : part.keys[n]) || { answer: "" };
-    const missingSet = part.missing instanceof Set ? part.missing : new Set(part.missing || []);
-    for (const n of part.numbers) {
-      const key = getKey(n);
-      const response = String(responses[n] || "");
-      const status = missingSet.has(n) || key.missing || !key.answer ? "ungraded" : !normalizeAnswer(response) ? "blank" : answerMatches(response, key) ? "correct" : "incorrect";
-      rows.set(n, {
-        number: n,
-        response,
-        answer: key.answer || "",
-        status
-      });
-    }
-    for (const group of part.multiGroups || []) {
-      if (group.some((n) => rows.get(n)?.status === "ungraded")) {
-        for (const n of group) {
-          if (rows.has(n)) rows.get(n).status = "ungraded";
-        }
-        continue;
-      }
-      const remaining = group.map((n) => ({ ...getKey(n) }));
-      for (const n of group) {
-        const row = rows.get(n);
-        if (!row) continue;
-        if (!normalizeAnswer(row.response)) {
-          row.status = "blank";
-          continue;
-        }
-        const index = remaining.findIndex((k) => answerMatches(row.response, k));
-        row.status = index < 0 ? "incorrect" : "correct";
-        if (index >= 0) {
-          row.answer = remaining.splice(index, 1)[0].answer;
-        }
-      }
-    }
-  }
-  const sortedRows = Array.from(rows.values()).sort((a, b) => a.number - b.number);
-  const result = {
-    rows: sortedRows,
-    total: sortedRows.length,
-    correct: 0,
-    incorrect: 0,
-    blank: 0,
-    ungraded: 0,
-    gradable: 0
-  };
-  for (const row of result.rows) {
-    result[row.status]++;
-  }
-  result.gradable = result.total - result.ungraded;
-  return result;
-}
-function estimatedBand(result, skill = "reading") {
-  if (result.total !== 40 || result.ungraded > 0) return null;
-  const bounds = skill === "listening" ? [
-    [39, 9],
-    [37, 8.5],
-    [35, 8],
-    [32, 7.5],
-    [30, 7],
-    [26, 6.5],
-    [23, 6],
-    [18, 5.5],
-    [16, 5],
-    [13, 4.5],
-    [10, 4],
-    [8, 3.5],
-    [6, 3],
-    [4, 2.5],
-    [3, 2],
-    [2, 1.5],
-    [1, 1],
-    [0, 0]
-  ] : [
-    [39, 9],
-    [37, 8.5],
-    [35, 8],
-    [33, 7.5],
-    [30, 7],
-    [27, 6.5],
-    [23, 6],
-    [19, 5.5],
-    [15, 5],
-    [13, 4.5],
-    [10, 4],
-    [8, 3.5],
-    [6, 3],
-    [4, 2.5],
-    [3, 2],
-    [2, 1.5],
-    [1, 1],
-    [0, 0]
-  ];
-  const match = bounds.find(([threshold]) => result.correct >= threshold);
-  return match ? match[1] : null;
-}
-
-// server/assessment.ts
-var AssessmentError = class extends Error {
-  constructor(status, message) {
-    super(message);
-    this.status = status;
-  }
-};
-var validId = (id) => typeof id === "string" && /^[\w-]{1,128}$/.test(id);
-async function loadAssessment(store, request, admin) {
-  const custom = request.sourceSections !== void 0;
-  if (custom && (!Array.isArray(request.sourceSections) || !request.sourceSections.length || request.sourceSections.length > 4)) {
-    throw new AssessmentError(400, "Choose between one and four source sections.");
-  }
-  const sources = custom ? request.sourceSections : [{ testId: request.testId }];
-  const cache = /* @__PURE__ */ new Map();
-  const keys = {};
-  const parts = [];
-  const transcripts = {};
-  const seenSections = /* @__PURE__ */ new Set();
-  let next = 1;
-  let skill;
-  for (const source of sources) {
-    if (!validId(source.testId) || custom && !validId(source.sectionId)) throw new AssessmentError(400, "Invalid test or section identifier.");
-    let data = cache.get(source.testId);
-    if (!data) {
-      const meta = await store.test(source.testId);
-      if (!meta || !admin && meta.status !== "published") throw new AssessmentError(404, "This test is unavailable.");
-      const [sections, keyData] = await Promise.all([store.sections(source.testId), store.keys(source.testId)]);
-      if (!keyData) throw new AssessmentError(409, "Answer keys are missing. Ask an administrator to re-import this test.");
-      data = { meta, sections: sections.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), keyData };
-      cache.set(source.testId, data);
-    }
-    if (skill && skill !== data.meta.skill) throw new AssessmentError(400, "A mock must use the same test skill throughout.");
-    skill = data.meta.skill;
-    let selected = data.sections;
-    if (custom) selected = selected.filter((p) => p.id === source.sectionId);
-    else if (request.sectionIds !== void 0) {
-      if (!Array.isArray(request.sectionIds) || !request.sectionIds.length || request.sectionIds.some((id) => !validId(id))) throw new AssessmentError(400, "Invalid section selection.");
-      selected = selected.filter((p) => request.sectionIds.includes(p.id));
-      if (selected.length !== new Set(request.sectionIds).size) throw new AssessmentError(404, "A selected section no longer exists.");
-    }
-    if (!selected.length) throw new AssessmentError(404, "No questions found in the selected sections.");
-    for (const section of selected) {
-      const identity = source.testId + ":" + section.id;
-      if (seenSections.has(identity)) throw new AssessmentError(400, "Choose distinct source sections.");
-      seenSections.add(identity);
-      if (skill === "listening") transcripts[custom ? "p" + parts.length : section.id] = data.keyData.transcripts?.[section.id] ?? section.passageHtml ?? "";
-      const questions = section.questions || [];
-      const slots = Object.values(section.slots || {});
-      if (questions.some((q) => !q.missing && !slots.some((s) => s.numbers.includes(q.number)))) {
-        throw new AssessmentError(409, "This test has broken answer controls. Re-upload the original ZIP or HTML file to repair it.");
-      }
-      const mapping = /* @__PURE__ */ new Map();
-      for (const q of questions) {
-        if (!Number.isInteger(q.number) || q.number < 1 || mapping.has(q.number)) throw new AssessmentError(409, "The test has invalid question numbers.");
-        const n = custom ? next++ : q.number;
-        if (keys[n]) throw new AssessmentError(409, "The test contains duplicate question numbers.");
-        mapping.set(q.number, n);
-        const key = data.keyData.keys?.[q.number] || { answer: "" };
-        keys[n] = { ...key, missing: Boolean(q.missing || key.missing) };
-      }
-      const groups = slots.filter((s) => s.type === "multi").map((s) => s.numbers.map((n) => mapping.get(n)));
-      if (groups.some((g) => g.some((n) => n === void 0))) throw new AssessmentError(409, "A multiple-choice group is incomplete.");
-      parts.push({ numbers: [...mapping.values()], keys, missing: [...mapping.values()].filter((n) => keys[n].missing), multiGroups: groups });
-    }
-  }
-  if (!parts.some((p) => p.numbers.length)) throw new AssessmentError(409, "This test has no questions.");
-  const first = cache.values().next().value;
-  return { parts, keys, transcripts, title: custom ? "Custom Mock" : first.meta.title, skill };
-}
-function markAssessment(assessment, responses) {
-  if (!responses || typeof responses !== "object" || Array.isArray(responses)) throw new AssessmentError(400, "Answers must be an object.");
-  const clean = {};
-  for (const [number, value] of Object.entries(responses)) {
-    if (!/^\d+$/.test(number) || !Object.hasOwn(assessment.keys, number) || typeof value !== "string" || value.length > 1e3) {
-      throw new AssessmentError(400, "An answer is invalid or belongs to another test.");
-    }
-    clean[Number(number)] = value;
-  }
-  const result = scoreTest(assessment.parts, clean);
-  return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
-}
-
 // server/publicPages.ts
 var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
 function textMarkup(text) {
   return text.split(/\n\s*\n/).map((block) => /^#{1,3}\s/.test(block) ? `<h2>${escapeHtml(block.replace(/^#{1,3}\s/, ""))}</h2>` : `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`).join("");
 }
 function publicPage(title, description, body, path, noindex = false) {
-  return `<!doctype html><html lang="vi"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="${noindex ? "noindex,nofollow" : "index,follow"}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(path)}"><style>
+  return `<!doctype html><html lang="vi"><head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="${noindex ? "noindex,nofollow" : "index,follow"}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(path)}"><style>
  :root{font-family:system-ui,sans-serif;color:#14283f;background:#f7f9fa}*{box-sizing:border-box}body{margin:0}a{color:inherit}header{padding:20px 5vw;display:flex;gap:30px;align-items:center;background:#fff;border-bottom:1px solid #e1e7ea;flex-wrap:wrap}header a{text-decoration:none;font-size:14px}header b{font-size:23px;margin-right:auto}main{max-width:1280px;margin:40px auto;padding:0 24px}h1{font-size:clamp(26px,4vw,44px);letter-spacing:-1px}p{line-height:1.8}.answer-layout{display:grid;grid-template-columns:1fr 1fr;gap:28px}.reading,.solutions,article{padding:28px;background:#fff;border:1px solid #e1e7ea;border-radius:16px}.reading{font:19px/1.9 Georgia,serif}.reading h1,.reading h2{text-align:center;font-size:25px}.solution{padding:18px 0;border-bottom:1px solid #e1e7ea}.solution h3{font-size:16px}.answer{font-weight:650;color:#0c645f}.cta{display:inline-block;text-decoration:none;background:#146d69;color:white;border-radius:9px;padding:12px 20px;margin:10px 0 25px}.section-links{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.section-links a{padding:10px;background:white;border:1px solid #e1e7ea;border-radius:8px}img{max-width:100%}[data-slot]{display:inline-block;border-bottom:1px solid #8994a3;min-width:70px}footer{padding:40px;text-align:center;color:#667085}@media(max-width:760px){.answer-layout{grid-template-columns:1fr}.reading,.solutions,article{padding:20px}header{gap:16px}}
  </style></head><body><header><b><a href="/">IELTS studio.</a></b><a href="/practice">Practice Test</a><a href="/full-tests">Full Test</a><a href="/knowledge">Chia s\u1EBB ki\u1EBFn th\u1EE9c</a><a href="/forum">Forum</a><a href="/contribute">\u0110\xF3ng g\xF3p</a></header><main>${body}</main><footer>IELTS Studio \xB7 Learn one step at a time.</footer></body></html>`;
 }
@@ -670,6 +708,7 @@ async function caller(req) {
   const isAdmin = identity.email === "manhcuong2006ht@gmail.com" && identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerStudentRoutes(app, caller, backend, apiError);
 registerMediaRoutes(app, async (req) => {
   const identity = await caller(req);
   if (!identity.isAdmin) throw new AssessmentError(403, "Administrator access required.");

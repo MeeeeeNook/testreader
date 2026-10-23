@@ -1,3 +1,5 @@
+import {ScoreAnalysis} from './ScoreAnalysis';
+import {PaginatedTable} from './PaginatedTable';
 import React from "react";
 import {
   ArrowLeft,
@@ -18,6 +20,8 @@ interface Props {
   onOpenProfileModal: () => void;
   onReopenAttempt: (attempt: AttemptRecord) => void;
 }
+const duration=(seconds?:number)=>Number.isFinite(seconds)?`${Math.floor(seconds!/60)}m ${Math.floor(seconds!%60)}s`:'Time not recorded';
+const sessionMode=(mode:unknown)=>mode==='exam'?'Test mode':mode==='practice'?'Practice mode':'Mode not recorded';
 const date = (time: number) =>
   new Date(time).toLocaleString(undefined, {
     dateStyle: "medium",
@@ -34,6 +38,7 @@ export const ProgressView: React.FC<Props> = ({
   onOpenProfileModal,
   onReopenAttempt,
 }) => {
+  const Table=readOnly?PaginatedTable:'table';
   const selected = attempts.find((a) => a.id === selectedAttemptId);
   const bands = attempts
     .map((a) => a.band)
@@ -72,8 +77,8 @@ export const ProgressView: React.FC<Props> = ({
                 <h1 className="studio-heading">{selected.testTitle}</h1>
                 <p className="studio-lead">
                   {date(selected.createdAt)} ·{" "}
-                  {selected.mode === "exam" ? "Exam" : "Practice"} ·{" "}
-                  {selected.skill}
+                  {sessionMode(selected.mode)} ·{" "}
+                  {selected.skill} · {duration(selected.elapsedSeconds)}
                 </p>
               </div>
               {!selected.sourceSections?.length && (
@@ -117,9 +122,9 @@ export const ProgressView: React.FC<Props> = ({
               )}
             </div>
             <section className="studio-panel">
-              <h2>Question breakdown</h2>
+              <ScoreAnalysis result={selected.result} skill={selected.skill}/><h2>Question breakdown</h2>
               <div className="table-scroll">
-                <table className="studio-table result-table">
+                <Table className="studio-table result-table">
                   <thead>
                     <tr>
                       <th>Question</th>
@@ -142,7 +147,7 @@ export const ProgressView: React.FC<Props> = ({
                       </tr>
                     ))}
                   </tbody>
-                </table>
+                </Table>
               </div>
             </section>
           </>
@@ -250,11 +255,11 @@ export const ProgressView: React.FC<Props> = ({
             </span>
             <div>
               <span className="collection-label">
-                {a.mode} · {a.skill}
+                {sessionMode(a.mode)} · {a.skill}
               </span>
               <h3>{a.testTitle}</h3>
               <small>
-                {date(a.createdAt)} ·{" "}
+                {date(a.createdAt)} · {duration(a.elapsedSeconds)} ·{" "}
                 {a.syncedAt ? "Synced to account" : "Saved on this device"}
               </small>
             </div>

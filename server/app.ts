@@ -1,3 +1,4 @@
+import {registerStudentRoutes} from './studentRoutes';
 import {readR2Config,listR2Files,MediaStorageError} from './r2Storage';
 import {registerMediaRoutes} from './mediaRoutes';
 import {getStorage} from "firebase-admin/storage";
@@ -110,6 +111,7 @@ async function caller(req: express.Request) {
     identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerStudentRoutes(app,caller,backend,apiError);
 registerMediaRoutes(app,async req=>{const identity=await caller(req);if(!identity.isAdmin)throw new AssessmentError(403,'Administrator access required.');return identity;},()=>backend().bucket);
 async function optionalCaller(req: express.Request) {
   const token = /^Bearer (.+)$/i.exec(req.headers.authorization || "")?.[1];

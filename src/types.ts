@@ -100,6 +100,7 @@ export interface TestMeta {
 }
 
 export interface UserProfile {
+  deletedAt?:number;
   weeklyGoal?:number;
   libraryFolders?: import("./services/folders").LibraryFolder[];
   libraryFolderVersion?: number;
@@ -118,6 +119,9 @@ export interface UserProfile {
 }
 
 export interface AttemptRecord {
+  startedAt?:number;
+  completedAt?:number;
+  elapsedSeconds?:number;
   id: string;
   owner: string;
   testId: string;

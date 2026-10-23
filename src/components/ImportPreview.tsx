@@ -17,7 +17,7 @@ export function ImportPreview({plan,folders=[],tests=[],onSaveFolders,onCancel,o
  const [titles,setTitles]=useState<Record<number,string>>({});
  const [edits,setEdits]=useState<Record<number,import('../types').EditableTest>>({});
  const [audioBusy,setAudioBusy]=useState(false);
- const [folder,setFolder]=useState('');const [status,setStatus]=useState<'draft'|'published'>('draft');
+ const [folder,setFolder]=useState('');const [status,setStatus]=useState<'draft'|'published'>('published');
  const [showNewFolder,setShowNewFolder]=useState(false);
  const [current,setCurrent]=useState(0);const [query,setQuery]=useState('');
  const duplicates=plan.candidates.filter(c=>c.match).length;

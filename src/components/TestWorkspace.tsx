@@ -1,7 +1,11 @@
+import {AnswerSheet} from './AnswerSheet';
+import {ResultScreen} from './ResultScreen';
+import {ScoreAnalysis} from './ScoreAnalysis';
 import {Modal} from "./Modal";
 import {FontSizeSlider,readingSize} from "./FontSizeSlider";
 import {readerSessionKey,readReaderSession} from "../services/readerSession";
 import {requestJson} from "../services/apiRequest";
+import {preloadRecordings} from "../services/audioPreload";
 import {ListeningAudio} from "./ListeningAudio";
 import {Select} from "./Select";
 import {paintHighlights,selectionOffsets} from "../services/highlights";
@@ -35,6 +39,7 @@ import { firestoreAdapter } from "../services/firestoreAdapter";
 import { scoreTest, estimatedBand } from "../services/scoring";
 
 interface TestWorkspaceProps {
+  audioSources?:Record<string,string>;
   initialSolution?: boolean;
   onRetake?:()=>void;
   test: EditableTest;
@@ -55,7 +60,22 @@ interface TestWorkspaceProps {
   onNotify: (msg: string) => void;
 }
 
-export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
+export const TestWorkspace: React.FC<TestWorkspaceProps> = (props) => {
+ const needsAudio=props.test.skill==='listening';
+ const [sources,setSources]=useState<Record<string,string>|null>(null),[error,setError]=useState(''),[retry,setRetry]=useState(0),[progress,setProgress]=useState({done:0,total:0,bytes:0});
+ const urls=JSON.stringify([...new Set(props.test.parts.map(p=>p.audio).filter((u):u is string=>!!u))]);
+ useEffect(()=>{
+  if(!needsAudio)return;
+  const controller=new AbortController();let alive=true;let owned:Record<string,string>={};setSources(null);setError('');setProgress({done:0,total:JSON.parse(urls).length,bytes:0});
+  const timeout=setTimeout(()=>controller.abort(new Error('Audio loading timed out. Check your connection and retry.')),180000);
+  void preloadRecordings(JSON.parse(urls),controller.signal,(done,total,bytes)=>setProgress({done,total,bytes})).then(result=>{owned=result;if(controller.signal.aborted)Object.values(result).forEach(URL.revokeObjectURL);else setSources(result)}).catch(e=>{if(alive)setError(e.message||'Audio could not load. Retry before starting the test.')}).finally(()=>clearTimeout(timeout));
+  return()=>{alive=false;clearTimeout(timeout);controller.abort();Object.values(owned).forEach(URL.revokeObjectURL)};
+ },[needsAudio,urls,retry,props.sessionId]);
+ if(needsAudio&&!sources)return <section className="audio-loading-gate" aria-label="Prepare listening audio"><h1>{error?'Audio could not load':'Loading your recordings'}</h1><p>Your timer starts after all recordings have loaded.</p><p role="status">{progress.done} / {progress.total||JSON.parse(urls).length} recordings · {(progress.bytes/1048576).toFixed(1)} MB loaded</p><progress max={progress.total||1} value={progress.done}/>{error&&<p role="alert">{error}</p>}<div className="studio-actions">{error&&<button className="studio-primary" onClick={()=>setRetry(r=>r+1)}>Retry loading</button>}<button className="studio-secondary" onClick={props.onReturnToLibrary}>Back to tests</button></div></section>;
+ return <LoadedTestWorkspace key={props.sessionId} {...props} audioSources={sources||{}}/>;
+};
+const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
+  audioSources={},
   test,
   initialSolution=false,
   onRetake,
@@ -114,6 +134,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     savedSession.band ?? null,
   );
   const [showResultsModal, setShowResultsModal] = useState(false);
+  const [showAnswerSheet,setShowAnswerSheet]=useState(false);
   const [activeDrawer, setActiveDrawer] = useState<"notes" | "review" | null>(
     null,
   );
@@ -159,6 +180,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const [historyNotice, setHistoryNotice] = useState("");
   const [reviewLoaded, setReviewLoaded] = useState(false);
   const [transcripts,setTranscripts]=useState<Record<string,string>>(()=>isPreview?Object.fromEntries(test.parts.map(p=>[p.id,p.passageHtml])):{});
+  const [audioStop,setAudioStop]=useState(0);
+  const [timeUp,setTimeUp]=useState(false);
+  const [elapsedSeconds,setElapsedSeconds]=useState(Math.max(0,Number(savedSession.elapsedSeconds)||0));
+  const [startedAt,setStartedAt]=useState(Number(savedSession.startedAt)||Date.now());
   const [listeningReview,setListeningReview]=useState(initialSolution||Boolean(savedSession.scored));
   const listeningSolution=test.skill==='listening'&&(initialSolution||listeningReview);
 
@@ -201,6 +226,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             notes,
             highlights,
             remaining: timerRemaining,
+            elapsedSeconds,startedAt,
             scored,
             result: scoreResult,
             band: approxBand,
@@ -226,30 +252,38 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     flags,
     notes,
     highlights,
-    timerRemaining,
+    timerRemaining,elapsedSeconds,startedAt,
     scored,
     scoreResult,
     approxBand,
     onNotify,
   ]);
 
+  useEffect(()=>{
+    if(scored||initialSolution)return;
+    if(initialDurationMinutes>0&&!timerRunning&&!expired.current)return;
+    let previous=Date.now();
+    const tick=setInterval(()=>{const now=Date.now();setElapsedSeconds(s=>s+(now-previous)/1000);previous=now},1000);
+    return()=>clearInterval(tick);
+  },[scored,initialSolution,timerRunning,initialDurationMinutes]);
   // Timer updaters are pure; expiry submission happens once in an effect.
   const submitLatest = useRef<() => Promise<void>>(async () => {});
   const expired = useRef(false);
   useEffect(() => {
     if (!timerRunning) return;
+    const initial=timerRemaining,began=Date.now();
     const interval = setInterval(
-      () => setTimerRemaining((prev: number) => Math.max(0, prev - 1)),
+      () => setTimerRemaining(Math.max(0,initial-Math.floor((Date.now()-began)/1000))),
       1000,
     );
     return () => clearInterval(interval);
-  }, [timerRunning]);
+  }, [timerRunning,startedAt]);
   useEffect(() => {
     if (!timerRunning || timerRemaining > 0 || expired.current) return;
     expired.current = true;
     setTimerRunning(false);
     if (mode === "exam" && !scored) void submitLatest.current();
-    else onNotify("Time is up. You can continue practising.");
+    else if(!scored){setAudioStop(n=>n+1);setTimeUp(true);}
   }, [timerRemaining, timerRunning, mode, scored, onNotify]);
 
   // Handle Response Changes
@@ -382,6 +416,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     if (submissionRef.current) return;
     submissionRef.current = true;
     setSubmitting(true);
+    setAudioStop(n=>n+1);
     const wasRunning = timerRunning;
     const submissionOwner = auth.currentUser?.uid || "guest";
     setTimerRunning(false);
@@ -417,6 +452,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       setScoreResult(data.result);
       setApproxBand(data.band);
       setScored(true);
+      setShowResultsModal(true);
       if(test.skill==='listening')setListeningReview(true);
       setShowAnswers(true);
       setShowExplanations(true);
@@ -434,6 +470,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         skill: test.skill,
         mode,
         createdAt: Date.now(),
+        startedAt,completedAt:Date.now(),elapsedSeconds:Math.round(elapsedSeconds),
         responses,
         result: data.result,
         band: data.band,
@@ -634,6 +671,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     }
   };
 
+  const hasCountdown=initialDurationMinutes>0&&!(mode==='practice'&&expired.current&&timerRemaining===0&&!timeUp);
   const minutes = Math.floor(timerRemaining / 60);
   const seconds = timerRemaining % 60;
   const timeFormatted = `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
@@ -643,11 +681,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   return (
     <div
-      className={`app ${mode === "exam" ? "exam-mode" : ""} ${scored ? "exam-finished" : ""}`}
+      className={`app ${test.skill==='listening'?'listening-workspace':''} ${mode === "exam" ? "exam-mode" : ""} ${scored ? "exam-finished" : ""}`}
       style={{ "--study-font-size": `${textSize}px` } as React.CSSProperties}
       onMouseUp={handleMouseUp}
       onTouchEnd={()=>setTimeout(handleMouseUp,100)}
     >
+      {timeUp&&<ConfirmActionDialog title="Practice time is up" confirmLabel="Submit now" cancelLabel="Keep practising" onCancel={()=>setTimeUp(false)} onConfirm={()=>{setTimeUp(false);void handleSubmit()}}>Submit your answers now, or continue practising without a time limit.</ConfirmActionDialog>}
       {confirmSubmit && <ConfirmActionDialog title={false ? "Nộp bài?" : "Submit your test?"} confirmLabel={false ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
         {false ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
       </ConfirmActionDialog>}
@@ -663,6 +702,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           }
           onCancel={() => setResetAction(null)}
           onConfirm={() => {
+            setAudioStop(n=>n+1);setElapsedSeconds(0);setStartedAt(Date.now());
             setResponses({});
             setFlags([]);
             setScored(false);
@@ -694,7 +734,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           <button className="reader-back" title="Return to tests" onClick={onReturnToLibrary}><ArrowLeft size={17}/>Back</button>
           <div className="reader-test-heading"><small>{test.skill.toUpperCase()} · {initialSolution?'SOLUTION':scored?'REVIEW':mode==='exam'?'EXAM MODE':'PRACTICE MODE'}</small><strong title={test.title}>{test.title}</strong></div>
           <div className="reader-actions" role="toolbar" aria-label="Test tools">
-            <div className={`reader-clock ${initialDurationMinutes>0&&timerRemaining<300?'low':''}`} aria-label={initialDurationMinutes>0?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{initialDurationMinutes>0?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{initialDurationMinutes>0?'remaining':'Unlimited time'}</span>{mode==='practice'&&initialDurationMinutes>0&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
+            <div className={`reader-clock ${hasCountdown&&timerRemaining<300?'low':''}`} aria-label={hasCountdown?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{hasCountdown?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{hasCountdown?'remaining':'Unlimited time'}</span>{mode==='practice'&&hasCountdown&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
             <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
             <button className="reader-icon" title="Report an issue" aria-label="Report an issue" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}><Bug size={22}/></button>
             <button className="reader-icon" title="Dictionary" aria-label="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>{setDictionaryContext('');setDictionarySaveIntent(false);setDictionaryWord('');}}><BookOpen size={22}/></button>
@@ -703,7 +743,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           </div>
         </header>
         <nav className="reader-passage-tabs" aria-label="Test parts">
-          {test.parts.map((item,index)=><button key={item.id} type="button" className={currentPartIndex===index?'active':''} aria-pressed={currentPartIndex===index} title={passageTitle(item.passageHtml,item.title,index)} onClick={()=>setCurrentPartIndex(index)}>{test.skill==='reading'?'Passage':'Section'} {item.position||index+1}</button>)}
+          {test.parts.map((item,index)=><button key={item.id} type="button" className={currentPartIndex===index?'active':''} aria-pressed={currentPartIndex===index} title={passageTitle(item.passageHtml,item.title,index)} onClick={()=>setCurrentPartIndex(index)}>{test.skill==='reading'?'Passage':'Part'} {item.position||index+1}</button>)}
         </nav>
         {initialSolution&&!reviewLoaded&&!solutionError&&<p className="studio-callout" role="status">Loading solution guide…</p>}
         {solutionError&&<div className="studio-callout" role="alert">{solutionError}<button className="quiet-button" onClick={()=>setSolutionRetry(i=>i+1)}>Retry solutions</button></div>}
@@ -751,9 +791,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </button>
           </div>
         )}
-        {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} exam={mode==='exam'&&!scored&&!initialSolution}/>}
+        {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} sources={audioSources} stopSignal={audioStop} disabled={submitting} exam={mode==='exam'&&!scored&&!initialSolution}/>}
 
-        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Academic Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setActiveDrawer('review')}>Answer sheet</button></div></section>}
+        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Academic Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button></div></section>}
 
         {/* Mobile Tab Toggle for narrow viewports */}
         {(test.skill==='reading'||listeningSolution)&&<div className="mobile-tabs">
@@ -783,7 +823,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             className={`pane passage-pane ${mobileTab === "questions" ? "mobile-hidden" : ""}`}
           >
             <div className="pane-label">
-              {passageTitle(part.passageHtml, part.title, currentPartIndex)}
+              {test.skill==='listening'?'Part '+(part.position||currentPartIndex+1)+' · Transcript':passageTitle(part.passageHtml, part.title, currentPartIndex)}
             </div>
 
             <div className="reading-content">
@@ -814,7 +854,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                 </p>
               ) : (
                 <QuestionLayout
-                  html={part.questionHtml}
+                  html={test.skill==='listening'?part.questionHtml.replace(/(>\s*)section(\s+[1-4]\s*<)/gi,'$1Part$2'):part.questionHtml}
                   renderSlot={renderSlot}
                 />
               )}
@@ -836,7 +876,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
               {qNum}{isFlagged&&<Flag className="chip-flag" size={9} fill="currentColor"/>}
             </button>;
           })}</nav>
-          <div className="reader-footer-actions"><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setActiveDrawer('review'):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':'Submit test'}</button></div>
+          <div className="reader-footer-actions"><button className="quiet-button answer-sheet-trigger" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setShowAnswerSheet(true):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':'Submit test'}</button></div>
         </footer>
       </main>
 
@@ -919,7 +959,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
                         marginTop: "8px",
                       }}
                     >
-                      <span className="studio-small">Section {n.part + 1}</span>
+                      <span className="studio-small">{test.skill==='listening'?'Part':'Passage'} {n.part + 1}</span>
                       <button
                         className="studio-quiet studio-danger"
                         style={{ padding: "2px 6px", fontSize: "10px" }}
@@ -997,107 +1037,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         </aside>
       )}
 
-      {/* Results Modal Dialog */}
-      {showResultsModal && scoreResult && (
-        <dialog
-          className="results-panel"
-          open
-          style={{
-            position: "fixed",
-            top: "50%",
-            left: "50%",
-            transform: "translate(-50%, -50%)",
-            zIndex: 130,
-          }}
-        >
-          <div className="results-header">
-            <h2>Your Reading Result</h2>
-            <button
-              className="quiet-button"
-              onClick={() => setShowResultsModal(false)}
-            >
-              Close
-            </button>
-          </div>
-
-          {historyNotice && <p className="studio-callout">{historyNotice} {profile.id === "guest" && <button className="studio-secondary" onClick={() => void loginWithGoogle().catch(error => onNotify(error.message))}>Sign in with Google</button>}</p>}
-          <div className="result-score">
-            {scoreResult.correct} / {scoreResult.gradable}
-          </div>
-
-          {approxBand !== null ? (
-            <div
-              style={{
-                fontSize: "18px",
-                fontWeight: 600,
-                color: "var(--teal)",
-                marginBottom: "8px",
-              }}
-            >
-              IELTS Academic Reading Band: {approxBand.toFixed(1)}
-            </div>
-          ) : <p className="result-note">A band is available for a complete 40-question test with all answer keys. Single passages receive a raw score.</p>}
-
-          <p style={{ margin: "6px 0 14px" }}>
-            {scoreResult.incorrect} incorrect · {scoreResult.blank} unanswered
-            {scoreResult.ungraded > 0 &&
-              ` · ${scoreResult.ungraded} ungraded (source missing or ungraded)`}
-          </p>
-
-          <p className="result-note">
-            Practice score based on the uploaded answer keys (ignoring case and
-            whitespace). Band estimates are approximate and valid for complete
-            40-question tests.
-          </p>
-
-          <div className="results-table-wrap">
-            <table className="results-table">
-              <thead>
-                <tr>
-                  <th>Question</th>
-                  <th>Your Answer</th>
-                  <th>Accepted Answer</th>
-                  <th>Result</th>
-                </tr>
-              </thead>
-              <tbody>
-                {scoreResult.rows.map((row: ScoreRow) => (
-                  <tr key={row.number} data-score={row.status}>
-                    <td>Question {row.number}</td>
-                    <td>{row.response || "—"}</td>
-                    <td>
-                      {row.answer ? row.answer.split("||").join(" / ") : "—"}
-                    </td>
-                    <td>
-                      {row.status === "ungraded" ? "Needs review" : row.status}
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-
-          <div
-            style={{
-              marginTop: "20px",
-              display: "flex",
-              justifyContent: "flex-end",
-            }}
-          >
-            <button
-              className="studio-primary"
-              onClick={async () => {
-                if (!(await ensureReviewKeys())) return;
-                setShowResultsModal(false);
-                setShowAnswers(true);
-                setShowExplanations(true);
-              }}
-            >
-              Review Test Questions with Answers
-            </button>
-          </div>
-        </dialog>
-      )}
+      {showAnswerSheet&&<AnswerSheet parts={test.parts} skill={test.skill} responses={responses} flags={flags} result={scoreResult} keys={scored||initialSolution?reviewKeys:{}} onClose={()=>setShowAnswerSheet(false)} onJump={number=>{setShowAnswerSheet(false);handleJump(number)}}/>}
+      {showResultsModal&&scoreResult&&<ResultScreen test={test} result={scoreResult} band={approxBand} elapsedSeconds={Math.round(elapsedSeconds)} mode={mode} notice={historyNotice||historyError} onLeave={onReturnToLibrary} onReview={()=>{void ensureReviewKeys().then(ok=>{if(ok){setShowResultsModal(false);setShowAnswers(true);setShowExplanations(true);if(test.skill==='listening')setListeningReview(true)}})}}/>}
 
       {/* Content Report Dialog */}
       {showReportModal && (
