@@ -1,0 +1,2 @@
+import {encodeMonoMp3} from './mp3Encoder';
+self.onmessage=(event:MessageEvent<{pcm:ArrayBuffer;sampleRate:number}>)=>{try{const result=encodeMonoMp3(new Float32Array(event.data.pcm),event.data.sampleRate,percent=>self.postMessage({percent}));(self as unknown as {postMessage:(message:unknown,transfer:Transferable[])=>void}).postMessage({buffer:result.buffer},[result.buffer]);}catch(error){self.postMessage({error:(error as Error).message})}};

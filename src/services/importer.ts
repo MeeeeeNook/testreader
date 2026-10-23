@@ -1,3 +1,4 @@
+import type {ImportProgressCallback} from './importProgress';
 import { passageTitle } from "./passageTitle";
 import JSZip from "jszip";
 import JSON5 from "json5";
@@ -915,6 +916,7 @@ export function toEditable(
 
 export async function collectFiles(
   files: File[],
+  onProgress?:ImportProgressCallback,
 ): Promise<{
   candidates: { source: string; name: string; archive?: string }[];
   images: { name: string; url: string; blob: Blob; archive?: string }[];
@@ -931,13 +933,17 @@ export async function collectFiles(
     data: ArrayBuffer | Uint8Array,
     name: string,
     depth = 0,
+    start=0,end=40,
   ) {
     if (depth > 3) throw new Error("Too many nested ZIP levels.");
     const zip = await JSZip.loadAsync(data);
     const entries = Object.values(zip.files).filter((e) => !e.dir);
     if (entries.length > 2500) throw new Error("This ZIP has too many files.");
 
-    for (const entry of entries) {
+    for (const [entryIndex,entry] of entries.entries()) {
+      const from=start+(end-start)*entryIndex/entries.length,to=start+(end-start)*(entryIndex+1)/entries.length;
+      const progress=(meta:{percent:number})=>onProgress?.({phase:'unpack',label:'Reading ZIP files',percent:from+(to-from)*meta.percent/100,detail:name+'/'+entry.name});
+      progress({percent:0});
       const lower = entry.name.toLowerCase();
       if (
         entry.name.startsWith("__MACOSX/") ||
@@ -946,7 +952,7 @@ export async function collectFiles(
         continue;
       try {
         if (/\.(html?|json)$/.test(lower)) {
-          const s = await entry.async("string");
+          const s = await entry.async("string",progress);
           sourceSize += s.length;
           if (sourceSize > 180e6)
             throw new Error(
@@ -957,10 +963,10 @@ export async function collectFiles(
           await processZip(
             await entry.async("uint8array"),
             name + "/" + entry.name,
-            depth + 1,
+            depth + 1,from,to,
           );
         } else if (/\.(png|jpe?g|webp|gif)$/i.test(lower)) {
-          const blob = await entry.async("blob");
+          const blob = await entry.async("blob",progress);
           images.push({
             name: entry.name.split("/").at(-1) || entry.name,
             url: URL.createObjectURL(blob),
@@ -968,7 +974,7 @@ export async function collectFiles(
             archive:name,
           });
         } else if(audioExtension.test(lower)) {
-          const bytes=await entry.async('uint8array');totalSize+=bytes.length;
+          const bytes=await entry.async('uint8array',progress);totalSize+=bytes.length;
           if(totalSize>600e6)throw new Error('Import is too large. Add Listening tests in smaller groups.');
           const blob=new Blob([bytes as BlobPart],{type:audioMime(entry.name)});
           recordings.push({name:entry.name,url:URL.createObjectURL(blob),blob,archive:name});
@@ -981,14 +987,15 @@ export async function collectFiles(
     }
   }
 
-  for (const f of files) {
+  for (const [fileIndex,f] of files.entries()) {
+    onProgress?.({phase:'unpack',label:'Opening files',percent:40*fileIndex/files.length,detail:f.name});
     try {
       if (f.size > 150e6)
         throw new Error(
           `${f.name} is too large. Import individual test ZIPs instead.`,
         );
       if (/\.zip$/i.test(f.name)) {
-        await processZip(await f.arrayBuffer(), f.name);
+        await processZip(await f.arrayBuffer(), f.name,0,40*fileIndex/files.length,40*(fileIndex+1)/files.length);
       } else if (/\.html?$/i.test(f.name)) {
         candidates.push({
           source: await f.text(),

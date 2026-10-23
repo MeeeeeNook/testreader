@@ -8,7 +8,16 @@ export async function contentHash(test:EditableTest,media=new Map<string,string>
  const value=new TextEncoder().encode(JSON.stringify(stable(canonical)));
  return Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',value)),b=>b.toString(16).padStart(2,'0')).join('');
 }
-export async function mediaDigests(images:{url:string;blob:Blob}[]){return new Map(await Promise.all(images.map(async image=>[image.url,Array.from(new Uint8Array(await crypto.subtle.digest('SHA-256',await image.blob.arrayBuffer())),b=>b.toString(16).padStart(2,'0')).join('')] as const)));}
+export async function mediaDigests(images:{url:string;blob:Blob}[],onProgress?:(done:number,total:number)=>void){
+ const values=new Map<string,string>();
+ for(const [index,image] of images.entries()){
+  const digest=await crypto.subtle.digest('SHA-256',await image.blob.arrayBuffer());
+  values.set(image.url,Array.from(new Uint8Array(digest),b=>b.toString(16).padStart(2,'0')).join(''));
+  onProgress?.(index+1,images.length);
+ }
+ return values;
+}
+
 export function contentMatch(hash:string,catalog:TestMeta[]){return catalog.find(t=>!t.deletedAt&&t.contentHash===hash);}
 export function newImportIdentity(test:EditableTest,hash:string):EditableTest {return {...test,id:'test_'+createId(),contentHash:hash,createdAt:Date.now(),updatedAt:Date.now()};}
 
