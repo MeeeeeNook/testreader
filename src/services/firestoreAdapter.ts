@@ -1,3 +1,4 @@
+import {dividerIssues} from './listening';
 import {importError} from "./importProgress";
 import {contentHash} from "./importIdentity";
 import {organizationPatch,type LibraryFolder,type MenuFolder} from "./folders";
@@ -357,6 +358,7 @@ export class FirestoreAdapter {
     const user = auth.currentUser;
     if (!user || (await this.getRole()) !== "admin")
       throw new Error("Administrator access required.");
+    if(test.skill==='listening'&&dividerIssues(test.parts).length)throw new Error(dividerIssues(test.parts).join(' '));
     if(test.skill==='listening'&&test.status==='published'&&test.parts.some(p=>!p.audio||(p.audioEnd&&p.audioEnd<=(p.audioStart||0))))throw new Error('Assign a recording and valid start/end times to every Listening part before publishing.');
     const now = Date.now();
     test.updatedAt = now;

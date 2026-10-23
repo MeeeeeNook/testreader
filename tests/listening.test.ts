@@ -41,7 +41,7 @@ test('audio ZIP downloads each original file once and preserves playback instruc
  const t=sample();t.parts[1].audio=t.parts[0].audio;let calls=0;const zip=await JSZip.loadAsync(await(await listeningAudioZip(t,async()=>{calls++;return new Response('ID3-original')})).arrayBuffer());assert.equal(calls,3);assert.match(await zip.file('Playback-order.txt')!.async('string'),/Part 1 \/ Part 2/);assert.equal(Object.keys(zip.files).filter(n=>/\.mp3$/.test(n)).length,3);
 });
 test('admin audio editor exposes selectors for every part, replacements and clip settings',()=>{
- const html=renderToStaticMarkup(React.createElement(ListeningMediaEditor,{test:sample(),onChange:()=>{},onUpload:async()=>({id:'x',name:'x.mp3',url:'x'})}));assert.equal((html.match(/aria-label="Recording for part /g)||[]).length,4);assert.match(html,/Replace file/);assert.match(html,/Start \(seconds\)/);assert.match(html,/Use for all parts/);
+ const html=renderToStaticMarkup(React.createElement(ListeningMediaEditor,{test:sample(),onChange:()=>{},onUpload:async()=>({id:'x',name:'x.mp3',url:'x'})}));assert.equal((html.match(/aria-label="Recording for part /g)||[]).length,4);assert.match(html,/Replace file/);assert.match(html,/Part 1 starts at/);assert.match(html,/Use for all parts/);
 });
 test('student player automatically advances audio and retains its position across question-part rerenders',async()=>{
  const window=dom();let plays=0;

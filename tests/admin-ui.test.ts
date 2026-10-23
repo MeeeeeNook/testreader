@@ -97,9 +97,9 @@ test('admin paginates large libraries and duplicates only the requested test as 
  const root=createRoot(document.getElementById('app')!);
  try {
   await act(async()=>root.render(React.createElement(AdminView,{...props,tests,onDuplicateTest:async id=>{duplicated.push(id);},onRenameTest:async()=>{},onExportSelected:async()=>{}})));
-  assert.equal(document.querySelectorAll('tbody tr').length,25);
+  assert.equal(document.querySelectorAll('tbody tr').length,10);
   const click=async(label:string)=>{const b=[...document.querySelectorAll('button')].find(b=>b.textContent===label)!;assert.ok(b,label);await act(async()=>b.dispatchEvent(new window.Event('click',{bubbles:true})));};
-  await click('Next →');assert.equal(document.querySelectorAll('tbody tr').length,5);
+  await act(async()=>document.querySelector('button[aria-label="Next page"]')!.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(document.querySelectorAll('tbody tr').length,10);
   await click('Duplicate draft');assert.equal(duplicated.length,1);assert.ok(tests.some(t=>t.id===duplicated[0]));
   await click('Rename');assert.ok(document.querySelector('dialog[aria-label="Rename test"] input'));
   await click('Cancel');assert.equal(document.querySelector('dialog'),null);

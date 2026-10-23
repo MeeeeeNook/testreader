@@ -138,7 +138,7 @@ export function scoreTest(
 }
 
 export function estimatedBand(result: ScoreResult, skill: 'reading' | 'listening' = 'reading'): number | null {
-  if (result.total !== 40 || result.ungraded > 0) return null;
+  if (result.total !== 40 || result.ungraded > 0 || !Number.isInteger(result.correct) || result.correct<0 || result.correct>40 || (result.gradable!==undefined&&result.gradable!==40)) return null;
   // Listening thresholds: https://ielts.idp.com/vietnam/results/scores/listening/en-gb/
   const bounds: [number, number][] = skill === 'listening' ? [
     [39,9],[37,8.5],[35,8],[32,7.5],[30,7],[26,6.5],[23,6],[18,5.5],
@@ -152,3 +152,11 @@ export function estimatedBand(result: ScoreResult, skill: 'reading' | 'listening
   return match ? match[1] : null;
 }
 
+
+/** Transparent score analysis. No invented difficulty or speed penalties. */
+export function scoreInsights(result:ScoreResult,skill:'reading'|'listening'){
+ const band=estimatedBand(result,skill);
+ let nextBand:null|{band:number;needed:number}=null;
+ if(band!==null&&band<9)for(let correct=result.correct+1;correct<=40;correct++){const candidate=estimatedBand({...result,correct},skill);if(candidate!==null&&candidate>band){nextBand={band:candidate,needed:correct-result.correct};break}}
+ return {band,nextBand,accuracy:result.gradable?result.correct/result.gradable:null,completion:result.gradable?(result.gradable-result.blank)/result.gradable:null};
+}

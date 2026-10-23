@@ -1,3 +1,4 @@
+import {PaginatedTable} from './PaginatedTable';
 import React, { useState } from 'react';
 import { HardDrive, RefreshCw, Database, AlertCircle, CheckCircle2 } from 'lucide-react';
 import { auth } from '../firebase';
@@ -249,7 +250,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
           </p>
           <details>
             <summary>Largest uploaded files ({inventory.largest.length})</summary>
-            <table className="studio-table">
+            <PaginatedTable className="studio-table">
               <thead>
                 <tr>
                   <th>File</th>
@@ -264,7 +265,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
                   </tr>
                 ))}
               </tbody>
-            </table>
+            </PaginatedTable>
           </details>
         </>
       )}
@@ -272,7 +273,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
       {!!known.length && (
         <details>
           <summary>Storage by test ({known.length} measured)</summary>
-          <table className="studio-table">
+          <PaginatedTable className="studio-table">
             <thead>
               <tr>
                 <th>Test</th>
@@ -289,7 +290,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
                   </tr>
                 ))}
             </tbody>
-          </table>
+          </PaginatedTable>
         </details>
       )}
     </section>

@@ -3,12 +3,14 @@ export function ConfirmActionDialog({
   title,
   children,
   confirmLabel,
+  cancelLabel="Cancel",
   onCancel,
   onConfirm,
 }: {
   title: string;
   children: React.ReactNode;
   confirmLabel: string;
+  cancelLabel?: string;
   onCancel: () => void;
   onConfirm: () => void;
 }) {
@@ -35,7 +37,7 @@ export function ConfirmActionDialog({
       <p>{children}</p>
       <div className="studio-actions">
         <button className="studio-secondary" autoFocus onClick={onCancel}>
-          Cancel
+          {cancelLabel}
         </button>
         <button className="studio-primary" onClick={onConfirm}>
           {confirmLabel}

@@ -27,7 +27,7 @@ test('folder page shows its description, child links and only its own descendant
  try{await act(async()=>root.render(React.createElement(FolderPage,{id:'parent',folders,tests:[meta('one','child','Cambridge / Cam 16'),meta('other','elsewhere','Forecast')],profile,attempts:[],location:'/folders/parent',onNavigate:path=>paths.push(path)})));
  assert.match(document.body.textContent!,/A curated collection/);assert.ok(document.querySelector('a[href="/folders/child?skill=reading&view=full"]'));
  assert.deepEqual([...document.querySelectorAll('.practice-card h2')].map(node=>node.textContent),['Test one']);
- const switcher=[...document.querySelectorAll('button')].find(button=>button.textContent==='Passages & sections')!;
+ const switcher=[...document.querySelectorAll('button')].find(button=>button.textContent==='Passages & parts')!;
  await act(async()=>switcher.dispatchEvent(new window.Event('click',{bubbles:true})));assert.match(paths[0],/^\/folders\/parent\?view=practice/);
  assert.equal(document.querySelector('[aria-label="Source folder"]'),null);
  }finally{await act(async()=>root.unmount());}

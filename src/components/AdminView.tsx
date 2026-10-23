@@ -1,3 +1,4 @@
+import {PaginatedTable} from './PaginatedTable';
 import {MediaStorageStatus} from './MediaStorageStatus';
 import {StorageOverview} from "./StorageOverview";
 import {Select} from "./Select";
@@ -135,7 +136,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
 
   const pages=Math.max(1,Math.ceil(filteredTests.length/25));
   const currentPage=Math.min(page,pages-1);
-  const visibleTests=filteredTests.slice(currentPage*25,currentPage*25+25);
+  const visibleTests=filteredTests;
 
   const filteredReports = reports.filter((r) => {
     if (reportFilter === "all") return true;
@@ -215,7 +216,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       </section></>}
       {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
       <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
-      {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are imported as drafts by default, ready for review.</p></section>}
+      {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are published by default. Choose Draft in the preview if you want to review them privately.</p></section>}
       {/* Test Bank & Archive Tab */}
       {(tab === "tests" || tab === "archive" || tab === "trash") && (
         <div className="studio-panel">
@@ -320,7 +321,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
               )}
             </div>
           )}
-          <div className="admin-page-bar"><span>{filteredTests.length} tests · page {currentPage+1} / {pages}</span><button disabled={!currentPage} onClick={()=>setPage(currentPage-1)}>← Previous</button><button disabled={currentPage>=pages-1} onClick={()=>setPage(currentPage+1)}>Next →</button></div>
+          
           {filteredTests.length === 0 ? (
             <div className="studio-empty">
               {tab === "archive"
@@ -329,7 +330,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           ) : (
             <div className="studio-table-wrap">
-              <table className="studio-table">
+              <PaginatedTable className="studio-table">
                 <thead>
                   <tr>
                     <th>
@@ -351,7 +352,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </th>
                     <th>Test title & folder</th>
                     <th>Skill</th>
-                    <th>Sections</th>
+                    <th>Parts / passages</th>
                     <th>Status</th>
                     <th>Actions</th>
                   </tr>
@@ -437,7 +438,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </PaginatedTable>
             </div>
           )}
         </div>
@@ -536,12 +537,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </div>
           ) : (
             <div className="studio-table-wrap">
-              <table className="studio-table">
+              <PaginatedTable className="studio-table">
                 <thead>
                   <tr>
                     <th>Learner Name</th>
                     <th>Email</th>
-                    <th>Target Band</th>
+                    <th>Target Band</th><th>Created</th>
                     <th>Status</th>
                     <th>Action</th>
                   </tr>
@@ -555,7 +556,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         <span className="studio-small">{learner.id}</span>
                       </td>
                       <td>{learner.email}</td>
-                      <td>{learner.target}</td>
+                      <td>{learner.target}</td><td>{learner.createdAt?new Date(learner.createdAt).toLocaleString():"Not recorded"}</td>
                       <td>
                         <span
                           className={`studio-tag ${
@@ -568,6 +569,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         </span>
                       </td>
                       <td>
+                        <button className="studio-quiet" onClick={()=>go("/admin/students/"+encodeURIComponent(learner.id))}>Manage account</button>
                         {learner.id !== adminUid ? (
                           <button
                             className={`studio-quiet ${
@@ -598,7 +600,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     </tr>
                   ))}
                 </tbody>
-              </table>
+              </PaginatedTable>
             </div>
           )}
         </div>

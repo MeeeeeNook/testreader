@@ -35,6 +35,7 @@ export function listeningTracks(parts:EditablePart[]):ListeningTrack[]{
     const src=part.audio||'',start=Math.max(0,Number(part.audioStart)||0),end=Number(part.audioEnd)>start?Number(part.audioEnd):undefined;
     const previous=result.at(-1);
     if(src&&previous?.src===src&&previous.start===start&&previous.end===end){previous.partIds.push(part.id);previous.label+=' / Part '+(part.position||index+1);continue}
+    if(src&&previous?.src===src&&start>previous.start&&!previous.end)previous.end=start;
     result.push({src,name:part.audioName||fileName(src)||'Recording '+(result.length+1),partIds:[part.id],label:'Part '+(part.position||index+1),start,...(end?{end}:{})});
   }
   return result;
@@ -43,4 +44,14 @@ export function recordingLibrary(test:EditableTest):ListeningRecording[]{
   const files=[...(test.audioFiles||[])];
   for(const p of test.parts)if(p.audio&&!files.some(f=>f.url===p.audio))files.push({id:'part-'+p.id,name:p.audioName||fileName(p.audio)||p.title,url:p.audio});
   return files;
+}
+
+export function dividerIssues(parts:EditablePart[]):string[]{
+ const issues:string[]=[];
+ for(const url of new Set(parts.map(p=>p.audio).filter(Boolean))){
+  const shared=parts.filter(p=>p.audio===url);
+  if(shared.length<2||!shared.some(p=>(p.audioStart||0)>0))continue;
+  for(let i=1;i<shared.length;i++)if(!Number.isFinite(shared[i].audioStart)||(shared[i].audioStart||0)<=(shared[i-1].audioStart||0))issues.push('Complete the shared recording dividers: every later part needs an increasing start timestamp.');
+ }
+ return [...new Set(issues)];
 }

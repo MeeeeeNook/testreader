@@ -107,11 +107,12 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
 
         const fullTest = await firestoreAdapter.getTestComplete(sel.testId);
         const partToCopy = fullTest.parts[sel.partIndex];
+        if(skill==='listening'&&partToCopy&&fullTest.parts.filter(p=>p.audio===partToCopy.audio).length>1&&!partToCopy.audioEnd&&!fullTest.parts[sel.partIndex+1]?.audioStart)throw new Error('This recording needs part dividers before it can be mixed. Ask the administrator to add timestamps.');
         if (!partToCopy) {
           throw new Error(`Section ${sel.partIndex + 1} not found in test ${fullTest.title}.`);
         }
         sourceSections.push({ testId: sel.testId, sectionId: partToCopy.id });
-        compiledParts.push({ ...JSON.parse(JSON.stringify(partToCopy)), id: `p${i}` });
+        compiledParts.push({ ...JSON.parse(JSON.stringify({...partToCopy,audioEnd:partToCopy.audioEnd||(fullTest.parts[sel.partIndex+1]?.audio===partToCopy.audio?fullTest.parts[sel.partIndex+1]?.audioStart:undefined)})), id: `p${i}`, position:i+1 });
       }
 
       // Renumber questions sequentially 1..40 across all selected parts
@@ -167,15 +168,15 @@ export const MockBuilderView: React.FC<MockBuilderViewProps> = ({
     }finally{setBusy(false);}
   };
 
-  const minutes=skill==='reading'?60:30,unit=skill==='reading'?'Passage':'Section';
+  const minutes=skill==='reading'?60:30,unit=skill==='reading'?'Passage':'Part';
   return <div className="mock-builder">
     <header className="mock-page-heading"><span className="portal-eyebrow">YOUR TEST, YOUR WAY</span><h1>Make room for your next milestone.</h1><p>Bring your favourite passages together in one focused IELTS session.</p></header>
     <div className="mock-layout"><div className="mock-main">
       <section className="mock-settings" aria-label="Test settings"><div className="mock-section-heading"><span>01</span><div><h2>Set your focus</h2><p>A little practice, or the full challenge.</p></div></div>
-        <div className="mock-skill-options">{(['reading','listening'] as const).map(value=><button key={value} aria-pressed={skill===value} className={skill===value?'selected':''} onClick={()=>{setSkill(value);setError('');}}>{value==='reading'?<BookOpen size={22}/>:<Headphones size={22}/>}<span><strong>{value==='reading'?'Academic Reading':'Listening'}</strong><small>{value==='reading'?'3 passages · 60 minutes':'4 sections · 30 minutes'}</small></span>{skill===value&&<Check size={17}/>}</button>)}</div>
+        <div className="mock-skill-options">{(['reading','listening'] as const).map(value=><button key={value} aria-pressed={skill===value} className={skill===value?'selected':''} onClick={()=>{setSkill(value);setError('');}}>{value==='reading'?<BookOpen size={22}/>:<Headphones size={22}/>}<span><strong>{value==='reading'?'Academic Reading':'Listening'}</strong><small>{value==='reading'?'3 passages · 60 minutes':'4 parts · 30 minutes'}</small></span>{skill===value&&<Check size={17}/>}</button>)}</div>
         <div className="mock-mode-options" aria-label="Session mode">{(['practice','exam'] as const).map(value=><button key={value} aria-pressed={mode===value} className={mode===value?'selected':''} onClick={()=>setMode(value)}>{value==='practice'?<SlidersHorizontal size={18}/>:<ShieldCheck size={18}/>}<span><strong>{value==='practice'?'Practice':'Exam'}</strong><small>{value==='practice'?'Unlimited time, reading tools on':'Timed, with exam conditions'}</small></span></button>)}</div>
       </section>
-      <section className="mock-passages" aria-label="Choose passages"><div className="mock-section-heading"><span>02</span><div><h2>Choose your {skill==='reading'?'passages':'sections'}</h2><p>Pick from the library, or let us surprise you.</p></div><button className="mock-shuffle" disabled={!published.length||busy} onClick={handleRandomize}><Shuffle size={15}/>Shuffle</button></div>
+      <section className="mock-passages" aria-label="Choose passages"><div className="mock-section-heading"><span>02</span><div><h2>Choose your {skill==='reading'?'passages':'parts'}</h2><p>Pick from the library, or let us surprise you.</p></div><button className="mock-shuffle" disabled={!published.length||busy} onClick={handleRandomize}><Shuffle size={15}/>Shuffle</button></div>
         {!published.length?<div className="portal-empty"><BookOpen size={30}/><p>No published {skill} tests yet. Try the other skill.</p></div>:Array.from({length:count},(_,index)=>{
           const selection=selections[index],test=published.find(test=>test.id===selection?.testId);
           const title=passageNames[selection?.testId]?.[selection?.partIndex]||test?.passageTitles?.[selection?.partIndex];
