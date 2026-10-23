@@ -19,7 +19,7 @@ test('direct codes are unlimited practice; explicit exam links enforce passage t
   assert.equal(directSession(new URLSearchParams('minutes=15'),file).minutes,15);
   assert.equal(directSession(new URLSearchParams('minutes=-5'),file).minutes,0);
   assert.equal(examMinutes({...file,parts:[file.parts[0],file.parts[0],file.parts[0]]}),60);
-  assert.equal(examMinutes({...file,skill:'listening',parts:Array(4).fill(file.parts[0])}),30);
+  assert.equal(examMinutes({...file,skill:'listening',duration:30,parts:Array(4).fill(file.parts[0])}),30);
 });
 
 test('catalog opens setup for the selected passage and still supplies a separate public solution link',()=>{

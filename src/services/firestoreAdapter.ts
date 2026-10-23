@@ -264,7 +264,7 @@ export class FirestoreAdapter {
             a.id.localeCompare(b.id, undefined, { numeric: true }),
         );
 
-      parts.forEach((part, index) => { part.title = passageTitle(part.passageHtml, part.title, index); });
+      parts.forEach((part, index) => { if(meta.skill!=='listening')part.title = passageTitle(part.passageHtml, part.title, index); });
 
       // If user is admin, also fetch the private keys
       const role = await this.getRole();
@@ -274,6 +274,7 @@ export class FirestoreAdapter {
           const keysData = keySnap.data().keys || {};
           // Merge private answers and explanations into question objects for the admin editor
           for (const part of parts) {
+            if(meta.skill==='listening')part.passageHtml=keySnap.data().transcripts?.[part.id]??part.passageHtml;
             for (const q of part.questions) {
               if (keysData[q.number]) {
                 q.answer = keysData[q.number].answer || q.answer;
@@ -292,6 +293,7 @@ export class FirestoreAdapter {
         id: meta.id,
         title: meta.title,
         skill: meta.skill,
+        audioFiles:meta.audioFiles||[],
         source: meta.source,
         folderId:meta.folderId||null,folderPath:meta.folderPath||"",contentHash:meta.contentHash,
         coverImage: meta.coverImage,
@@ -337,8 +339,8 @@ export class FirestoreAdapter {
         const snap = await getDocs(collection(db, `tests/${test.id}/sections`));
         const parts = snap.docs.map(d => ({...d.data(), id:d.id} as EditablePart & {index?:number})).sort((a,b) => (a.index || 0) - (b.index || 0));
         if (!parts.length) throw new Error("This test has no sections.");
-        parts.forEach((p,i) => {p.title = passageTitle(p.passageHtml,p.title,i);});
-        patch = {passageTitles:parts.map(p=>p.title),sectionSummaries:sectionSummaries({...test,schemaVersion:1,createdAt:test.createdAt||test.updatedAt,parts}),...(parts.length===1 ? {title:parts[0].title} : {})};
+        parts.forEach((p,i) => {if(test.skill!=='listening')p.title = passageTitle(p.passageHtml,p.title,i);});
+        patch = {passageTitles:parts.map(p=>p.title),sectionSummaries:sectionSummaries({...test,schemaVersion:1,createdAt:test.createdAt||test.updatedAt,parts}),...(test.skill==='reading'&&parts.length===1 ? {title:parts[0].title} : {})};
         try {localStorage.setItem(`reading-room:summary:${test.id}`,JSON.stringify({version:2,updatedAt:test.updatedAt,patch}));} catch {}
       }
       if ((await this.getRole()) === "admin") await this.updateTestMeta(test.id,patch);
@@ -354,21 +356,23 @@ export class FirestoreAdapter {
     const user = auth.currentUser;
     if (!user || (await this.getRole()) !== "admin")
       throw new Error("Administrator access required.");
+    if(test.skill==='listening'&&test.status==='published'&&test.parts.some(p=>!p.audio||(p.audioEnd&&p.audioEnd<=(p.audioStart||0))))throw new Error('Assign a recording and valid start/end times to every Listening part before publishing.');
     const now = Date.now();
     test.updatedAt = now;
 
     // 1. Lightweight metadata
     const meta: TestMeta = {
       id: test.id,
-      title: test.parts.length === 1 ? passageTitle(test.parts[0].passageHtml, test.parts[0].title, 0) : test.title,
+      title: test.skill==='reading'&&test.parts.length === 1 ? passageTitle(test.parts[0].passageHtml, test.parts[0].title, 0) : test.title,
       skill: test.skill,
       source: test.source || "My Collection",
       access: "free",
       status: test.status || "published",
-      duration: test.duration || 60,
+      duration: test.duration || (test.skill==='listening'?30:60),
+      audioFiles:test.audioFiles||[],
       passages: test.parts.length,
-      passageTitles: test.parts.map((p, i) => passageTitle(p.passageHtml, p.title, i)),
-      sectionSummaries: sectionSummaries({...test, parts:test.parts.map((p,i)=>({...p,title:passageTitle(p.passageHtml,p.title,i)}))}),
+      passageTitles: test.parts.map((p, i) => test.skill==='listening'?p.title:passageTitle(p.passageHtml, p.title, i)),
+      sectionSummaries: sectionSummaries({...test, parts:test.parts.map((p,i)=>({...p,title:test.skill==='listening'?p.title:passageTitle(p.passageHtml,p.title,i)}))}),
       questions: test.parts.reduce((sum, p) => sum + p.questions.length, 0),
       createdAt: test.createdAt || now,
       updatedAt: now,
@@ -399,8 +403,8 @@ export class FirestoreAdapter {
           testId: test.id,
           index,
           position: part.position || index + 1,
-          title: passageTitle(part.passageHtml, part.title, index),
-          passageHtml: cleanLayout(part.passageHtml || ""),
+          title: test.skill==='listening'?part.title:passageTitle(part.passageHtml, part.title, index),
+          passageHtml: test.skill==='listening'?'':cleanLayout(part.passageHtml || ""),
           questionHtml: cleanLayout(part.questionHtml || ""),
           slots: part.slots || {},
           questions: part.questions.map((q) => ({
@@ -409,6 +413,9 @@ export class FirestoreAdapter {
             missing: q.missing || false,
           })),
           audio: part.audio || "",
+          audioName:part.audioName||'',
+          audioStart:Math.max(0,Number(part.audioStart)||0),
+          audioEnd:Math.max(0,Number(part.audioEnd)||0),
         };
         batch.set(
           doc(db, `tests/${test.id}/sections`, sectionDoc.id),
@@ -435,7 +442,7 @@ export class FirestoreAdapter {
       return url;
     } catch (error) {
       console.error("Storage upload failed:", error);
-      throw new Error("The image could not be uploaded. Check Firebase Storage access and retry. Your test has not been changed.");
+      throw new Error("The media file could not be uploaded. Check Firebase Storage access and retry. Your test has not been changed.");
     }
   }
 

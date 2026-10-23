@@ -1,6 +1,7 @@
 import { passageTitle } from "./passageTitle";
 import JSZip from "jszip";
 import JSON5 from "json5";
+import {audioExtension,audioMime} from './listening';
 
 export interface TestSlot {
   id: string;
@@ -28,9 +29,13 @@ export interface EditablePart {
   slots: Record<string, TestSlot>;
   questions: TestQuestion[];
   audio?: string;
+  audioName?: string;
+  audioStart?: number;
+  audioEnd?: number;
 }
 
 export interface EditableTest {
+  audioFiles?: import('../types').ListeningRecording[];
   coverImage?: string;
   folderId?: string|null;
   folderPath?: string;
@@ -53,6 +58,7 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  audioFiles?: import('../types').ListeningRecording[];
   coverImage?: string;
   contentBytes?: number;
   fullTestMenuFolders?: import('./folders').MenuFolder[];
@@ -423,7 +429,7 @@ export function toEditable(
 
   rawParts.forEach((part, partIndex) => {
     const tplTopic = document.createElement("template");
-    tplTopic.innerHTML = part.topic_content;
+    tplTopic.innerHTML = part.topic_content || "";
     const topic = tplTopic.content;
     const q = repairQuestions(part.question_content);
 
@@ -501,7 +507,7 @@ export function toEditable(
     while (assigned.has(cursor)) cursor++;
     Array.from(q.querySelectorAll(".question")).forEach((wEl) => {
       const w = wEl as HTMLElement;
-      const type = [
+      let type = [
         "true_false",
         "yes_no",
         "fill_blank",
@@ -510,6 +516,8 @@ export function toEditable(
         "multiple_choice_many",
         "matching_names",
       ].find((c) => w.classList.contains(c));
+      // Some Listening exports label a plain note-completion blank as a heading.
+      if(!type&&meta.skill==='listening'&&w.classList.contains('matching_heading')&&!w.querySelector('input,select'))type='fill_blank';
       if (!type) return;
 
       const inputs = Array.from(
@@ -548,7 +556,7 @@ export function toEditable(
         const count =
           fs.length || w.querySelectorAll("input[is-value]").length || 2;
         let start = groups.get(w) || cursor;
-        if (assigned.has(start)) start = cursor;
+        if (assigned.has(start)||(meta.skill==='listening'&&expected.length&&!expected.includes(start))) start = cursor;
         nums = range(start, start + count - 1);
         fs.forEach((e, i) => {
           const key = e
@@ -832,6 +840,8 @@ export function toEditable(
     }
     substitute(topic);
     substitute(q);
+    // Ignore stray explanation IDs that do not belong to a question in this part.
+    if(expected.length)for(const n of keys.keys())if(!expected.includes(n)&&!assigned.has(n))keys.delete(n);
     Array.from(keys.keys())
       .filter((n) => !assigned.has(n))
       .forEach((n) => missing.add(n));
@@ -873,12 +883,12 @@ export function toEditable(
       return html;
     }
     const passageHtml = layout(topic);
-    const title = passageTitle(part.topic_content, "", partIndex);
+    const title = passageTitle(part.topic_content || "", "", partIndex);
     const questionHtml = layout(q);
 
     parts.push({
       id: `p${partIndex}`,
-      position: Number(/(?:PASSAGE|SECTION|PART)\s*([1-4])\b/i.exec(part.topic_content.replace(/<[^>]*>/g," "))?.[1]) || partIndex + 1,
+      position: Number(/(?:PASSAGE|SECTION|PART)\s*([1-4])\b/i.exec((part.topic_content||"").replace(/<[^>]*>/g," "))?.[1]) || partIndex + 1,
       title,
       passageHtml,
       questionHtml,
@@ -896,7 +906,7 @@ export function toEditable(
     source: meta.source || "Imported Collection",
     access: meta.access || "free",
     status: meta.status || "published",
-    duration: rawParts.length === 1 ? 20 : 60,
+    duration: meta.duration || (meta.skill==='listening' ? (rawParts.length===4?30:rawParts.length*10) : rawParts.length === 1 ? 20 : 60),
     parts,
     createdAt: meta.createdAt || Date.now(),
     updatedAt: Date.now(),
@@ -906,14 +916,16 @@ export function toEditable(
 export async function collectFiles(
   files: File[],
 ): Promise<{
-  candidates: { source: string; name: string }[];
-  images: { name: string; url: string; blob: Blob }[];
+  candidates: { source: string; name: string; archive?: string }[];
+  images: { name: string; url: string; blob: Blob; archive?: string }[];
+  recordings: { name: string; url: string; blob: Blob; archive?: string }[];
   errors: string[];
 }> {
-  const candidates: { source: string; name: string }[] = [];
-  const images: { name: string; url: string; blob: Blob }[] = [];
+  const candidates: { source: string; name: string; archive?: string }[] = [];
+  const images: { name: string; url: string; blob: Blob; archive?: string }[] = [];
+  const recordings: { name: string; url: string; blob: Blob; archive?: string }[] = [];
   const errors: string[] = [];
-  let totalSize = 0;
+  let totalSize = 0, sourceSize = 0;
 
   async function processZip(
     data: ArrayBuffer | Uint8Array,
@@ -935,12 +947,12 @@ export async function collectFiles(
       try {
         if (/\.(html?|json)$/.test(lower)) {
           const s = await entry.async("string");
-          totalSize += s.length;
-          if (totalSize > 180e6)
+          sourceSize += s.length;
+          if (sourceSize > 180e6)
             throw new Error(
               "Import is too large. Add test ZIPs in smaller groups.",
             );
-          candidates.push({ source: s, name: name + "/" + entry.name });
+          candidates.push({ source: s, name: name + "/" + entry.name, archive:name });
         } else if (/\.zip$/.test(lower)) {
           await processZip(
             await entry.async("uint8array"),
@@ -953,7 +965,13 @@ export async function collectFiles(
             name: entry.name.split("/").at(-1) || entry.name,
             url: URL.createObjectURL(blob),
             blob,
+            archive:name,
           });
+        } else if(audioExtension.test(lower)) {
+          const bytes=await entry.async('uint8array');totalSize+=bytes.length;
+          if(totalSize>600e6)throw new Error('Import is too large. Add Listening tests in smaller groups.');
+          const blob=new Blob([bytes as BlobPart],{type:audioMime(entry.name)});
+          recordings.push({name:entry.name,url:URL.createObjectURL(blob),blob,archive:name});
         }
       } catch (error) {
         errors.push(
@@ -982,6 +1000,9 @@ export async function collectFiles(
           url: URL.createObjectURL(f),
           blob: f,
         });
+      } else if(audioExtension.test(f.name)) {
+        const blob=new Blob([f],{type:audioMime(f.name)});
+        recordings.push({name:f.name,url:URL.createObjectURL(blob),blob});
       } else if (/\.json$/i.test(f.name)) {
         // Handled directly by caller
       } else {
@@ -992,7 +1013,7 @@ export async function collectFiles(
     }
   }
 
-  return { candidates, images, errors };
+  return { candidates, images, recordings, errors };
 }
 
 // Supported JSON imports are validated before any Firebase write. No source scripts execute.

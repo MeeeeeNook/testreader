@@ -1,7 +1,7 @@
 import type { EditableTest } from '../types';
 
 export function examMinutes(test: Pick<EditableTest, 'skill' | 'parts' | 'duration'>) {
-  return test.skill === 'reading' ? Math.min(60, test.parts.length * 20) : test.parts.length === 4 ? 30 : test.parts.length * 10;
+  return test.skill === 'reading' ? Math.min(60, test.parts.length * 20) : Number.isFinite(test.duration) && Number(test.duration)>0 ? Math.min(180, Number(test.duration)) : test.parts.length === 4 ? 30 : test.parts.length * 10;
 }
 
 export function directSession(search: URLSearchParams, test: Pick<EditableTest, 'skill' | 'parts' | 'duration'>) {

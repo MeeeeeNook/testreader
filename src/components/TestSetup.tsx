@@ -9,7 +9,7 @@ export function TestSetup({test,mode,minutes,section,onMode,onMinutes,onSection,
   test:EditableTest;mode:'practice'|'exam';minutes:number;section:'all'|number;
   onMode:(mode:'practice'|'exam')=>void;onMinutes:(minutes:number)=>void;onSection:(section:'all'|number)=>void;onStart:()=>void;onClose:()=>void;
 }) {
-  const selected = section === 'all' ? test : {...test,parts:[test.parts[section]]};
+  const selected = section === 'all' ? test : {...test,parts:[test.parts[section]],duration:test.skill==='listening'?10:test.duration};
   const limit = examMinutes(selected);
   return <Modal className={`test-setup ${mode}`} label="Choose your test mode" onClose={onClose}>
     <header><div><span className="setup-badge"><BookOpen size={20}/>{section === 'all' ? test.skill.toUpperCase() : `${test.skill==='reading'?'PASSAGE':'SECTION'} ${section+1}`}</span><h1>{section==='all'?test.title:test.parts[section].title}</h1><p>Choose how you want to practise before you begin.</p></div><button className="setup-close" aria-label="Close test setup" onClick={onClose}><X/></button></header>

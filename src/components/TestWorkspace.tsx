@@ -158,6 +158,10 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
   const [historyError, setHistoryError] = useState("");
   const [historyNotice, setHistoryNotice] = useState("");
   const [reviewLoaded, setReviewLoaded] = useState(false);
+  const [transcripts,setTranscripts]=useState<Record<string,string>>(()=>isPreview?Object.fromEntries(test.parts.map(p=>[p.id,p.passageHtml])):{});
+  const [listeningReview,setListeningReview]=useState(initialSolution||Boolean(savedSession.scored));
+  const listeningSolution=test.skill==='listening'&&(initialSolution||listeningReview);
+
   useEffect(() => {
     onSessionActive(!isPreview && !initialSolution && (!scored || Boolean(historyError)));
     return () => onSessionActive(false);
@@ -175,9 +179,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
     return paintHighlights(roots);
   },[highlights,currentPartIndex,showExplanations,showAnswers]);
   useEffect(()=>{
-    if(!initialSolution)return;let alive=true;setSolutionError('');
-    void assessmentRequest('/api/test-review',{testId:test.sourceTestId||test.id,sectionIds:test.sectionIds,sourceSections:test.sourceSections,mode:'practice'}).then(data=>{if(!alive)return;setReviewKeys(data.keys||{});setReviewLoaded(true);setScored(true);setTimerRunning(false);setShowAnswers(true);setShowExplanations(true);}).catch(e=>{if(alive)setSolutionError(e.message);});return ()=>{alive=false;};
-  },[initialSolution,test.id,solutionRetry]);
+    if((!initialSolution&&!(test.skill==='listening'&&scored))||isPreview||reviewLoaded)return;let alive=true;setSolutionError('');
+    void assessmentRequest('/api/test-review',{testId:test.sourceTestId||test.id,sectionIds:test.sectionIds,sourceSections:test.sourceSections,mode:'practice'}).then(data=>{if(!alive)return;setReviewKeys(data.keys||{});setTranscripts(data.transcripts||{});setReviewLoaded(true);setScored(true);setTimerRunning(false);setShowAnswers(true);setShowExplanations(true);}).catch(e=>{if(alive)setSolutionError(e.message);});return ()=>{alive=false;};
+  },[initialSolution,test.id,solutionRetry,scored,reviewLoaded,isPreview]);
   const allQuestions = test.parts.flatMap((p) => p.questions);
   const allQuestionNumbers = allQuestions
     .map((q) => q.number)
@@ -397,8 +401,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           responses,
         );
         setScoreResult(result);
-        setApproxBand(estimatedBand(result));
+        setApproxBand(estimatedBand(result,test.skill));
         setScored(true);
+        if(test.skill==='listening')setListeningReview(true);
         setShowResultsModal(true);
         return;
       }
@@ -407,10 +412,12 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         attemptId,
       });
       setReviewKeys(data.keys || {});
+      setTranscripts(data.transcripts||{});
       setReviewLoaded(true);
       setScoreResult(data.result);
       setApproxBand(data.band);
       setScored(true);
+      if(test.skill==='listening')setListeningReview(true);
       setShowAnswers(true);
       setShowExplanations(true);
 
@@ -470,6 +477,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         mode: "practice",
       });
       setReviewKeys(data.keys || {});
+      setTranscripts(data.transcripts||{});
       setReviewLoaded(true);
       return true;
     } catch (error) {
@@ -665,6 +673,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             setShowExplanations(false);
             setReviewLoaded(false);
             setReviewKeys({});
+            setListeningReview(false);setTranscripts(isPreview?Object.fromEntries(test.parts.map(p=>[p.id,p.passageHtml])):{});
             if (resetAction === "restart") {
               setTimerRemaining(Math.max(0, initialDurationMinutes) * 60);
               setTimerRunning(mode === "exam" || initialDurationMinutes > 0);
@@ -742,23 +751,17 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </button>
           </div>
         )}
-        {/* Listening Audio Strip if audio is present */}
-        {part.audio && (
-          <div className="audio-strip">
-            <span style={{ fontWeight: 600 }}>Section Audio:</span>
-            {mode==='exam'&&!scored&&!initialSolution ? test.parts.map((audioPart,index)=>audioPart.audio&&<div key={audioPart.id} hidden={index!==currentPartIndex}><ListeningAudio src={audioPart.audio} exam/></div>) : <ListeningAudio key={sessionId+part.id} src={part.audio} exam={false}/>}
-          </div>
-        )}
+        {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} exam={mode==='exam'&&!scored&&!initialSolution}/>}
 
-        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS Academic Reading · Band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setActiveDrawer('review')}>Answer sheet</button></div></section>}
+        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Academic Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setActiveDrawer('review')}>Answer sheet</button></div></section>}
 
         {/* Mobile Tab Toggle for narrow viewports */}
-        <div className="mobile-tabs">
+        {(test.skill==='reading'||listeningSolution)&&<div className="mobile-tabs">
           <button
             className={`mobile-tab ${mobileTab === "passage" ? "active" : ""}`}
             onClick={() => setMobileTab("passage")}
           >
-            Passage
+            {test.skill==='listening'?'Transcript':'Passage'}
           </button>
           <button
             className={`mobile-tab ${mobileTab === "questions" ? "active" : ""}`}
@@ -766,16 +769,16 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
           >
             Questions
           </button>
-        </div>
+        </div>}
 
         {/* Split-Screen Main Content */}
         <div
           ref={splitRef}
           style={{"--passage-width":paneWidth+"%"} as React.CSSProperties}
-          className={`split-view ${showAnswers ? "show-answers" : ""} ${showExplanations ? "show-explanations" : ""}`}
+          className={`split-view ${test.skill==='listening'&&!listeningSolution?'listening-questions-only':''} ${showAnswers ? "show-answers" : ""} ${showExplanations ? "show-explanations" : ""}`}
         >
           {/* Left Pane: Passage Content */}
-          <article
+          {(test.skill==='reading'||listeningSolution)&&<article
             ref={passageRef}
             className={`pane passage-pane ${mobileTab === "questions" ? "mobile-hidden" : ""}`}
           >
@@ -784,15 +787,15 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             </div>
 
             <div className="reading-content">
-              <QuestionLayout html={part.passageHtml} renderSlot={renderSlot} />
+              {test.skill==='listening'?<><h3>Transcript</h3>{transcripts[part.id]?<QuestionLayout html={cleanLayout(transcripts[part.id])} renderSlot={renderSlot}/>:<p className="studio-callout">{reviewLoaded||isPreview?'No transcript was provided for this part.':'Loading transcript…'}</p>}</>:<QuestionLayout html={part.passageHtml} renderSlot={renderSlot} />}
             </div>
-          </article>
+          </article>}
 
-          <div className="pane-resizer" role="separator" aria-label="Resize reading passage" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={paneWidth} tabIndex={0} onKeyDown={e=>{if(e.key==='ArrowLeft'){e.preventDefault();setPaneWidth(w=>Math.max(25,w-2));}if(e.key==='ArrowRight'){e.preventDefault();setPaneWidth(w=>Math.min(75,w+2));}}} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.currentTarget.hasPointerCapture(e.pointerId)||!splitRef.current)return;const r=splitRef.current.getBoundingClientRect();setPaneWidth(Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100)));}} onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)}><span/></div>
+          {(test.skill==='reading'||listeningSolution)&&<div className="pane-resizer" role="separator" aria-label="Resize reading passage" aria-orientation="vertical" aria-valuemin={25} aria-valuemax={75} aria-valuenow={paneWidth} tabIndex={0} onKeyDown={e=>{if(e.key==='ArrowLeft'){e.preventDefault();setPaneWidth(w=>Math.max(25,w-2));}if(e.key==='ArrowRight'){e.preventDefault();setPaneWidth(w=>Math.min(75,w+2));}}} onPointerDown={e=>{e.currentTarget.setPointerCapture(e.pointerId);}} onPointerMove={e=>{if(!e.currentTarget.hasPointerCapture(e.pointerId)||!splitRef.current)return;const r=splitRef.current.getBoundingClientRect();setPaneWidth(Math.max(25,Math.min(75,(e.clientX-r.left)/r.width*100)));}} onPointerUp={e=>e.currentTarget.releasePointerCapture(e.pointerId)}><span/></div>}
           {/* Right Pane: Questions Content */}
           <section
             ref={questionsRef}
-            className={`pane questions-pane ${mobileTab === "passage" ? "mobile-hidden" : ""}`}
+            className={`pane questions-pane ${mobileTab === "passage" && (test.skill==='reading'||listeningSolution) ? "mobile-hidden" : ""}`}
           >
             <div className="pane-label">
               Questions {currentPartNumbers[0] || 1}–
@@ -838,7 +841,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
       </main>
 
       {dictionaryWord!==null&&<DictionaryPanel initialWord={dictionaryWord} sourceContext={dictionaryContext} saveIntent={dictionarySaveIntent} onClose={()=>setDictionaryWord(null)} onSave={onSaveVocabulary}/>}
-      {showExport&&<ExportDialog test={test} onClose={()=>setShowExport(false)} loadKeys={async()=>{if(isPreview)return Object.fromEntries(test.parts.flatMap(p=>p.questions.map(q=>[q.number,q])));const data=await assessmentRequest('/api/test-review',{...submissionPayload(),mode:'practice'});return data.keys||{};}}/>}
+      {showExport&&<ExportDialog test={test} onClose={()=>setShowExport(false)} loadTranscripts={async()=>{if(isPreview)return Object.fromEntries(test.parts.map(p=>[p.id,p.passageHtml]));if(Object.keys(transcripts).length)return transcripts;const data=await assessmentRequest('/api/test-review',{...submissionPayload(),mode:'practice'});setTranscripts(data.transcripts||{});return data.transcripts||{};}} loadKeys={async()=>{if(isPreview)return Object.fromEntries(test.parts.flatMap(p=>p.questions.map(q=>[q.number,q])));const data=await assessmentRequest('/api/test-review',{...submissionPayload(),mode:'practice'});return data.keys||{};}}/>}
       {/* Floating Selection Tools */}
       {selectionBox && (
         <div

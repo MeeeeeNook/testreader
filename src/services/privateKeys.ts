@@ -18,6 +18,7 @@ export function buildPrivateKeys(test: EditableTest, updatedAt: number) {
       if (slot.type === 'multi') multiGroups.push({ numbers: [...slot.numbers] });
     }
   }
-  return { testId: test.id, keys, multiGroups, updatedAt };
+  const transcripts=test.skill==='listening'?Object.fromEntries(test.parts.map(p=>[p.id,p.passageHtml||''])):{};
+  return { testId: test.id, keys, multiGroups, transcripts, updatedAt };
 }
 

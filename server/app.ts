@@ -271,7 +271,7 @@ app.post("/api/test-review", async (req, res) => {
       req.body,
       isAdmin,
     );
-    res.json({ keys: assessment.keys });
+    res.json({ keys: assessment.keys, transcripts: assessment.transcripts });
   } catch (error) {
     apiError(res, error);
   }
@@ -298,7 +298,7 @@ app.post("/api/submit-exam", async (req, res) => {
       /^[\w-]{1,128}$/.test(req.body.attemptId)
         ? req.body.attemptId
         : randomUUID();
-    res.json({ attemptId, result, band, keys: assessment.keys });
+    res.json({ attemptId, result, band, keys: assessment.keys, transcripts: assessment.transcripts });
   } catch (error) {
     apiError(res, error);
   }

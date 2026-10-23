@@ -41,9 +41,15 @@ export interface EditablePart {
   slots: Record<string, TestSlot>;
   questions: TestQuestion[];
   audio?: string;
+  audioName?: string;
+  audioStart?: number;
+  audioEnd?: number;
 }
 
+export interface ListeningRecording { id: string; name: string; url: string; size?: number }
+
 export interface EditableTest {
+  audioFiles?: ListeningRecording[];
   coverImage?: string;
   folderId?: string|null;
   folderPath?: string;
@@ -66,6 +72,7 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  audioFiles?: ListeningRecording[];
   coverImage?: string;
   contentBytes?: number;
   fullTestMenuFolders?: import('./services/folders').MenuFolder[];

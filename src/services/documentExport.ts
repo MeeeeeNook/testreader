@@ -1,6 +1,6 @@
 import type {EditableTest,EditablePart} from '../types';
 import {cleanLayout} from './importer';
-export interface ExportOptions {includeAnswers:boolean;includeExplanations:boolean}
+export interface ExportOptions {includeAnswers:boolean;includeExplanations:boolean;transcriptOnly?:boolean}
 export interface ExportRun{text:string;bold?:boolean;italic?:boolean;underline?:boolean}
 export type ExportBlock={kind:'text';text:string;runs?:ExportRun[];heading?:boolean;center?:boolean;align?:'left'|'center'|'right'|'justify';pageBreakBefore?:boolean}|{kind:'table';rows:string[][];answerTable?:boolean;pageBreakBefore?:boolean}|{kind:'image';url:string;alt:string};
 const normalize=(s:string)=>s.replace(/\s+/g,' ').trim().toLowerCase();
@@ -27,7 +27,9 @@ function passageRoot(part:EditablePart){const root=printableHtml(part.passageHtm
 export function readingDocument(test:EditableTest,options:ExportOptions={includeAnswers:true,includeExplanations:true}):ExportBlock[]{
  const blocks:ExportBlock[]=[{kind:'text',text:test.title,heading:true,center:true}];for(const [i,part]of test.parts.entries()){
   if(test.parts.length>1)blocks.push({kind:'text',text:part.title||`Passage ${i+1}`,heading:true,center:true,pageBreakBefore:i>0});
-  blocks.push(...htmlBlocks(passageRoot(part)));const questions=htmlBlocks(printableHtml(part.questionHtml,part));if(questions[0]&&questions[0].kind!=='image')questions[0].pageBreakBefore=true;blocks.push(...questions);
+   if(test.skill==='reading'||options.transcriptOnly)blocks.push(...htmlBlocks(passageRoot(part)));
+   if(options.transcriptOnly)continue;
+   const questions=htmlBlocks(printableHtml(part.questionHtml,part));if(test.skill==='reading'&&questions[0]&&questions[0].kind!=='image')questions[0].pageBreakBefore=true;blocks.push(...questions);
   for(const slot of Object.values(part.slots)){if(![part.passageHtml,part.questionHtml].some(h=>h.includes(`data-slot="${slot.id}"`)||h.includes(`data-slot='${slot.id}'`)))blocks.push(...htmlBlocks(printableHtml(`<span data-slot="${slot.id}"></span>`,part)));}
  }
  if(options.includeAnswers) {blocks.push({kind:'text',text:options.includeExplanations?'Answers and explanations':'Answer key',heading:true,pageBreakBefore:true});blocks.push({kind:'table',answerTable:true,rows:[options.includeExplanations?['Question','Answer','Explanation']:['Question','Answer'],...test.parts.flatMap(p=>p.questions.map(q=>{const el=document.createElement('div');el.innerHTML=cleanLayout(q.explanationHtml||'');const row=[String(q.number),q.answer?.split('||').join(' / ')||''];return options.includeExplanations?[...row,plain(el)]:row;}))]});}return blocks;

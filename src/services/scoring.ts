@@ -137,9 +137,13 @@ export function scoreTest(
   return result;
 }
 
-export function estimatedBand(result: ScoreResult): number | null {
+export function estimatedBand(result: ScoreResult, skill: 'reading' | 'listening' = 'reading'): number | null {
   if (result.total !== 40 || result.ungraded > 0) return null;
-  const bounds: [number, number][] = [
+  // Listening thresholds: https://ielts.idp.com/vietnam/results/scores/listening/en-gb/
+  const bounds: [number, number][] = skill === 'listening' ? [
+    [39,9],[37,8.5],[35,8],[32,7.5],[30,7],[26,6.5],[23,6],[18,5.5],
+    [16,5],[13,4.5],[10,4],[8,3.5],[6,3],[4,2.5],[3,2],[2,1.5],[1,1],[0,0],
+  ] : [
     [39, 9], [37, 8.5], [35, 8], [33, 7.5], [30, 7], [27, 6.5],
     [23, 6], [19, 5.5], [15, 5], [13, 4.5], [10, 4], [8, 3.5],
     [6, 3], [4, 2.5], [3, 2], [2, 1.5], [1, 1], [0, 0],

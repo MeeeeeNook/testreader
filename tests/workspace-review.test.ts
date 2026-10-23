@@ -23,8 +23,11 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={get currentUser(){return globalThis.__workspaceUser||null}};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const mode of ['practice','exam','solution','member']) {
+    for (const variant of ['practice','exam','solution','member','listening','listening-solution']) {
+      const listening=variant.startsWith('listening');
+      const mode=variant==='listening'?'practice':variant==='listening-solution'?'solution':variant;
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
+      Object.assign(window.HTMLElement.prototype,{load(){},pause(){},play(){return Promise.resolve()}});
       const storage=new Map<string,string>();
       let requests=0;
       const questions=Array.from({length:40},(_,i)=>({number:i+1,kind:'fill_blank',answer:'yes',explanationHtml:'<p>Source explanation.</p>'}));
@@ -36,22 +39,24 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
         __workspaceUser:mode==='member'?{uid:owner}:null,
         __scoreRequest:async(url:string,payload:any)=>{
-          requests++; if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys};}assert.equal(url,'/api/submit-exam');
+          requests++; if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};}assert.equal(url,'/api/submit-exam');
           const result=scoreTest([{numbers,keys}],payload.responses);
-          return {attemptId:payload.attemptId,result,band:estimatedBand(result),keys};
+          return {attemptId:payload.attemptId,result,band:estimatedBand(result),keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};
         }});
-      const test={schemaVersion:1,id:'test-one',title:'Test',skill:'reading',access:'free',status:'published',source:'Forecast',duration:60,createdAt:1,updatedAt:1,parts:[{id:'p0',title:'Airborne Dentists',passageHtml:'<p>A passage.</p>',questionHtml:'<p>Question prompt</p><span data-slot="s0"></span>',slots:{s0:{id:'s0',type:'text',numbers:[1],label:'Complete the sentence',options:[]}},questions:questions.map(q=>({...q,answer:'',explanationHtml:''}))}]};
+      const test={schemaVersion:1,id:'test-one',title:'Test',skill:listening?'listening':'reading',access:'free',status:'published',source:'Forecast',duration:60,createdAt:1,updatedAt:1,parts:[{id:'p0',title:'Airborne Dentists',passageHtml:listening?'':'<p>A passage.</p>',questionHtml:'<p>Question prompt</p><span data-slot="s0"></span>',slots:{s0:{id:'s0',type:'text',numbers:[1],label:'Complete the sentence',options:[]}},questions:questions.map(q=>({...q,answer:'',explanationHtml:''}))}]};
       const noop=()=>{};
       let root=createRoot(document.getElementById('root')!);
       try {
         await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
         if(mode==='solution'){
+          if(listening)assert.match(document.querySelector('.passage-pane')!.textContent!,/PRIVATE LISTENING TRANSCRIPT/);
           assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
           await act(async()=>root.unmount());root=createRoot(document.getElementById('root')!);
           await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:'practice',initialSolution:false,sessionId:mode,initialDurationMinutes:0,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
           assert.equal(requests,1,'practice must not request solutions after visiting the answer page');assert.equal(document.querySelector('.solution-score-banner'),null);assert.equal((document.querySelector('.fill-input') as HTMLInputElement).disabled,false);continue;
         }
         assert.equal(requests,0,'opening a test must not fetch solutions');
+        if(listening){assert.equal(document.querySelector('.passage-pane'),null);assert.equal(document.body.textContent!.includes('PRIVATE LISTENING TRANSCRIPT'),false);}
         assert.equal(document.querySelector('.review-toggles .toggle'),null);
         assert.equal(document.querySelector('.explanation-card'),null);
         assert.equal(document.querySelector('.answer-tag'),null);
@@ -74,8 +79,9 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         const confirm=[...document.querySelectorAll('dialog button')].find(b=>b.textContent==='Confirm submission')!;
         await act(async()=>confirm.dispatchEvent(new window.Event('click',{bubbles:true})));
         assert.equal(requests,1);
+        if(listening)assert.match(document.querySelector('.passage-pane')!.textContent!,/PRIVATE LISTENING TRANSCRIPT/);
         assert.equal(document.querySelector('.results-panel'),null,'submission reveals answers without a blocking score modal');
-        assert.match(document.querySelector('.solution-score-banner')!.textContent!,/Band 7\.0/);
+        assert.match(document.querySelector('.solution-score-banner')!.textContent!,/Estimated band 7\.0/);
         assert.equal(readAttempts(localStorage,owner).length,mode==='member'?1:0,'only signed-in results save quietly in history');
         assert.equal(document.querySelectorAll('.solution-score-banner button[aria-pressed]').length,2);
         assert.match(document.querySelector('.explanation-card')!.textContent!,/Correct answer: yes.*Source explanation/s);
