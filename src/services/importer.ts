@@ -966,7 +966,8 @@ export async function collectFiles(
             depth + 1,from,to,
           );
         } else if (/\.(png|jpe?g|webp|gif)$/i.test(lower)) {
-          const blob = await entry.async("blob",progress);
+          const imageBytes=await entry.async('uint8array',progress);
+          const blob = new Blob([imageBytes as BlobPart],{type:/\.png$/i.test(lower)?'image/png':/\.webp$/i.test(lower)?'image/webp':/\.gif$/i.test(lower)?'image/gif':'image/jpeg'});
           images.push({
             name: entry.name.split("/").at(-1) || entry.name,
             url: URL.createObjectURL(blob),

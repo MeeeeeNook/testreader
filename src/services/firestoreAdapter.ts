@@ -435,12 +435,14 @@ export class FirestoreAdapter {
   }
 
   async existingMedia(customPath:string):Promise<string|null>{
+    if(customPath.startsWith('media/audio/')){const {storageConfiguration}=await import('./mediaStorage');if((await storageConfiguration()).provider==='r2')return null;}
     storage.maxOperationRetryTime=30000;
     try{return await getDownloadURL(ref(storage,customPath))}catch(error){if((error as {code?:string}).code==='storage/object-not-found')return null;throw new Error(importError(error))}
   }
   // Upload audio/diagrams to Firebase Storage
   async uploadMedia(file: File | Blob, customPath: string, onProgress?:(sent:number,total:number)=>void): Promise<string> {
     try {
+      if(/^(audio|image)\//.test(file.type)){const {uploadToR2}=await import('./mediaStorage');const url=await uploadToR2(file,onProgress);if(url)return url;}
       storage.maxOperationRetryTime=30000;storage.maxUploadRetryTime=120000;
       const task=uploadBytesResumable(ref(storage,customPath),file);
       const snap=await new Promise<import('firebase/storage').UploadTaskSnapshot>((resolve,reject)=>{
