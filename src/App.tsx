@@ -1,3 +1,4 @@
+import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
 import {FolderPage} from "./components/FolderPage";
 import {TestSetup} from "./components/TestSetup";
@@ -149,6 +150,7 @@ export default function App() {
 
   // Upload progress modal
   const [uploadProgress, setUploadProgress] = useState<string | null>(null);
+  const [importProgress,setImportProgress]=useState<ImportProgress>({phase:'unpack',label:'Opening files',percent:0});
   const [importPlan,setImportPlan]=useState<ImportPlan|null>(null);
   const importPlanRef=useRef<ImportPlan|null>(null);
   const preparingImport=useRef(false);
@@ -158,13 +160,14 @@ export default function App() {
   const [uploadReport, setUploadReport] = useState<{
     imported: number;
     duplicates: number;
-    errors: string[];
+    errors: string[];audioOriginalBytes?:number;audioStoredBytes?:number;
   } | null>(null);
 
   // Toast notifications
   const [toastMessage, setToastMessage] = useState<string | null>(null);
   const toastTimeoutRef = useRef<NodeJS.Timeout | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
+  const uploadSkillRef=useRef<'reading'|'listening'>('reading');
 
   const notify = useCallback((msg: string) => {
     if (toastTimeoutRef.current) clearTimeout(toastTimeoutRef.current);
@@ -836,60 +839,80 @@ export default function App() {
   };
 
   // Prepare locally, then wait for the owner's explicit import selection.
-  const handleUploadFiles = async (files: File[]) => {
+  const handleUploadFiles = async (files: File[],skill?:'reading'|'listening') => {
     if (!files.length || userRole !== "admin" || preparingImport.current || importing.current) return;
     preparingImport.current=true;
+    setImportProgress({phase:'unpack',label:'Opening files',percent:0});
     setUploadProgress("Preparing local preview…");setUploadReport(null);
     try {
-      const plan=await prepareImport(files);
+      const plan=await prepareImport(files,skill||uploadSkillRef.current,setImportProgress);
       const seen=new Map<string,{title:string;folder:string}>();
       for(const candidate of plan.candidates){const match=contentMatch(candidate.test.contentHash||"",tests);candidate.match=match?{title:match.title,folder:match.folderPath||"Unfiled"}:seen.get(candidate.test.contentHash||"");seen.set(candidate.test.contentHash||"",{title:candidate.test.title,folder:"this upload"});}
       closeImportPreview();importPlanRef.current=plan;setImportPlan(plan);
-    }catch(error){notify(error instanceof Error?error.message:String(error));}
+    }catch(error){setUploadReport({imported:0,duplicates:0,errors:['Preparing ZIP preview: '+importError(error)]});}
     finally{preparingImport.current=false;setUploadProgress(null);}
   };
   const confirmImport=async (items:ImportCandidate[])=>{
     const plan=importPlanRef.current;
     if(!plan||userRole!=="admin"||importing.current||!items.length)return;
     importing.current=true;setImportPlan(null);setUploadProgress("Uploading test media…");
+    setImportProgress({phase:'verify',label:'Checking selected media',percent:0});
+    let currentStep='Checking selected media';let audioOriginalBytes=0,audioStoredBytes=0;
     let imported=0,duplicates=items.filter(item=>item.match).length,completed=false;
     const errors=[...plan.errors];
     try {
-      const digests=await mediaDigests([...plan.images,...(plan.recordings||[])]);
+      const digests=await mediaDigests([...plan.images,...(plan.recordings||[])],(done,total)=>setImportProgress({phase:'verify',label:'Checking selected media',percent:5*done/Math.max(1,total)}));
       for(const item of items)item.test.contentHash=await contentHash(item.test,digests);
-      const assets=new Map<string,string>();
+      const assets=new Map<string,string>(),audioNames=new Map<string,string>(),audioSizes=new Map<string,number>();
+      const uploadedAudio=new Map<string,{url:string;name:string;size:number}>();
       const selectedContent=JSON.stringify(items);
-      for(const image of [...plan.images,...(plan.recordings||[])]) {
-        if(!selectedContent.includes(image.url))continue;
-        // A missing diagram must never become an expired blob URL in a saved test.
-        setUploadProgress(`Uploading ${image.name}…`);
-        assets.set(image.url,await firestoreAdapter.uploadMedia(image.blob,`media/${createId()}-${image.name.split('/').pop()}`));
+      const media=[...plan.images,...(plan.recordings||[])].filter(image=>selectedContent.includes(image.url));
+      const totalBytes=media.reduce((sum,image)=>sum+image.blob.size,0);let sentBytes=0;
+      for(const [mediaIndex,image] of media.entries()) {
+        const isAudio=plan.recordings?.some(recording=>recording.url===image.url),digest=digests.get(image.url)!;
+        const reused=isAudio?uploadedAudio.get(digest):undefined;
+        if(reused){audioSizes.set(image.url,reused.size);audioOriginalBytes+=image.blob.size;audioStoredBytes+=reused.size;assets.set(image.url,reused.url);audioNames.set(image.url,image.name.replace(/\.[^.]+$/,'')+'.'+reused.name.split('.').pop());sentBytes+=image.blob.size;continue}
+        const from=5+80*sentBytes/Math.max(1,totalBytes),span=80*image.blob.size/Math.max(1,totalBytes);
+        let blob=image.blob,name=image.name;
+        if(isAudio){
+          currentStep='Compressing '+image.name;setUploadProgress(currentStep);
+          const {compressListeningAudio}=await import('./services/audioCompression');
+          const compressed=await compressListeningAudio(blob,name,(percent,label)=>setImportProgress({phase:'compress',label,percent:from+span*.45*percent/100,detail:image.name}));
+          blob=compressed.blob;name=compressed.name;audioSizes.set(image.url,blob.size);audioOriginalBytes+=image.blob.size;audioStoredBytes+=blob.size;audioNames.set(image.url,name);
+          setImportProgress({phase:'compress',label:'Audio ready',percent:from+span*.45,detail:`${name}: ${(image.blob.size/1048576).toFixed(1)} MB to ${(blob.size/1048576).toFixed(1)} MB`});
+        }
+        currentStep='Uploading '+name;setUploadProgress(currentStep);
+        const path=isAudio?`media/audio/48k-v1/${digest}.${name.split('.').pop()}`:`media/${createId()}-${name.split('/').pop()}`;
+        const existing=isAudio?await firestoreAdapter.existingMedia(path):null;
+        const url=existing||await firestoreAdapter.uploadMedia(blob,path,(sent,total)=>setImportProgress({phase:'upload',label:`Uploading file ${mediaIndex+1} of ${media.length}`,percent:from+span*((isAudio?.45:0)+(isAudio?.55:1)*sent/Math.max(1,total)),detail:`${name} — ${(sent/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB${isAudio?' (original '+(image.blob.size/1048576).toFixed(1)+' MB)':''}`}));
+        assets.set(image.url,url);if(isAudio)uploadedAudio.set(digest,{url,name,size:blob.size});sentBytes+=image.blob.size;
       }
-      const candidates=items.map(c=>({...c,test:replaceImportAssets(c.test,assets)}));
+      const candidates=items.map(c=>({...c,test:replaceImportAssets({...c.test,parts:c.test.parts.map(p=>({...p,...(p.audio&&audioNames.has(p.audio)?{audioName:audioNames.get(p.audio)}:{})})),audioFiles:c.test.audioFiles?.map(file=>({...file,name:audioNames.get(file.url)||file.name,size:audioSizes.get(file.url)||file.size}))},assets)}));
       // 3. Save candidates to Firestore with duplicate detection
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          await firestoreAdapter.saveTestComplete(item.test,folders);
+          currentStep='Saving '+item.test.title;
+          setImportProgress({phase:'save',label:`Saving test ${idx+1} of ${candidates.length}`,percent:85+15*idx/Math.max(1,candidates.length),detail:item.test.title});
+          await withImportTimeout(firestoreAdapter.saveTestComplete(item.test,folders),'Saving '+item.test.title);
           imported++;
         } catch (saveErr) {
+          if((saveErr as {code?:string}).code==='import/save-timeout')throw saveErr;
           errors.push(
-            `${item.name}: ${saveErr instanceof Error ? saveErr.message : String(saveErr)}`,
+            `${item.name}: saving test: ${importError(saveErr)}`,
           );
         }
       }
 
-      setUploadReport({ imported, duplicates, errors });completed=true;
+      setImportProgress({phase:'save',label:'Import complete',percent:100});
+      setUploadReport({ imported, duplicates, errors,audioOriginalBytes,audioStoredBytes });completed=true;
       await loadData();
       notify(
         `Import complete: ${imported} imported, ${duplicates} content matches kept as new copies.`,
       );
     } catch (topErr) {
-      if(!completed)setImportPlan(plan);
-      notify(
-        "Upload failed: " +
-          (topErr instanceof Error ? topErr.message : String(topErr)),
-      );
+      // Keep the preview hidden until the error report is dismissed.
+      setUploadReport({imported,duplicates,errors:[...errors,currentStep+': '+importError(topErr)]});
     } finally {
       importing.current=false;if(completed)closeImportPreview();setUploadProgress(null);
     }
@@ -1128,7 +1151,7 @@ export default function App() {
                 onUpdateProfile={handleUpdateProfile}
                 onViewStudents={() => setRoute("students")}
                 onExportTestBank={handleExportBank}
-                onOpenUpload={() => fileInputRef.current?.click()}
+                onOpenUpload={(skill?:'reading'|'listening') => {uploadSkillRef.current=skill||'reading';fileInputRef.current?.click();}}
                 onNotify={notify}
               />
             )}
@@ -1188,7 +1211,7 @@ export default function App() {
                 onExportTest={handleExportTest}
                 onArchiveToggle={handleArchiveToggle}
                 onExportBank={handleExportBank}
-                onOpenUpload={() => fileInputRef.current?.click()}
+                onOpenUpload={(skill?:'reading'|'listening') => {uploadSkillRef.current=skill||'reading';fileInputRef.current?.click();}}
                 onUploadFiles={handleUploadFiles}
                 onToggleReportStatus={handleToggleReportStatus}
                 onToggleLearnerStatus={handleToggleLearnerStatus}
@@ -1245,7 +1268,7 @@ export default function App() {
         />
       )}
 
-      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} folders={folders} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
+      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} folders={folders} tests={tests} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
       {/* Upload Progress Modal */}
       {(uploadProgress || uploadReport) && (
         <dialog
@@ -1264,7 +1287,7 @@ export default function App() {
             {uploadReport && (
               <button
                 className="studio-quiet"
-                onClick={() => setUploadReport(null)}
+                onClick={() => {setUploadReport(null);if(importPlanRef.current)setImportPlan(importPlanRef.current);}}
               >
                 ✕
               </button>
@@ -1274,10 +1297,9 @@ export default function App() {
           {uploadProgress && (
             <div className="studio-drop">
               <strong>{uploadProgress}</strong>
-              <p>
-                Unpacking ZIP archives, sanitizing markup, and verifying answer
-                keys…
-              </p>
+              <div className="import-progress-track"><progress aria-label="Import progress" max={100} value={importProgress.percent}/><strong>{Math.floor(importProgress.percent)}%</strong></div>
+              <p role="status">{importProgress.label}</p><p className="import-progress-file">{importProgress.detail}</p>
+              <p>Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
             </div>
           )}
 
@@ -1287,6 +1309,7 @@ export default function App() {
                 <strong>{uploadReport.imported}</strong> tests imported · <strong>{uploadReport.duplicates}</strong> content matches imported as copies.
               </p>
 
+              {!!uploadReport.audioOriginalBytes&&<p>Audio size: {(uploadReport.audioOriginalBytes/1048576).toFixed(1)} MB to {((uploadReport.audioStoredBytes||0)/1048576).toFixed(1)} MB ({Math.round(100*(1-(uploadReport.audioStoredBytes||0)/uploadReport.audioOriginalBytes))}% smaller).</p>}
               {uploadReport.errors.length > 0 && (
                 <div
                   className="studio-callout"
@@ -1299,7 +1322,7 @@ export default function App() {
                     {uploadReport.errors.map((err, i) => (
                       <li key={i}>{err}</li>
                     ))}
-                  </ul>
+                  </ul><label>Copyable error details<textarea className="import-error-details" aria-label="Upload error details" readOnly value={uploadReport.errors.join('\n')} onFocus={e=>e.target.select()}/></label><button className="studio-secondary" onClick={()=>void navigator.clipboard.writeText(uploadReport.errors.join('\n')).then(()=>notify('Error details copied.')).catch(()=>notify('Select the error details and copy them.'))}>Copy error details</button>
                 </div>
               )}
 
@@ -1312,7 +1335,7 @@ export default function App() {
               >
                 <button
                   className="studio-primary"
-                  onClick={() => setUploadReport(null)}
+                  onClick={() => {setUploadReport(null);if(importPlanRef.current)setImportPlan(importPlanRef.current);}}
                 >
                   Done
                 </button>

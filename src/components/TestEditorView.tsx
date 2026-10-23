@@ -326,7 +326,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           </button>
         </div>
 
-        {test.skill==='listening'&&<ListeningMediaEditor test={test} onChange={setTest} onBusyChange={setAudioBusy} onUpload={async file=>{const blob=new Blob([file],{type:audioMime(file.name)});const id=createId();const url=await firestoreAdapter.uploadMedia(blob,`tests/${test.id}/audio/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`);return {id,name:file.name,url,size:file.size};}}/>}
+        {test.skill==='listening'&&<ListeningMediaEditor test={test} onChange={setTest} onBusyChange={setAudioBusy} onUpload={async (file,onProgress)=>{const blob=new Blob([file],{type:audioMime(file.name)});const id=createId();const url=await firestoreAdapter.uploadMedia(blob,`tests/${test.id}/audio/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`,(sent,total)=>onProgress?.(100*sent/Math.max(1,total)));return {id,name:file.name,url,size:file.size};}}/>}
 
         {/* Passage / Transcript Editor */}
         <div style={{ marginTop: '20px' }}>

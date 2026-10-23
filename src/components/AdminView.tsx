@@ -20,7 +20,7 @@ interface AdminViewProps {
   reports: ContentReport[];
   learners: UserProfile[];
   adminUid: string;
-  onUploadFiles: (files: File[]) => Promise<void>;
+  onUploadFiles: (files: File[],skill?:'reading'|'listening') => Promise<void>;
   onNewTest: () => void;
   onDeleteTest: (id: string) => Promise<void>;
   onRestoreTest: (id: string) => Promise<void>;
@@ -35,7 +35,7 @@ interface AdminViewProps {
   onExportTest: (testId: string) => void;
   onArchiveToggle: (testId: string) => void;
   onExportBank: () => void;
-  onOpenUpload: () => void;
+  onOpenUpload: (skill?:'reading'|'listening') => void;
   onToggleReportStatus: (report: ContentReport) => Promise<void>;
   onToggleLearnerStatus: (
     targetUserId: string,
@@ -82,7 +82,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [skillFilter,setSkillFilter]=useState('');
+  const [skillFilter,setSkillFilter]=useState('reading');
+  const [uploadSkill,setUploadSkill]=useState<'reading'|'listening'>('reading');
   const [statusFilter,setStatusFilter]=useState('');
   const [qualityFilter,setQualityFilter]=useState(false);
   const [page,setPage]=useState(0);
@@ -173,30 +174,29 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <button className="studio-primary" onClick={onNewTest}>
             <Plus size={16}/> New test
           </button>
-          <button className="studio-secondary" onClick={onOpenUpload}>
-            <Upload size={16}/> Import tests
-          </button>
+          <button className="studio-secondary" onClick={()=>onOpenUpload('reading')}>
+            <Upload size={16}/> Upload Reading
+          </button><button className="studio-secondary" onClick={()=>onOpenUpload('listening')}><Upload size={16}/> Upload Listening</button>
         </div>
       </div>
 
-      {section === "upload" && <section
+      {section === "upload" && <><div className="collection-view-tabs" aria-label="Upload skill">{(['reading','listening'] as const).map(skill=><button key={skill} aria-pressed={uploadSkill===skill} className={uploadSkill===skill?'active':''} onClick={()=>setUploadSkill(skill)}>Upload {skill==='reading'?'Reading':'Listening'}</button>)}</div><section
         className="admin-dropzone"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
           e.preventDefault();
-          void onUploadFiles(Array.from(e.dataTransfer.files));
+          void onUploadFiles(Array.from(e.dataTransfer.files),uploadSkill);
         }}
       >
-        <strong>Drop ZIP, HTML, or JSON tests here</strong>
+        <strong>Drop {uploadSkill==='reading'?'Reading':'Listening'} ZIP, HTML, or JSON tests here</strong>
         <p>
-          Nested ZIPs and JSON backups are supported. You can also select an
-          unzipped folder with its diagrams.
+          {uploadSkill==='listening'?'Include the audio files inside the ZIP. Review recordings and transcripts before importing.':'Include the passages, questions and diagrams. Review the test before importing.'}
         </p>
         <button
           className="studio-secondary"
           onClick={() => folderInput.current?.click()}
         >
-          Upload a folder
+          Upload {uploadSkill==='reading'?'Reading':'Listening'} folder
         </button>
         <input
           ref={(e) => {
@@ -207,11 +207,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
           multiple
           hidden
           onChange={(e) => {
-            if (e.target.files) void onUploadFiles(Array.from(e.target.files));
+            if (e.target.files) void onUploadFiles(Array.from(e.target.files),uploadSkill);
             e.target.value = "";
           }}
         />
-      </section>}
+      </section></>}
       {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
       <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
       {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are imported as drafts by default, ready for review.</p></section>}
@@ -232,7 +232,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </button>
           </div>
 
-          {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}/>}
+          {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} skill={skillFilter==='listening'?'listening':'reading'} onSkillChange={skill=>{setSkillFilter(skill);setCollectionFilter('');setSelected([]);}} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}/>}
           <div className="admin-filters">
             <label>Skill<Select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></Select></label>
             <label>Status<Select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></Select></label>

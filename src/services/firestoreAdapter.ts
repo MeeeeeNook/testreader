@@ -1,3 +1,4 @@
+import {importError} from "./importProgress";
 import {contentHash} from "./importIdentity";
 import {organizationPatch,type LibraryFolder,type MenuFolder} from "./folders";
 import { sectionSummaries } from "./portal";
@@ -19,7 +20,7 @@ import {
   startAfter,
   DocumentSnapshot,
 } from "firebase/firestore";
-import { ref, uploadBytes, getDownloadURL } from "firebase/storage";
+import { ref, uploadBytesResumable, getDownloadURL } from "firebase/storage";
 import {
   db,
   auth,
@@ -433,16 +434,26 @@ export class FirestoreAdapter {
     }
   }
 
+  async existingMedia(customPath:string):Promise<string|null>{
+    storage.maxOperationRetryTime=30000;
+    try{return await getDownloadURL(ref(storage,customPath))}catch(error){if((error as {code?:string}).code==='storage/object-not-found')return null;throw new Error(importError(error))}
+  }
   // Upload audio/diagrams to Firebase Storage
-  async uploadMedia(file: File | Blob, customPath: string): Promise<string> {
+  async uploadMedia(file: File | Blob, customPath: string, onProgress?:(sent:number,total:number)=>void): Promise<string> {
     try {
-      const storageRef = ref(storage, customPath);
-      const snap = await uploadBytes(storageRef, file);
-      const url = await getDownloadURL(snap.ref);
-      return url;
+      storage.maxOperationRetryTime=30000;storage.maxUploadRetryTime=120000;
+      const task=uploadBytesResumable(ref(storage,customPath),file);
+      const snap=await new Promise<import('firebase/storage').UploadTaskSnapshot>((resolve,reject)=>{
+        let sent=-1,settled=false;
+        const finish=(error?:unknown)=>{if(settled)return;settled=true;clearTimeout(timer);if(error)reject(error);else resolve(task.snapshot);};
+        const timeout=()=>{finish(Object.assign(new Error('No upload progress for 120 seconds. File: '+customPath.split('/').pop()),{code:'storage/upload-timeout'}));task.cancel();};
+        let timer=setTimeout(timeout,120000);
+        task.on('state_changed',snapshot=>{if(snapshot.bytesTransferred!==sent){sent=snapshot.bytesTransferred;clearTimeout(timer);timer=setTimeout(timeout,120000)}onProgress?.(snapshot.bytesTransferred,snapshot.totalBytes);},error=>finish(error),()=>finish());
+      });
+      return await getDownloadURL(snap.ref);
     } catch (error) {
-      console.error("Storage upload failed:", error);
-      throw new Error("The media file could not be uploaded. Check Firebase Storage access and retry. Your test has not been changed.");
+      console.error('Storage upload failed:',error);
+      throw new Error(importError(error));
     }
   }
 
