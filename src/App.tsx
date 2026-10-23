@@ -1,3 +1,5 @@
+import {lookupVocabulary} from "./services/dictionary";
+import {FolderPage} from "./components/FolderPage";
 import {TestSetup} from "./components/TestSetup";
 import {directSession,examMinutes} from "./services/sessionSettings";
 import {SignInView} from "./components/SignInView";
@@ -69,8 +71,11 @@ export default function App() {
     cancelNavigation,
   } = usePageRouter();
   const route = page.name;
+
   const setupBackground=useRef('/practice');
-  useEffect(()=>{if(['practice','library','full'].includes(route))setupBackground.current=location;},[route,location]);
+  useEffect(()=>{if(['practice','library','full','folder'].includes(route))setupBackground.current=location;},[route,location]);
+  const catalogLocation=route==='test'?setupBackground.current:location;
+  const catalogFolder=/^\/folders\/([^/?]+)/.exec(catalogLocation);
   const [authReady, setAuthReady] = useState(false);
   const [syncStatus, setSyncStatus] = useState<
     "local" | "syncing" | "synced" | "offline"
@@ -222,6 +227,8 @@ export default function App() {
     });
     return unsubscribe;
   }, []);
+
+  useEffect(()=>{if(authReady&&user&&route==='home')navigate('/practice',true);},[authReady,user?.uid,route,navigate]);
 
   // Sync theme, font size, language with document root
   useEffect(() => {
@@ -476,6 +483,9 @@ export default function App() {
   // Vocabulary handlers
   const handleSaveWord = async (word: Partial<VocabularyItem>) => {
     if (!user) { notify(false ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
+    const owner=user.uid;
+    if(!word.meaning?.trim())word={...word,...await lookupVocabulary(word.word||'',word.example||'')};
+    if(previousUser.current!==owner)throw new Error('Your account changed. Please save the word again.');
     const duplicate=!word.id?vocabulary.find(item=>!item.archived&&item.word.toLowerCase()===word.word?.trim().toLowerCase()&&item.meaning===word.meaning?.trim()):undefined;
     const id = word.id || duplicate?.id || createId();
     const item: VocabularyItem = {
@@ -490,6 +500,7 @@ export default function App() {
       updatedAt: Date.now(),
     };
     await firestoreAdapter.put("vocabulary", item);
+    if(previousUser.current!==owner)return;
     setVocabulary((prev) => {
       const idx = prev.findIndex((w) => w.id === id);
       const next =
@@ -689,7 +700,7 @@ export default function App() {
       const clearing=new Set(unfiledIds);
       const patches=tests.flatMap(test=>{
         const patch=organizationPatch(clearing.has(test.id)?{...test,folderId:null}:test,next),stored=storedTests.find(t=>t.id===test.id)!;
-        return stored.folderId!==patch.folderId||(stored.folderPath||'')!==patch.folderPath||JSON.stringify(stored.fullTestMenuFolders||[])!==JSON.stringify(patch.fullTestMenuFolders)?[{id:test.id,...patch}]:[];
+        return stored.folderId!==patch.folderId||(stored.folderPath||'')!==patch.folderPath||JSON.stringify(stored.fullTestMenuFolders||[])!==JSON.stringify(patch.fullTestMenuFolders)||JSON.stringify(stored.folderPages||[])!==JSON.stringify(patch.folderPages)?[{id:test.id,...patch}]:[];
       });
       await firestoreAdapter.updateTestOrganizations(patches);
       const updates=new Map(patches.map(p=>[p.id,p]));
@@ -947,6 +958,8 @@ export default function App() {
     );
   }
 
+  const loadCatalogSummary=async(test:TestMeta)=>{const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;};
+
   return (
     <div id="studioHub" className="studio-hub">
       {pendingNavigation && (
@@ -1006,7 +1019,7 @@ export default function App() {
                 )}
               </div>
             )}
-            {catalogError && ["library", "practice", "full"].includes(route) && (
+            {catalogError && ["library", "practice", "full", "folder"].includes(route) && (
               <div className="studio-callout" role="alert">
                 Library unavailable: {catalogError}{" "}
                 <button
@@ -1055,8 +1068,9 @@ export default function App() {
                 </div>
               )}
             {route === "sign-in" && <SignInView location={location} onNavigate={navigate}/>}
-            {route === "home" && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
-            {["library", "practice", "full", "test"].includes(route) && <PracticeCatalog tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"||(route==='test'&&setupBackground.current.startsWith('/full-tests'))} category={page.category} location={route==='test'?setupBackground.current:location} onNavigate={navigate} loadSummary={async test => {const patch=await firestoreAdapter.getCatalogSummary(test);setTests(previous=>previous.map(item=>item.id===test.id?{...item,...patch}:item));return patch;}} />}
+            {route === "home" && authReady && !user && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
+            {(route==='folder'||(route==='test'&&catalogFolder))&&<FolderPage id={route==='folder'?page.id||'':decodeURIComponent(catalogFolder![1])} folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} location={catalogLocation} onNavigate={navigate} loading={!catalogLoaded} loadSummary={loadCatalogSummary}/>}
+            {["library", "practice", "full", "test"].includes(route) && !(route==='test'&&catalogFolder) && <PracticeCatalog folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"||(route==='test'&&setupBackground.current.startsWith('/full-tests'))} category={page.category} location={route==='test'?setupBackground.current:location} onNavigate={navigate} loadSummary={loadCatalogSummary} />}
 
 
 

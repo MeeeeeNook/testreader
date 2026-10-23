@@ -152,13 +152,14 @@ export class FirestoreAdapter {
       "folderId",
       "folderPath",
       "fullTestMenuFolders",
+      "folderPages",
     ] as const)
       if (changes[key] !== undefined) allowed[key] = changes[key];
     await setDoc(doc(db, "tests", id), allowed, { merge: true });
     this.testCache.delete(id);
   }
 
-  async updateTestOrganizations(patches:({id:string;folderId:string|null;folderPath:string;fullTestMenuFolders:MenuFolder[]})[]):Promise<void>{
+  async updateTestOrganizations(patches:({id:string;folderId:string|null;folderPath:string;fullTestMenuFolders:MenuFolder[];folderPages?:import("./folders").PublicFolder[]})[]):Promise<void>{
     if((await this.getRole())!=="admin")throw new Error("Administrator access required.");
     // Write metadata only, in bounded batches; never touch questions or answer keys.
     for(let offset=0;offset<patches.length;offset+=400){

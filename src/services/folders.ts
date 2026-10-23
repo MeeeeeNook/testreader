@@ -1,11 +1,28 @@
 import type {TestMeta} from '../types';
-export interface LibraryFolder {id:string;name:string;parentId:string|null;createdAt:number;updatedAt:number;deletedAt?:number|null;showInFullTestMenu?:boolean}
+export interface LibraryFolder {id:string;name:string;parentId:string|null;createdAt:number;updatedAt:number;description?:string;deletedAt?:number|null;showInFullTestMenu?:boolean}
+export interface PublicFolder {id:string;name:string;path:string;parentId:string|null;description?:string}
 export interface MenuFolder {id:string;path:string}
 const normalizePath=(path:string)=>path.split(/[\\/]/).map(s=>s.trim().normalize('NFC')).filter(Boolean).join(' / ');
 // Stable, encoded paths avoid random IDs when recovering a missing registry.
 const recoveredId=(path:string)=>'folder_'+encodeURIComponent(path);
 export function reconcileLibrary(folders:LibraryFolder[],tests:TestMeta[]) {
- const next=folders.map(f=>({...f})),byPath=new Map(folderOptions(next).map(f=>[f.path,f.id]));
+ const published=new Map<string,PublicFolder>();
+ for(const test of [...tests].sort((a,b)=>a.updatedAt-b.updatedAt)){
+  for(const menu of test.fullTestMenuFolders||[])published.set(menu.id,{id:menu.id,name:normalizePath(menu.path).split(' / ').at(-1)||menu.path,path:normalizePath(menu.path),parentId:null});
+  for(const folder of test.folderPages||[])published.set(folder.id,{...folder});
+ }
+ const knownPaths=new Map([...published.values()].map(folder=>[folder.path,folder.id]));
+ for(const folder of [...published.values()]){
+  const parts=folder.path.split(' / ');
+  for(let index=0;index<parts.length-1;index++){
+   const path=parts.slice(0,index+1).join(' / ');
+   if(!knownPaths.has(path)){const id=recoveredId(path);knownPaths.set(path,id);published.set(id,{id,name:parts[index],path,parentId:null});}
+  }
+ }
+ for(const folder of published.values()){const parentPath=folder.path.split(' / ').slice(0,-1).join(' / ');folder.parentId=parentPath?knownPaths.get(parentPath)||null:null;}
+ const next=folders.map(f=>({...f}));
+ for(const folder of published.values())if(!next.some(f=>f.id===folder.id))next.push({...folder,createdAt:0,updatedAt:0});
+ const byPath=new Map(folderOptions(next).map(f=>[f.path,f.id]));
  const assignments=new Map<string,string>();
  for(const test of [...tests].sort((a,b)=>a.id.localeCompare(b.id))){
   // A known ID is authoritative, including deleted folders. Do not resurrect them.
@@ -40,8 +57,15 @@ export function fullTestMenu(tests:TestMeta[]){
  for(const test of full){const seen=new Set<string>();for(const f of test.fullTestMenuFolders||[]){if(!f.id||!f.path||seen.has(f.id))continue;seen.add(f.id);const current=entries.get(f.id);entries.set(f.id,{id:f.id,path:f.path,count:(current?.count||0)+1});}}
  return {full,folders:[...entries.values()].sort((a,b)=>a.path.localeCompare(b.path,undefined,{numeric:true}))};
 }
+export const folderLink=(id:string)=>'/folders/'+encodeURIComponent(id);
+export function publicFolderPages(test:Pick<TestMeta,'folderId'>,folders:LibraryFolder[]):PublicFolder[]{
+ return folderOptions(folders).filter(folder=>isFolderWithin(test.folderId,folder.id,folders)).map(folder=>({id:folder.id,name:folder.name,path:folder.path,parentId:folder.parentId,description:folders.find(f=>f.id===folder.id)?.description?.trim()||''}));
+}
+export function folderDescription(folder:Pick<PublicFolder,'name'|'path'|'description'>){
+ return folder.description?.trim()||`Explore IELTS reading and listening material in ${folder.path}. Choose a full test or practise one passage or section at your own pace.`;
+}
 export function organizationPatch(test:TestMeta,folders:LibraryFolder[]){
- return {folderId:test.folderId||null,folderPath:folderLocation(test.folderId,folders),fullTestMenuFolders:menuFoldersForTest(test,folders)};
+ return {folderId:test.folderId||null,folderPath:folderLocation(test.folderId,folders),fullTestMenuFolders:menuFoldersForTest(test,folders),folderPages:publicFolderPages(test,folders)};
 }
 export function folderLocation(id:string|null|undefined,folders:LibraryFolder[]):string {
  if(!id)return '';const names:string[]=[],seen=new Set<string>();let next:string|null|undefined=id;

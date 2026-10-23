@@ -20,6 +20,15 @@ export async function lookupDictionary(word:string,signal?:AbortSignal,fetcher:t
   cache.set(key,entry);return entry;
 }
 
+// Save all dictionary senses, rather than guessing a meaning from the passage.
+export async function lookupVocabulary(word:string,context='') {
+  const entry=await lookupDictionary(word);
+  const meanings=entry.results.flatMap(result=>result.meanings);
+  const unique=[...new Set(meanings.map(meaning=>meaning.definition.trim()))];
+  const parts=[...new Set(meanings.map(meaning=>meaning.pos?.trim()).filter((part):part is string=>!!part))];
+  return {word:entry.word,meaning:unique.join('\n'),partOfSpeech:parts.join(' · ')||'term',example:context||meanings.find(meaning=>meaning.example)?.example||''};
+}
+
 export function vocabularyFromMeaning(entry:DictionaryEntry,meaning:DictionaryMeaning,context='') {
   return {word:entry.word,meaning:meaning.definition,example:meaning.example||context,partOfSpeech:meaning.pos||'term'};
 }
