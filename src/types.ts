@@ -141,6 +141,9 @@ export interface AttemptRecord {
 }
 
 export interface VocabularyItem {
+  dictionarySource?:'minhqnd'|'wiktionary';
+  definitionLanguage?:string;
+  phonetic?:string;
   id: string;
   owner: string;
   word: string;
