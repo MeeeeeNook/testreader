@@ -1,3 +1,5 @@
+import {readR2Config,listR2Files,MediaStorageError} from './r2Storage';
+import {registerMediaRoutes} from './mediaRoutes';
 import {getStorage} from "firebase-admin/storage";
 import {summarizeFiles} from "../src/services/storageUsage";
 import { registerPortalRoutes } from "./portalRoutes";
@@ -108,6 +110,7 @@ async function caller(req: express.Request) {
     identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerMediaRoutes(app,async req=>{const identity=await caller(req);if(!identity.isAdmin)throw new AssessmentError(403,'Administrator access required.');return identity;},()=>backend().bucket);
 async function optionalCaller(req: express.Request) {
   const token = /^Bearer (.+)$/i.exec(req.headers.authorization || "")?.[1];
   const { auth, db } = backend();
@@ -331,6 +334,7 @@ app.post("/api/admin/storage-usage", async (req,res)=>{
   try {
     const {isAdmin}=await caller(req);
     if(!isAdmin)throw new AssessmentError(403,"Administrator access required.");
+    const r2=readR2Config();if(r2){const inventory=await listR2Files(r2);res.json({...summarizeFiles(inventory.files),truncated:inventory.truncated,provider:'r2',bucket:r2.bucket,scannedAt:Date.now()});return;}
     const { bucket } = backend();
     let targetBucket = bucket;
     const files:{name:string;size:number}[]=[];
@@ -366,6 +370,10 @@ app.post("/api/admin/storage-usage", async (req,res)=>{
       bucket: targetBucket.name,
     });
   }catch(error){
+    if (error instanceof MediaStorageError) {
+      res.status(error.status).json({code:error.code,error:`[${error.code}] ${error.message}`});
+      return;
+    }
     console.error("Storage inventory failed:", error);
     if (error instanceof AssessmentError) {
       return res.status(error.status).json({ error: error.message });

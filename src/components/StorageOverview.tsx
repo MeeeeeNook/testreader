@@ -12,7 +12,7 @@ interface Inventory {
   scannedAt: number;
   largest: { name: string; size: number }[];
   truncated: boolean;
-  bucket?: string;
+  bucket?: string;provider?:'r2'|'firebase';
 }
 
 interface TestError {
@@ -99,7 +99,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
           <h2>
             <HardDrive size={22} /> Resource storage
           </h2>
-          <p>Inspect Cloud Storage media assets and Firestore test document usage.</p>
+          <p>Inspect media storage assets and Firestore test document usage.</p>
         </div>
         <button
           className="studio-secondary"
@@ -189,6 +189,7 @@ export function StorageOverview({ tests }: { tests: TestMeta[] }) {
       {measureProgress && <p role="status">{measureProgress}</p>}
       {busyStorage && !measureProgress && <p role="status">Checking Cloud Storage bucket…</p>}
 
+      {inventory&&<p>Media provider: {inventory.provider==='r2'?'Cloudflare R2':'Firebase Storage'}</p>}
       {storageError && (
         <div role="alert" style={{ marginTop: '14px', padding: '12px', background: '#fdf2f2', border: '1px solid #f5c6cb', borderRadius: '10px', color: '#721c24' }}>
           <strong>Cloud Storage unavailable: </strong>

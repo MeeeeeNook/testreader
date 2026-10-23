@@ -1,3 +1,155 @@
+// server/r2Storage.ts
+import { createHash, createHmac } from "node:crypto";
+var MediaStorageError = class extends Error {
+  constructor(code, message, status = 503) {
+    super(message);
+    this.code = code;
+    this.status = status;
+  }
+};
+var r2Fields = ["R2_ACCOUNT_ID", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY", "R2_BUCKET_NAME", "R2_PUBLIC_BASE_URL"];
+function readR2Config(env = process.env) {
+  if (!r2Fields.some((key) => env[key])) return null;
+  const missing = r2Fields.filter((key) => !env[key]?.trim());
+  if (missing.length) throw new MediaStorageError("R2_SETUP_INCOMPLETE", "Missing server settings: " + missing.join(", ") + ". Add these in Vercel, then redeploy.");
+  const publicUrl = new URL(env.R2_PUBLIC_BASE_URL);
+  if (publicUrl.protocol !== "https:" || publicUrl.username || publicUrl.password || publicUrl.search || publicUrl.hash) throw new MediaStorageError("R2_INVALID_CONFIG", "R2_PUBLIC_BASE_URL must be a public HTTPS URL without credentials or query parameters.");
+  if (!/^[a-f0-9]{32}$/i.test(env.R2_ACCOUNT_ID) || !/^[a-z0-9][a-z0-9.-]{1,61}[a-z0-9]$/.test(env.R2_BUCKET_NAME)) throw new MediaStorageError("R2_INVALID_CONFIG", "Check the R2 account ID and bucket name.");
+  return { accountId: env.R2_ACCOUNT_ID, accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, bucket: env.R2_BUCKET_NAME, publicUrl: publicUrl.href.replace(/\/$/, "") };
+}
+var encode = (value) => encodeURIComponent(value).replace(/[!'()*]/g, (char) => "%" + char.charCodeAt(0).toString(16).toUpperCase());
+var hash = (value) => createHash("sha256").update(value).digest("hex");
+var hmac = (key, value) => createHmac("sha256", key).update(value).digest();
+function presign(url, method, credentials, headers = {}, now = /* @__PURE__ */ new Date(), expires = 600, region = "auto") {
+  const result = new URL(url), timestamp = now.toISOString().replace(/[:-]|\.\d{3}/g, ""), day = timestamp.slice(0, 8), scope = day + "/" + region + "/s3/aws4_request";
+  const normalized = Object.fromEntries(Object.entries({ host: result.host, ...headers }).map(([key, value]) => [key.toLowerCase(), value.trim().replace(/\s+/g, " ")]));
+  const names = Object.keys(normalized).sort();
+  result.searchParams.set("X-Amz-Algorithm", "AWS4-HMAC-SHA256");
+  result.searchParams.set("X-Amz-Credential", credentials.accessKeyId + "/" + scope);
+  result.searchParams.set("X-Amz-Date", timestamp);
+  result.searchParams.set("X-Amz-Expires", String(expires));
+  result.searchParams.set("X-Amz-SignedHeaders", names.join(";"));
+  const query = [...result.searchParams.entries()].map(([key, value]) => [encode(key), encode(value)]).sort(([a, av], [b, bv]) => a < b ? -1 : a > b ? 1 : av < bv ? -1 : av > bv ? 1 : 0).map(([key, value]) => key + "=" + value).join("&");
+  const canonical = [method, result.pathname, query, names.map((name) => name + ":" + normalized[name] + "\n").join(""), names.join(";"), "UNSIGNED-PAYLOAD"].join("\n");
+  const signingKey = hmac(hmac(hmac(hmac("AWS4" + credentials.secretAccessKey, day), region), "s3"), "aws4_request");
+  const signature = createHmac("sha256", signingKey).update("AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hash(canonical)).digest("hex");
+  result.search = query + "&X-Amz-Signature=" + signature;
+  return result.href;
+}
+function objectUrl(config, key) {
+  return new URL("https://" + config.accountId + ".r2.cloudflarestorage.com/" + encode(config.bucket) + "/" + key.split("/").map(encode).join("/"));
+}
+var mediaTypes = { "audio/mpeg": "mp3", "audio/mp4": "m4a", "audio/wav": "wav", "audio/ogg": "ogg", "audio/aac": "aac", "audio/flac": "flac", "audio/webm": "webm", "image/png": "png", "image/jpeg": "jpg", "image/webp": "webp", "image/gif": "gif" };
+function validateMedia(input) {
+  const type = String(input?.contentType || "").toLowerCase(), size = Number(input?.size), digest = String(input?.sha256 || "");
+  if (!mediaTypes[type] || !Number.isSafeInteger(size) || size <= 0 || size > (type.startsWith("audio/") ? 150 : 15) * 1024 * 1024 || !/^[a-f0-9]{64}$/.test(digest)) throw new MediaStorageError("INVALID_MEDIA", "Choose a supported audio file up to 150 MB or image up to 15 MB.", 400);
+  return { type, size, key: (type.startsWith("audio/") ? "audio" : "images") + "/" + digest + "." + mediaTypes[type] };
+}
+async function head(config, key, fetcher) {
+  let response;
+  try {
+    response = await fetcher(presign(objectUrl(config, key), "HEAD", config), { method: "HEAD", signal: AbortSignal.timeout(15e3) });
+  } catch {
+    throw new MediaStorageError("R2_CONNECTION_FAILED", "Cannot reach Cloudflare R2. Check the account ID and server network connection.");
+  }
+  if (response.status === 403 || response.status === 401) throw new MediaStorageError("R2_ACCESS_DENIED", "R2 rejected the server credentials. Use a bucket-scoped Object Read & Write token.");
+  if (response.status !== 404 && !response.ok) throw new MediaStorageError("R2_HTTP_" + response.status, "R2 storage check failed (HTTP " + response.status + "). Check the bucket name and R2 access.");
+  return response;
+}
+async function prepareR2Upload(config, input, fetcher = fetch, now = /* @__PURE__ */ new Date()) {
+  const media = validateMedia(input), existing = await head(config, media.key, fetcher), headers = { "Content-Type": media.type };
+  if (existing.ok && Number(existing.headers.get("content-length")) !== media.size) throw new MediaStorageError("R2_OBJECT_MISMATCH", "The stored recording size differs from this file. Contact the site owner.", 409);
+  return { provider: "r2", exists: existing.ok, publicUrl: config.publicUrl + "/" + media.key, headers, ...!existing.ok ? { uploadUrl: presign(objectUrl(config, media.key), "PUT", config, headers, now) } : {} };
+}
+async function checkR2(config, fetcher = fetch) {
+  await head(config, "__ielts_connection_check__", fetcher);
+  return { provider: "r2", ready: true, bucket: config.bucket, message: "R2 credentials accepted. Browser uploads also require the bucket CORS policy and public read access." };
+}
+var xmlText = (value) => value.replace(/&(?:amp|lt|gt|quot|apos);/g, (entity) => ({ "&amp;": "&", "&lt;": "<", "&gt;": ">", "&quot;": '"', "&apos;": "'" })[entity]);
+async function listR2Files(config, fetcher = fetch) {
+  const files = [];
+  let continuation = "", truncated = false;
+  const started = Date.now();
+  do {
+    const url = new URL("https://" + config.accountId + ".r2.cloudflarestorage.com/" + encode(config.bucket));
+    url.searchParams.set("list-type", "2");
+    url.searchParams.set("max-keys", "1000");
+    if (continuation) url.searchParams.set("continuation-token", continuation);
+    const response = await fetcher(presign(url, "GET", config), { signal: AbortSignal.timeout(15e3) });
+    if (!response.ok) throw new MediaStorageError("R2_INVENTORY_FAILED", "Cannot list R2 files (HTTP " + response.status + "). Check the token read/list permissions.");
+    const xml = await response.text();
+    for (const item of xml.matchAll(/<Contents>([\s\S]*?)<\/Contents>/g)) {
+      const name = /<Key>([\s\S]*?)<\/Key>/.exec(item[1])?.[1], size = /<Size>(\d+)<\/Size>/.exec(item[1])?.[1];
+      if (name !== void 0 && size !== void 0) files.push({ name: xmlText(name), size: Number(size) });
+    }
+    truncated = /<IsTruncated>true<\/IsTruncated>/.test(xml);
+    continuation = xmlText(/<NextContinuationToken>([\s\S]*?)<\/NextContinuationToken>/.exec(xml)?.[1] || "");
+    if (truncated && !continuation) throw new MediaStorageError("R2_INVENTORY_RESPONSE", "R2 returned an incomplete listing without a continuation token.");
+  } while (truncated && files.length < 1e4 && Date.now() - started < 2e4);
+  return { files, truncated };
+}
+
+// server/mediaRoutes.ts
+function registerMediaRoutes(app2, authorize, firebaseBucket) {
+  const fail = (res, error) => {
+    const code = error?.code, status = error?.status;
+    if (error instanceof MediaStorageError) return res.status(error.status).json({ code: error.code, error: "[" + error.code + "] " + error.message });
+    if (status === 401 || status === 403) return res.status(status).json({ error: error.message });
+    return res.status(503).json({ code: "MEDIA_STORAGE_UNAVAILABLE", error: "Storage connection check failed. Check server credentials and the storage configuration." });
+  };
+  app2.post("/api/admin/media/config", async (req, res) => {
+    try {
+      await authorize(req);
+      const config = readR2Config();
+      res.json({ provider: config ? "r2" : "firebase", ready: !!config, message: config ? "Cloudflare R2 is configured." : "R2 is not configured. Firebase Storage is currently used." });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+  app2.post("/api/admin/media/check", async (req, res) => {
+    try {
+      await authorize(req);
+      const config = readR2Config();
+      if (config) {
+        res.json(await checkR2(config));
+        return;
+      }
+      try {
+        let timer;
+        try {
+          await Promise.race([firebaseBucket().getMetadata(), new Promise((_, reject) => {
+            timer = setTimeout(() => reject(new MediaStorageError("FIREBASE_STORAGE_TIMEOUT", "Firebase bucket check timed out. Check whether Storage is enabled and the configured bucket exists.")), 15e3);
+            timer.unref?.();
+          })]);
+        } finally {
+          clearTimeout(timer);
+        }
+        res.json({ provider: "firebase", ready: true, message: "Firebase bucket exists and the server can access it. A browser-only upload failure can still indicate CORS, App Check or Storage rules." });
+      } catch (error) {
+        const code = error?.code;
+        if (code === 404) throw new MediaStorageError("FIREBASE_BUCKET_NOT_FOUND", "The configured Firebase Storage bucket does not exist. Enable Storage with a valid bucket, or configure Cloudflare R2.");
+        if (code === 403) throw new MediaStorageError("FIREBASE_STORAGE_ACCESS_DENIED", "The server cannot access this Firebase bucket. Check IAM, enabled Storage and the billing plan.");
+        throw error;
+      }
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+  app2.post("/api/admin/media/prepare", async (req, res) => {
+    try {
+      await authorize(req);
+      const config = readR2Config();
+      if (!config) {
+        res.json({ provider: "firebase" });
+        return;
+      }
+      res.json(await prepareR2Upload(config, req.body));
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+}
+
 // server/app.ts
 import { getStorage } from "firebase-admin/storage";
 
@@ -11,7 +163,7 @@ var slugify = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").to
 var answerPath = (id, sectionId, title) => `/answers/${encodeURIComponent(id)}/${encodeURIComponent(sectionId)}/${slugify(title)}`;
 
 // server/portalRoutes.ts
-import { createHash, randomUUID } from "node:crypto";
+import { createHash as createHash2, randomUUID } from "node:crypto";
 
 // src/services/scoring.ts
 function normalizeAnswer(value) {
@@ -238,7 +390,7 @@ function validateContribution(body) {
   if (body.tests.some((test) => !test || !Array.isArray(test.parts) || !test.parts.length || test.parts.some((p) => !p || typeof p.passageHtml !== "string" || typeof p.questionHtml !== "string" || !Array.isArray(p.questions)))) throw new AssessmentError(400, "The uploaded test content is incomplete.");
   const content = JSON.stringify(body.tests);
   if (Buffer.byteLength(content, "utf8") > 7e5) throw new AssessmentError(400, "This contribution is too large. Upload a smaller test ZIP (under 700 KB after conversion).");
-  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
+  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash2("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
 }
 function registerPortalRoutes(app2, { caller: caller2, backend: backend2, apiError: apiError2 }) {
   const admin = async (req) => {
@@ -518,6 +670,11 @@ async function caller(req) {
   const isAdmin = identity.email === "manhcuong2006ht@gmail.com" && identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerMediaRoutes(app, async (req) => {
+  const identity = await caller(req);
+  if (!identity.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+  return identity;
+}, () => backend().bucket);
 async function optionalCaller(req) {
   const token = /^Bearer (.+)$/i.exec(req.headers.authorization || "")?.[1];
   const { auth, db } = backend();
@@ -691,6 +848,12 @@ app.post("/api/admin/storage-usage", async (req, res) => {
   try {
     const { isAdmin } = await caller(req);
     if (!isAdmin) throw new AssessmentError(403, "Administrator access required.");
+    const r2 = readR2Config();
+    if (r2) {
+      const inventory = await listR2Files(r2);
+      res.json({ ...summarizeFiles(inventory.files), truncated: inventory.truncated, provider: "r2", bucket: r2.bucket, scannedAt: Date.now() });
+      return;
+    }
     const { bucket } = backend();
     let targetBucket = bucket;
     const files = [];
@@ -726,6 +889,10 @@ app.post("/api/admin/storage-usage", async (req, res) => {
       bucket: targetBucket.name
     });
   } catch (error) {
+    if (error instanceof MediaStorageError) {
+      res.status(error.status).json({ code: error.code, error: `[${error.code}] ${error.message}` });
+      return;
+    }
     console.error("Storage inventory failed:", error);
     if (error instanceof AssessmentError) {
       return res.status(error.status).json({ error: error.message });

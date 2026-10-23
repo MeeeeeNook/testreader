@@ -1,3 +1,4 @@
+import {MediaStorageStatus} from './MediaStorageStatus';
 import {StorageOverview} from "./StorageOverview";
 import {Select} from "./Select";
 import {FolderPicker} from "./FolderPicker";
@@ -180,7 +181,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
         </div>
       </div>
 
-      {section === "upload" && <><div className="collection-view-tabs" aria-label="Upload skill">{(['reading','listening'] as const).map(skill=><button key={skill} aria-pressed={uploadSkill===skill} className={uploadSkill===skill?'active':''} onClick={()=>setUploadSkill(skill)}>Upload {skill==='reading'?'Reading':'Listening'}</button>)}</div><section
+      {section === "upload" && <><MediaStorageStatus/><div className="collection-view-tabs" aria-label="Upload skill">{(['reading','listening'] as const).map(skill=><button key={skill} aria-pressed={uploadSkill===skill} className={uploadSkill===skill?'active':''} onClick={()=>setUploadSkill(skill)}>Upload {skill==='reading'?'Reading':'Listening'}</button>)}</div><section
         className="admin-dropzone"
         onDragOver={(e) => e.preventDefault()}
         onDrop={(e) => {
