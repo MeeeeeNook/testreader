@@ -9,7 +9,7 @@ import {lookupVocabulary} from "../services/dictionary";
 import {DictionaryPanel} from "./DictionaryPanel";
 import {ExportDialog} from "./ExportDialog";
 import {testLink} from "../services/testLinks";
-import {BookOpen,Printer,NotebookPen,Flag,Settings2,ArrowLeft,RotateCcw,ChevronLeft,ChevronRight,AlarmClock,Pause,Play,Bug,Infinity as InfinityIcon} from "lucide-react";
+import {BookOpen,Printer,NotebookPen,Flag,Settings2,ArrowLeft,RotateCcw,AlarmClock,Pause,Play,Bug,Infinity as InfinityIcon} from "lucide-react";
 import { loginWithGoogle } from "../services/auth";
 import { passageTitle } from "../services/passageTitle";
 import { ConfirmActionDialog } from "./ConfirmActionDialog";
@@ -683,7 +683,7 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
         {/* Top Header Bar */}
         <header className="topbar reader-toolbar">
           <button className="reader-back" title="Return to tests" onClick={onReturnToLibrary}><ArrowLeft size={17}/>Back</button>
-          <div className="reader-part-control"><button className="quiet-button" aria-label="Previous passage" disabled={currentPartIndex===0} onClick={()=>setCurrentPartIndex(i=>i-1)}><ChevronLeft size={17}/></button><label><small>{test.skill==='reading'?'Passage':'Section'} {part.position||currentPartIndex+1} · {initialSolution?'SOLUTION':scored?'REVIEW':mode.toUpperCase()}</small><Select aria-label="Current passage" value={currentPartIndex} onChange={e=>setCurrentPartIndex(Number(e.target.value))}>{test.parts.map((p,i)=><option key={p.id} value={i}>{passageTitle(p.passageHtml,p.title,i)}</option>)}</Select></label><button className="quiet-button" aria-label="Next passage" disabled={currentPartIndex===test.parts.length-1} onClick={()=>setCurrentPartIndex(i=>i+1)}><ChevronRight size={17}/></button></div>
+          <div className="reader-test-heading"><small>{test.skill.toUpperCase()} · {initialSolution?'SOLUTION':scored?'REVIEW':mode==='exam'?'EXAM MODE':'PRACTICE MODE'}</small><strong title={test.title}>{test.title}</strong></div>
           <div className="reader-actions" role="toolbar" aria-label="Test tools">
             <div className={`reader-clock ${initialDurationMinutes>0&&timerRemaining<300?'low':''}`} aria-label={initialDurationMinutes>0?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{initialDurationMinutes>0?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{initialDurationMinutes>0?'remaining':'Unlimited time'}</span>{mode==='practice'&&initialDurationMinutes>0&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
             <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
@@ -693,6 +693,9 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = ({
             <button className="reader-icon" title="Notes and highlights" aria-label="Notes and highlights" aria-pressed={activeDrawer==='notes'} onClick={()=>setActiveDrawer(activeDrawer==='notes'?null:'notes')}><NotebookPen size={22}/></button>
           </div>
         </header>
+        <nav className="reader-passage-tabs" aria-label="Test parts">
+          {test.parts.map((item,index)=><button key={item.id} type="button" className={currentPartIndex===index?'active':''} aria-pressed={currentPartIndex===index} title={passageTitle(item.passageHtml,item.title,index)} onClick={()=>setCurrentPartIndex(index)}>{test.skill==='reading'?'Passage':'Section'} {item.position||index+1}</button>)}
+        </nav>
         {initialSolution&&!reviewLoaded&&!solutionError&&<p className="studio-callout" role="status">Loading solution guide…</p>}
         {solutionError&&<div className="studio-callout" role="alert">{solutionError}<button className="quiet-button" onClick={()=>setSolutionRetry(i=>i+1)}>Retry solutions</button></div>}
         {historyError && (
