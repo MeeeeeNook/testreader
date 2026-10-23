@@ -40,7 +40,7 @@ test('Google account avatars use the photo supplied by authentication',()=>{
 
 test('dictionary vocabulary uses the chosen API meaning and part of speech, not a hardcoded noun',async()=>{
   const entry=await lookupDictionary('towards',undefined,async()=>new Response(JSON.stringify({exists:true,word:'towards',results:[{meanings:[{definition:'In the direction of.',pos:'preposition',example:'She walked towards the door.'},{definition:'In relation to.',pos:'preposition'}]}]})));
-  assert.deepEqual(vocabularyFromMeaning(entry,entry.results[0].meanings[1],'Source context.'),{word:'towards',meaning:'In relation to.',partOfSpeech:'preposition',example:'Source context.'});
+  assert.deepEqual(vocabularyFromMeaning(entry,entry.results[0].meanings[1],'Source context.'),{word:'towards',meaning:'In relation to.',partOfSpeech:'preposition',example:'Source context.',dictionarySource:'minhqnd',definitionLanguage:'',phonetic:''});
   await assert.rejects(lookupDictionary('around 900 people'),/English word/);
 });
 

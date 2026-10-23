@@ -19,7 +19,7 @@ export function AnswerControl({ slot, part, responses, showAnswers, disabled, on
       {slot.type === 'text' ? <input id={id} className="fill-input" type="text" autoComplete="off" spellCheck={false}
         aria-label={`Answer for question ${n}`} placeholder="Your answer" disabled={disabled}
         value={responses[n] || ''} onChange={e => onChange(n, e.target.value)} /> :
-        <Select id={id} className="question-select" aria-label={`Answer for question ${n}`} disabled={disabled}
+        <Select searchable={false} id={id} className="question-select" aria-label={`Answer for question ${n}`} disabled={disabled}
           value={responses[n] || ''} onChange={e => onChange(n, e.target.value)}>
           <option value="">Choose…</option>{slot.options.map(o => <option key={o.value} value={o.value}>{o.label}</option>)}
         </Select>}{badge}

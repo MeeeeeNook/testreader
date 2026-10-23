@@ -1,4 +1,6 @@
 import {lookupVocabulary} from "../services/dictionary";
+import {BookOpen,Plus,Download,Pencil,RotateCw,Search} from "lucide-react";
+import {Modal} from "./Modal";
 import {Select} from "./Select";
 import React, { useState, useMemo, useEffect, useRef } from 'react';
 import { VocabularyItem, UserProfile } from '../types';
@@ -93,90 +95,20 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
   };
 
   return (
-    <div style={{ paddingBottom: '40px' }}>
-      <div className="studio-page-head">
-        <div>
-          <div className="studio-eyebrow">
-            {isVi ? 'TỪ VỰNG QUAN TRỌNG' : 'WORDS WORTH KEEPING'}
-          </div>
-          <h1 className="studio-heading">
-            {isVi ? 'Sổ từ vựng của bạn.' : 'Your vocabulary notebook.'}
-          </h1>
-          <p className="studio-lead">
-            {isVi
-              ? 'Lưu lại từ vựng trực tiếp khi đọc bài thi, tra từ điển AI, ghi chú nghĩa và xuất thẻ ghi nhớ cho Anki.'
-              : 'Save collocations and academic vocabulary directly from reading passages, record contextual meanings, and export flashcards for Anki.'}
-          </p>
-        </div>
-
-        <div className="studio-actions">
-          <button
-            className="studio-primary"
-            onClick={() =>
-              setEditingWord({
-                word: '',
-                meaning: '',
-                example: '',
-                partOfSpeech: 'noun',
-              })
-            }
-          >
-            + {isVi ? 'Thêm từ mới' : 'Add word'}
-          </button>
-          <button className="studio-secondary" onClick={handleExportCsv}>
-            {isVi ? 'Xuất CSV (Anki)' : 'Export CSV (Anki)'}
-          </button>
-        </div>
-      </div>
-
-      <div className="studio-toolbar">
-        <div className="studio-search">
-          <input
-            placeholder={isVi ? 'Tìm kiếm từ hoặc định nghĩa…' : 'Search words, definitions or contexts…'}
-            value={search}
-            onChange={(e) => setSearch(e.target.value)}
-          />
-        </div>
-      </div>
-
+    <div className="vocab-notebook">
+      <header className="vocab-heading"><div><span className="portal-eyebrow">YOUR WORD COLLECTION</span><h1>Vocabulary</h1><p>Your saved words, with their dictionary meanings.</p></div><div className="vocab-heading-actions"><button className="studio-secondary" onClick={handleExportCsv}><Download size={16}/>Export CSV</button><button className="studio-primary" onClick={()=>{setSaveError('');setEditingWord({word:'',meaning:'',example:'',partOfSpeech:''});}}><Plus size={16}/>Add word</button></div></header>
+      <div className="vocab-toolbar"><label className="vocab-search"><Search size={18}/><input aria-label="Search saved vocabulary" placeholder="Search words or meanings…" value={search} onChange={event=>setSearch(event.target.value)}/></label><span>{activeWords.length} {activeWords.length===1?'word':'words'}</span></div>
       {activeWords.length > 0 ? (
-        <div className="studio-grid">
-          {activeWords.map((item) => (
-            <article key={item.id} className="test-card" style={{ minHeight: '190px' }}>
-              <div className="card-top">
-                <span className="studio-tag" style={{ textTransform: 'uppercase' }}>
-                  {item.meaning.trim()?item.partOfSpeech||'term':'Dictionary'}
-                </span>
-                <button
-                  className="studio-quiet"
-                  style={{ padding: '3px 8px', fontSize: '10px' }}
-                  onClick={() => setEditingWord(item)}
-                >
-                  Edit
-                </button>
-              </div>
-
-              <h3 style={{ margin: '14px 0 8px', fontSize: '20px' }}>{item.word}</h3>
-
-              <p style={{ margin: '0 0 10px', fontSize: '12px', color: 'var(--studio-ink)', lineHeight: '1.6', whiteSpace: 'pre-line' }}>
-                {item.meaning||definitions[item.id]||'Looking up meaning…'}
-              </p>{!item.meaning.trim()&&definitions[item.id]&&definitions[item.id]!=='Looking up meaning…'&&<button className="quiet-button" onClick={()=>{tried.current.delete(profile.id+':'+item.id+':'+item.word);setDefinitions(previous=>({...previous,[item.id]:''}));}}>Retry lookup</button>}
-
-              {item.example && (
-                <p
-                  style={{
-                    margin: 'auto 0 0',
-                    font: 'italic 12px/1.6 var(--studio-serif)',
-                    color: 'var(--studio-muted)',
-                    borderLeft: '2px solid var(--studio-border)',
-                    paddingLeft: '8px',
-                  }}
-                >
-                  "{item.example}"
-                </p>
-              )}
-            </article>
-          ))}
+        <div className="vocab-grid">
+          {activeWords.map(item=>{
+            const meanings=item.meaning.split('\n').map(meaning=>meaning.trim()).filter(Boolean);
+            const failed=!meanings.length&&definitions[item.id]&&definitions[item.id]!=='Looking up meaning…';
+            return <article key={item.id} className="vocab-card"><div className="vocab-card-heading"><div><h2>{item.word}</h2>{item.phonetic&&<span className="vocab-phonetic">{item.phonetic}</span>}</div><button className="vocab-edit" aria-label={'Edit '+item.word} title="Edit word" onClick={()=>{setSaveError('');setEditingWord(item);}}><Pencil size={16}/></button></div>
+              <div className="vocab-labels">{meanings.length&&item.partOfSpeech?<span>{item.partOfSpeech}</span>:null}{item.definitionLanguage==='en'&&<small>English definition</small>}</div>
+              {meanings.length?<><ol className="vocab-meanings">{meanings.slice(0,3).map((meaning,index)=><li key={index}>{meaning}</li>)}</ol>{meanings.length>3&&<details className="vocab-more"><summary>{meanings.length-3} more meanings</summary><ol className="vocab-meanings" start={4}>{meanings.slice(3).map((meaning,index)=><li key={index}>{meaning}</li>)}</ol></details>}</>:<div className="vocab-lookup-state" role="status"><BookOpen size={17}/><p>{failed?'Could not load this definition yet.':'Finding dictionary meanings…'}</p>{failed&&<button title="Retry lookup" onClick={()=>{tried.current.delete(profile.id+':'+item.id+':'+item.word);setDefinitions(previous=>({...previous,[item.id]:''}));}}><RotateCw size={14}/>Retry lookup</button>}</div>}
+              {item.dictionarySource&&<a className="vocab-source" href={item.dictionarySource==='wiktionary'?'https://en.wiktionary.org/':'https://dict.minhqnd.com/'} target="_blank" rel="noreferrer">{item.dictionarySource==='wiktionary'?'Wiktionary':'minhqnd Dictionary'}<span>↗</span></a>}
+            </article>;
+          })}
         </div>
       ) : (
         <div className="studio-empty">
@@ -204,13 +136,10 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
         </div>
       )}
 
+      <p className="vocab-attribution">Dictionary data: <a href="https://dict.minhqnd.com/" target="_blank" rel="noreferrer">minhqnd</a> · <a href="https://en.wiktionary.org/" target="_blank" rel="noreferrer">Wiktionary</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA</a></p>
       {/* Add / Edit Word Modal */}
       {editingWord && (
-        <dialog
-          className="studio-modal"
-          open
-          style={{ position: 'fixed', top: '50%', left: '50%', transform: 'translate(-50%, -50%)', zIndex: 120 }}
-        >
+        <Modal className="vocab-edit-dialog" label={editingWord.id?'Edit word':'Add word'} onClose={()=>setEditingWord(null)}>
           <div className="studio-modal-heading">
             <h2>{editingWord.id ? 'Edit Word' : 'Save Vocabulary Word'}</h2>
             <button className="studio-quiet" onClick={() => setEditingWord(null)}>
@@ -232,10 +161,10 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
             <label className="studio-field">
               Part of Speech
               <Select
-                value={editingWord.partOfSpeech || 'noun'}
+                value={editingWord.partOfSpeech || ''}
                 onChange={(e) => setEditingWord({ ...editingWord, partOfSpeech: e.target.value })}
               >
-                <option value="noun">Noun</option>
+                <option value="">From dictionary</option>{editingWord.partOfSpeech&&!['noun','verb','adjective','adverb','phrase'].includes(editingWord.partOfSpeech)&&<option value={editingWord.partOfSpeech}>{editingWord.partOfSpeech}</option>}<option value="noun">Noun</option>
                 <option value="verb">Verb</option>
                 <option value="adjective">Adjective</option>
                 <option value="adverb">Adverb</option>
@@ -245,10 +174,10 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
 
             <label className="studio-field">
               Meaning (English or Vietnamese)
-              <input
+              <textarea rows={4}
                 value={editingWord.meaning || ''}
                 onChange={(e) => setEditingWord({ ...editingWord, meaning: e.target.value })}
-                placeholder="Definition or translation"
+                placeholder="Leave blank to look up the dictionary automatically"
               />
             </label>
 
@@ -290,7 +219,7 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
               </button>
             </div>
           </form>
-        </dialog>
+        </Modal>
       )}
     </div>
   );

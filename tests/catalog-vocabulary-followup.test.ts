@@ -34,7 +34,7 @@ test('folder page shows its description, child links and only its own descendant
 });
 test('automatic vocabulary lookup saves dictionary meanings and actual parts of speech, retaining source context',async()=>{
  const original=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({exists:true,word:'handful',results:[{meanings:[{definition:'A small number.',pos:'noun'},{definition:'As much as a hand can hold.',pos:'noun'}]}]}));
- try{const entry=await lookupVocabulary('handful','A handful of families migrated.');assert.deepEqual(entry,{word:'handful',meaning:'A small number.\nAs much as a hand can hold.',partOfSpeech:'noun',example:'A handful of families migrated.'});}finally{globalThis.fetch=original;}
+ try{const entry=await lookupVocabulary('handful','A handful of families migrated.');assert.deepEqual(entry,{word:'handful',meaning:'A small number.\nAs much as a hand can hold.',partOfSpeech:'noun',example:'A handful of families migrated.',dictionarySource:'minhqnd',definitionLanguage:'',phonetic:''});}finally{globalThis.fetch=original;}
 });
 test('notebook repairs legacy blanks automatically, skips existing definitions and retains record IDs',async()=>{
  environment();const original=globalThis.fetch,records:any[]=[];globalThis.fetch=async()=>new Response(JSON.stringify({exists:true,word:'district',results:[{meanings:[{definition:'An area of a city or country.',pos:'noun'}]}]}));
@@ -46,7 +46,7 @@ test('notebook repairs legacy blanks automatically, skips existing definitions a
 test('a failed automatic lookup offers retry and never saves an empty word',async()=>{
  environment();const original=globalThis.fetch,records:any[]=[];globalThis.fetch=async()=>new Response('{}',{status:503});const root=createRoot(document.getElementById('app')!);
  try{await act(async()=>root.render(React.createElement(VocabularyView,{profile,vocabulary:[{id:'missing',word:'unavailable',meaning:'',example:'',partOfSpeech:'noun'} as any],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
- assert.equal(records.length,0);assert.match(document.body.textContent!,/Dictionary unavailable/);assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Retry lookup'));
+ assert.equal(records.length,0);assert.match(document.body.textContent!,/Could not load this definition/);assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Retry lookup'));
  }finally{await act(async()=>root.unmount());globalThis.fetch=original;}
 });
 test('mock builder shuffles distinct sections and starts practice with unlimited time',async()=>{
