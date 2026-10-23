@@ -371,7 +371,7 @@ export class FirestoreAdapter {
       source: test.source || "My Collection",
       access: "free",
       status: test.status || "published",
-      duration: test.duration || (test.skill==='listening'?30:60),
+      duration: test.duration || (test.skill==='listening'?40:60),
       audioFiles:test.audioFiles||[],
       passages: test.parts.length,
       passageTitles: test.parts.map((p, i) => test.skill==='listening'?p.title:passageTitle(p.passageHtml, p.title, i)),

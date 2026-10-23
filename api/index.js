@@ -198,38 +198,38 @@ function markAssessment(assessment, responses) {
   return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
 }
 
-// server/studentRoutes.ts
-var valid = (uid) => typeof uid === "string" && /^[\w-]{1,128}$/.test(uid);
-function registerStudentRoutes(app2, authorize, backend2, fail) {
-  const owner = async (req) => {
-    const caller2 = await authorize(req);
-    if (!caller2.isAdmin) throw new AssessmentError(403, "Administrator access required.");
-    if (!valid(req.body.targetUserId)) throw new AssessmentError(400, "Invalid student ID.");
-    return caller2;
-  };
-  app2.post("/api/admin/student-details", async (req, res) => {
+// src/services/websiteUI.ts
+var defaultWebsiteUI = { heroTitle: "Prepare for IELTS. Practise at your pace.", heroDescription: "Practise reading and listening. Check your answers and review the explanations.", showFullTestMenu: true, blocks: [
+  { id: "reading", title: "Reading practice", description: "Explore passages and build your reading skills.", href: "/practice?skill=reading", icon: "reading", visible: true },
+  { id: "listening", title: "Listening practice", description: "Choose a part, listen and review your answers.", href: "/practice?skill=listening", icon: "listening", visible: true },
+  { id: "full", title: "Full tests", description: "Complete a Reading or Listening test from start to finish.", href: "/full-tests", icon: "full", visible: true },
+  { id: "mix", title: "Mix your own test", description: "Choose the passages and parts you want to practise.", href: "/mock", icon: "mix", visible: true }
+] };
+function normalizeWebsiteUI(input) {
+  const v = input && typeof input === "object" ? input : {};
+  const text = (x, fallback, max) => typeof x === "string" && x.trim() ? x.trim().slice(0, max) : fallback;
+  const blocks = Array.isArray(v.blocks) ? v.blocks.slice(0, 12).map((b, i) => ({ id: "block-" + i, title: text(b?.title, "Practice", 80), description: text(b?.description, "Choose your next test.", 200), href: typeof b?.href === "string" && /^\/(?!\/)[^\s\\]*$/.test(b.href) && b.href.length <= 500 ? b.href : "/practice", icon: ["reading", "listening", "full", "mix"].includes(b?.icon) ? b.icon : "reading", visible: b?.visible !== false })) : defaultWebsiteUI.blocks.map((b) => ({ ...b }));
+  return { heroTitle: text(v.heroTitle, defaultWebsiteUI.heroTitle, 160), heroDescription: text(v.heroDescription, defaultWebsiteUI.heroDescription, 400), showFullTestMenu: v.showFullTestMenu !== false, blocks };
+}
+
+// server/websiteUIRoutes.ts
+function registerWebsiteUIRoutes(app2, authorize, backend2, fail) {
+  app2.get("/api/website-ui", async (_req, res) => {
     try {
-      await owner(req);
-      const user = await backend2().auth.getUser(req.body.targetUserId);
-      res.json({ uid: user.uid, email: user.email || "", createdAt: Date.parse(user.metadata.creationTime) || null, lastSignInAt: Date.parse(user.metadata.lastSignInTime) || null, disabled: user.disabled, emailVerified: user.emailVerified, providers: user.providerData.map((p) => p.providerId) });
+      const doc = await backend2().db.doc("site_settings/website_ui").get();
+      res.set("Cache-Control", "public, max-age=60, s-maxage=60");
+      res.json(normalizeWebsiteUI(doc.data()));
     } catch (e) {
       fail(res, e);
     }
   });
-  app2.post("/api/admin/student-delete", async (req, res) => {
+  app2.post("/api/admin/website-ui", async (req, res) => {
     try {
-      const caller2 = await owner(req), { auth, db } = backend2(), uid = req.body.targetUserId;
-      const user = await auth.getUser(uid);
-      if (uid === caller2.identity.uid || user.email?.toLowerCase() === "manhcuong2006ht@gmail.com") throw new AssessmentError(403, "The owner account cannot be deleted.");
-      if (!user.email || req.body.confirmEmail !== user.email) throw new AssessmentError(400, "Type the student email exactly to confirm deletion.");
-      const ref = db.doc("users/" + uid);
-      await ref.set({ id: uid, status: "suspended", updatedAt: Date.now() }, { merge: true });
-      await auth.updateUser(uid, { disabled: true });
-      await auth.revokeRefreshTokens(uid);
-      for (const name of ["attempts", "vocabulary"]) await db.recursiveDelete(ref.collection(name));
-      await auth.deleteUser(uid);
-      await ref.set({ id: uid, status: "suspended", deletedAt: Date.now() });
-      res.json({ success: true, uid });
+      const user = await authorize(req);
+      if (!user.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+      const settings = normalizeWebsiteUI(req.body);
+      await backend2().db.doc("site_settings/website_ui").set(settings);
+      res.json(settings);
     } catch (e) {
       fail(res, e);
     }
@@ -325,6 +325,135 @@ async function listR2Files(config, fetcher = fetch) {
     if (truncated && !continuation) throw new MediaStorageError("R2_INVENTORY_RESPONSE", "R2 returned an incomplete listing without a continuation token.");
   } while (truncated && files.length < 1e4 && Date.now() - started < 2e4);
   return { files, truncated };
+}
+
+// server/trashRoutes.ts
+function managedMedia(value, config, bucketName) {
+  const found = /* @__PURE__ */ new Set();
+  const walk = (v) => {
+    if (typeof v === "string") for (const raw of v.match(/https:\/\/[^\s<>"']+/g) || []) {
+      try {
+        const url = new URL(raw.replace(/&amp;/g, "&"));
+        if (config && url.origin === new URL(config.publicUrl).origin && url.pathname.startsWith(new URL(config.publicUrl).pathname.replace(/\/$/, "") + "/")) {
+          const prefix = new URL(config.publicUrl).pathname.replace(/\/$/, "") + "/";
+          const key = decodeURIComponent(url.pathname.slice(prefix.length));
+          if (/^(audio|images)\/[a-f0-9]{64}\.[a-z0-9]{2,5}$/.test(key)) found.add("r2:" + key);
+        }
+        const match = /^\/v0\/b\/([^/]+)\/o\/(.+)$/.exec(url.pathname);
+        if (url.hostname === "firebasestorage.googleapis.com" && match && decodeURIComponent(match[1]) === bucketName) {
+          const key = decodeURIComponent(match[2]);
+          if (/^(?:media\/(?:audio|images)\/|tests\/[\w-]+\/images\/)/.test(key) && !key.includes("..")) found.add("firebase:" + key);
+        }
+      } catch {
+      }
+    }
+    else if (Array.isArray(v)) v.forEach(walk);
+    else if (v && typeof v === "object") Object.values(v).forEach(walk);
+  };
+  walk(value);
+  return found;
+}
+function unreferencedMedia(target, others) {
+  return [...target].filter((key) => !others.has(key));
+}
+function registerTrashRoutes(app2, authorize, backend2, fail) {
+  app2.post("/api/admin/trash-delete", async (req, res) => {
+    try {
+      const caller2 = await authorize(req);
+      if (!caller2.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+      const values = Array.isArray(req.body?.testIds) ? req.body.testIds : [req.body?.testId];
+      if (!values.length || values.length > 25 || values.some((id) => typeof id !== "string" || !/^[-\w]{1,128}$/.test(id)) || req.body.confirm !== "DELETE") throw new AssessmentError(400, "Choose up to 25 trashed tests and confirm permanent deletion.");
+      const ids = new Set(values), { db, bucket } = backend2();
+      const config = readR2Config();
+      const lock = db.doc("site_settings/trash_cleanup"), lease = Date.now() + 12e4;
+      await db.runTransaction(async (tx) => {
+        const current = await tx.get(lock);
+        if ((current.data()?.until || 0) > Date.now()) throw new AssessmentError(409, "Another cleanup is running. Please retry shortly.");
+        tx.set(lock, { until: lease });
+      });
+      try {
+        const [all, parts, keys] = await Promise.all([db.collection("tests").get(), db.collectionGroup("sections").get(), db.collection("test_keys").get()]), target = /* @__PURE__ */ new Set(), others = /* @__PURE__ */ new Set();
+        const selected = all.docs.filter((d) => ids.has(d.id));
+        if (selected.some((d) => !d.data()?.deletedAt)) throw new AssessmentError(409, "Only tests in Trash can be permanently deleted.");
+        const retainedIds = new Set(all.docs.map((d) => d.id));
+        const collect = (testId, data) => {
+          if (!retainedIds.has(testId)) return;
+          for (const key of managedMedia(data, config, bucket.name)) (ids.has(testId) ? target : others).add(key);
+        };
+        for (const test of all.docs) collect(test.id, test.data());
+        for (const part of parts.docs) {
+          const match = /^tests\/([^/]+)\/sections\/[^/]+$/.exec(part.ref.path);
+          if (match) collect(match[1], part.data());
+        }
+        for (const key of keys.docs) collect(key.id, key.data());
+        let deletedMedia = 0;
+        const deadline = Date.now() + 2e4;
+        for (const media of unreferencedMedia(target, others)) {
+          if (Date.now() > deadline) throw new AssessmentError(503, "Cleanup is taking longer than expected. Some unused files are already removed; retry to finish permanent deletion.");
+          try {
+            if (media.startsWith("r2:") && config) {
+              const response = await fetch(presign(objectUrl(config, media.slice(3)), "DELETE", config), { method: "DELETE", signal: AbortSignal.timeout(8e3) });
+              if (!response.ok && response.status !== 404) throw new AssessmentError(503, "Media cleanup failed (R2 HTTP " + response.status + "). Cleanup may be partial. Retry to finish permanent deletion.");
+            } else await bucket.file(media.slice(9)).delete({ ignoreNotFound: true });
+          } catch (e) {
+            if (e instanceof AssessmentError) throw e;
+            throw new AssessmentError(503, "Storage cleanup could not finish. Check your storage connection and permissions, then retry permanent deletion.");
+          }
+          deletedMedia++;
+        }
+        for (const test of selected) {
+          await db.doc("test_keys/" + test.id).delete();
+          await db.recursiveDelete(db.doc("tests/" + test.id));
+        }
+        res.json({ success: true, deletedTestIds: selected.map((d) => d.id), deletedMedia, retainedSharedMedia: target.size - unreferencedMedia(target, others).length });
+      } finally {
+        await db.runTransaction(async (tx) => {
+          const current = await tx.get(lock);
+          if (current.data()?.until === lease) tx.delete(lock);
+        });
+      }
+    } catch (e) {
+      fail(res, e instanceof MediaStorageError ? new AssessmentError(e.status, e.message) : e);
+    }
+  });
+}
+
+// server/studentRoutes.ts
+var valid = (uid) => typeof uid === "string" && /^[\w-]{1,128}$/.test(uid);
+function registerStudentRoutes(app2, authorize, backend2, fail) {
+  const owner = async (req) => {
+    const caller2 = await authorize(req);
+    if (!caller2.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+    if (!valid(req.body.targetUserId)) throw new AssessmentError(400, "Invalid student ID.");
+    return caller2;
+  };
+  app2.post("/api/admin/student-details", async (req, res) => {
+    try {
+      await owner(req);
+      const user = await backend2().auth.getUser(req.body.targetUserId);
+      res.json({ uid: user.uid, email: user.email || "", createdAt: Date.parse(user.metadata.creationTime) || null, lastSignInAt: Date.parse(user.metadata.lastSignInTime) || null, disabled: user.disabled, emailVerified: user.emailVerified, providers: user.providerData.map((p) => p.providerId) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+  app2.post("/api/admin/student-delete", async (req, res) => {
+    try {
+      const caller2 = await owner(req), { auth, db } = backend2(), uid = req.body.targetUserId;
+      const user = await auth.getUser(uid);
+      if (uid === caller2.identity.uid || user.email?.toLowerCase() === "manhcuong2006ht@gmail.com") throw new AssessmentError(403, "The owner account cannot be deleted.");
+      if (!user.email || req.body.confirmEmail !== user.email) throw new AssessmentError(400, "Type the student email exactly to confirm deletion.");
+      const ref = db.doc("users/" + uid);
+      await ref.set({ id: uid, status: "suspended", updatedAt: Date.now() }, { merge: true });
+      await auth.updateUser(uid, { disabled: true });
+      await auth.revokeRefreshTokens(uid);
+      for (const name of ["attempts", "vocabulary"]) await db.recursiveDelete(ref.collection(name));
+      await auth.deleteUser(uid);
+      await ref.set({ id: uid, status: "suspended", deletedAt: Date.now() });
+      res.json({ success: true, uid });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
 }
 
 // server/mediaRoutes.ts
@@ -709,6 +838,8 @@ async function caller(req) {
   return { identity, isAdmin, db, profile };
 }
 registerStudentRoutes(app, caller, backend, apiError);
+registerWebsiteUIRoutes(app, caller, backend, apiError);
+registerTrashRoutes(app, caller, backend, apiError);
 registerMediaRoutes(app, async (req) => {
   const identity = await caller(req);
   if (!identity.isAdmin) throw new AssessmentError(403, "Administrator access required.");

@@ -24,6 +24,7 @@ interface AdminViewProps {
   adminUid: string;
   onUploadFiles: (files: File[],skill?:'reading'|'listening') => Promise<void>;
   onNewTest: () => void;
+  onPermanentDelete?: (ids:string[])=>Promise<void>;
   onDeleteTest: (id: string) => Promise<void>;
   onRestoreTest: (id: string) => Promise<void>;
   onSetCollection: (ids: string[], collection: string) => Promise<void>;
@@ -54,7 +55,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   adminUid,
   onUploadFiles,
   onNewTest,
-  onDeleteTest,
+  onDeleteTest,onPermanentDelete,
   onRestoreTest,
   onSetCollection,
   onRefreshTitles,
@@ -78,6 +79,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
     "all",
   );
 
+  const [purgeIds,setPurgeIds]=useState<string[]>([]);
   const [deleteIds, setDeleteIds] = useState<string[]>([]);
   const [sort, setSort] = useState("title");
   const [collectionFilter, setCollectionFilter] = useState("");
@@ -146,6 +148,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
   return (
     <div className="admin-page" style={{ paddingBottom: "40px" }}>
       {renameTest && <dialog open className="studio-modal admin-rename-dialog" aria-label="Rename test"><form onSubmit={e=>{e.preventDefault();if(!newTitle.trim()||!onRenameTest)return;const id=renameTest.id;void run(async()=>{await onRenameTest(id,newTitle.trim());setRenameTest(null);});}}><h2>Rename test</h2><input aria-label="New test title" value={newTitle} onChange={e=>setNewTitle(e.target.value)} required maxLength={250}/><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setRenameTest(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save title</button></div></form></dialog>}
+      {purgeIds.length>0&&<ConfirmActionDialog title="Permanently delete tests?" confirmLabel="Delete permanently" onCancel={()=>setPurgeIds([])} onConfirm={()=>{const ids=purgeIds;setPurgeIds([]);void run(async()=>{await onPermanentDelete?.(ids);setSelected([])})}}>{purgeIds.length} tests, their answer keys and unused audio/images will be deleted permanently. Files shared with other tests are kept. This cannot be undone.</ConfirmActionDialog>}
+      {tab==='trash'&&<section className="trash-actions studio-panel"><div><h2>Free up storage</h2><p>Permanently remove deleted tests and media no other test uses.</p></div><button className="studio-secondary studio-danger" disabled={busy||!trashedTests.length||!onPermanentDelete} onClick={()=>setPurgeIds(trashedTests.map(t=>t.id))}>Empty Trash ({trashedTests.length})</button></section>}
       {deleteIds.length > 0 && (
         <ConfirmActionDialog
           title="Move tests to Trash?"
@@ -168,7 +172,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
           <h1 className="studio-heading">{{overview:"Overview",tests:"Tests",folders:"Folders",upload:"Upload & Import",reports:"Content reports",users:"Students",archive:"Archive",trash:"Trash"}[section]||"Admin Studio"}</h1>
           <p className="studio-lead">
-            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Create folders and subfolders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests removed from the library."}[section]}
+            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Create folders and subfolders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests or permanently delete them to free storage."}[section]}
           </p>
         </div>
 
@@ -307,7 +311,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </>
               )}
               {tab === "trash" && (
-                <button
+                <><button className="studio-secondary studio-danger" disabled={busy||!selected.length||!onPermanentDelete} onClick={()=>setPurgeIds(selected)}>Delete permanently</button><button
                   className="studio-secondary"
                   disabled={busy}
                   onClick={() =>
@@ -317,7 +321,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                   }
                 >
                   Restore selected
-                </button>
+                </button></>
               )}
             </div>
           )}

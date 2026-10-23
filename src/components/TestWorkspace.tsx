@@ -1,3 +1,5 @@
+import {ShareButton} from './ShareButton';
+import {introductionLink} from '../services/shareTest';
 import {AnswerSheet} from './AnswerSheet';
 import {ResultScreen} from './ResultScreen';
 import {ScoreAnalysis} from './ScoreAnalysis';
@@ -6,7 +8,7 @@ import {FontSizeSlider,readingSize} from "./FontSizeSlider";
 import {readerSessionKey,readReaderSession} from "../services/readerSession";
 import {requestJson} from "../services/apiRequest";
 import {preloadRecordings} from "../services/audioPreload";
-import {ListeningAudio} from "./ListeningAudio";
+import {ListeningAudio,playbackSpeeds} from "./ListeningAudio";
 import {Select} from "./Select";
 import {paintHighlights,selectionOffsets} from "../services/highlights";
 import {lookupVocabulary} from "../services/dictionary";
@@ -39,6 +41,8 @@ import { firestoreAdapter } from "../services/firestoreAdapter";
 import { scoreTest, estimatedBand } from "../services/scoring";
 
 interface TestWorkspaceProps {
+  audioReady?:boolean;
+  audioProgress?:React.ReactNode;
   audioSources?:Record<string,string>;
   initialSolution?: boolean;
   onRetake?:()=>void;
@@ -71,11 +75,14 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = (props) => {
   void preloadRecordings(JSON.parse(urls),controller.signal,(done,total,bytes)=>setProgress({done,total,bytes})).then(result=>{owned=result;if(controller.signal.aborted)Object.values(result).forEach(URL.revokeObjectURL);else setSources(result)}).catch(e=>{if(alive)setError(e.message||'Audio could not load. Retry before starting the test.')}).finally(()=>clearTimeout(timeout));
   return()=>{alive=false;clearTimeout(timeout);controller.abort();Object.values(owned).forEach(URL.revokeObjectURL)};
  },[needsAudio,urls,retry,props.sessionId]);
- if(needsAudio&&!sources)return <section className="audio-loading-gate" aria-label="Prepare listening audio"><h1>{error?'Audio could not load':'Loading your recordings'}</h1><p>Your timer starts after all recordings have loaded.</p><p role="status">{progress.done} / {progress.total||JSON.parse(urls).length} recordings · {(progress.bytes/1048576).toFixed(1)} MB loaded</p><progress max={progress.total||1} value={progress.done}/>{error&&<p role="alert">{error}</p>}<div className="studio-actions">{error&&<button className="studio-primary" onClick={()=>setRetry(r=>r+1)}>Retry loading</button>}<button className="studio-secondary" onClick={props.onReturnToLibrary}>Back to tests</button></div></section>;
- return <LoadedTestWorkspace key={props.sessionId} {...props} audioSources={sources||{}}/>;
+ const ready=!needsAudio||sources!==null;
+ const loading=needsAudio&&!ready?<div className="audio-background-progress" aria-live="polite"><span>{error?'Audio download failed':`Downloading all audio · ${progress.done}/${progress.total} files · ${(progress.bytes/1048576).toFixed(1)} MB`}</span>{error?<><span role="alert">{error}</span><button onClick={()=>setRetry(r=>r+1)}>Retry audio</button></>:<><progress max={progress.total||1} value={progress.done}/><small>Browse the questions now. Playback and the timer start when all recordings are downloaded.</small></>}</div>:null;
+ return <LoadedTestWorkspace key={props.sessionId} {...props} audioSources={sources||{}} audioReady={ready} audioProgress={loading}/>;
 };
 const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   audioSources={},
+  audioReady=true,
+  audioProgress,
   test,
   initialSolution=false,
   onRetake,
@@ -90,6 +97,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
+  const [volume,setVolume]=useState(1),[audioSpeed,setAudioSpeed]=useState(4);
   const [dictionaryWord,setDictionaryWord]=useState<string|null>(null);
   const [dictionaryContext,setDictionaryContext]=useState(''),[dictionarySaveIntent,setDictionarySaveIntent]=useState(false);
   const [showExport,setShowExport]=useState(false);
@@ -164,6 +172,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
 
   const passageRef = useRef<HTMLDivElement>(null);
   const questionsRef = useRef<HTMLDivElement>(null);
+  useEffect(()=>{for(const pane of [passageRef.current,questionsRef.current])if(pane)pane.scrollTop=0;},[currentPartIndex]);
 
   const [reviewKeys, setReviewKeys] = useState<Record<number, any>>(() =>
     Object.fromEntries(
@@ -260,31 +269,31 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   ]);
 
   useEffect(()=>{
-    if(scored||initialSolution)return;
+    if(scored||initialSolution||!audioReady)return;
     if(initialDurationMinutes>0&&!timerRunning&&!expired.current)return;
     let previous=Date.now();
     const tick=setInterval(()=>{const now=Date.now();setElapsedSeconds(s=>s+(now-previous)/1000);previous=now},1000);
     return()=>clearInterval(tick);
-  },[scored,initialSolution,timerRunning,initialDurationMinutes]);
+  },[scored,initialSolution,timerRunning,initialDurationMinutes,audioReady]);
   // Timer updaters are pure; expiry submission happens once in an effect.
   const submitLatest = useRef<() => Promise<void>>(async () => {});
   const expired = useRef(false);
   useEffect(() => {
-    if (!timerRunning) return;
+    if (!timerRunning || !audioReady) return;
     const initial=timerRemaining,began=Date.now();
     const interval = setInterval(
       () => setTimerRemaining(Math.max(0,initial-Math.floor((Date.now()-began)/1000))),
       1000,
     );
     return () => clearInterval(interval);
-  }, [timerRunning,startedAt]);
+  }, [timerRunning,startedAt,audioReady]);
   useEffect(() => {
-    if (!timerRunning || timerRemaining > 0 || expired.current) return;
+    if (!audioReady || !timerRunning || timerRemaining > 0 || expired.current) return;
     expired.current = true;
     setTimerRunning(false);
     if (mode === "exam" && !scored) void submitLatest.current();
     else if(!scored){setAudioStop(n=>n+1);setTimeUp(true);}
-  }, [timerRemaining, timerRunning, mode, scored, onNotify]);
+  }, [timerRemaining, timerRunning, mode, scored, onNotify,audioReady]);
 
   // Handle Response Changes
   const handleInputChange = (questionNumber: number, value: string) => {
@@ -735,6 +744,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
           <div className="reader-test-heading"><small>{test.skill.toUpperCase()} · {initialSolution?'SOLUTION':scored?'REVIEW':mode==='exam'?'EXAM MODE':'PRACTICE MODE'}</small><strong title={test.title}>{test.title}</strong></div>
           <div className="reader-actions" role="toolbar" aria-label="Test tools">
             <div className={`reader-clock ${hasCountdown&&timerRemaining<300?'low':''}`} aria-label={hasCountdown?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{hasCountdown?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{hasCountdown?'remaining':'Unlimited time'}</span>{mode==='practice'&&hasCountdown&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
+            <ShareButton compact path={introductionLink(test)} title={test.title}/>
             <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
             <button className="reader-icon" title="Report an issue" aria-label="Report an issue" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}><Bug size={22}/></button>
             <button className="reader-icon" title="Dictionary" aria-label="Dictionary" disabled={mode==='exam'&&!scored} onClick={()=>{setDictionaryContext('');setDictionarySaveIntent(false);setDictionaryWord('');}}><BookOpen size={22}/></button>
@@ -791,7 +801,8 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
             </button>
           </div>
         )}
-        {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} sources={audioSources} stopSignal={audioStop} disabled={submitting} exam={mode==='exam'&&!scored&&!initialSolution}/>}
+        {audioProgress}
+        {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} sources={audioSources} stopSignal={audioStop} disabled={submitting||!audioReady} volume={volume} speedIndex={audioSpeed} onSpeedChange={setAudioSpeed} bufferedOnly exam={mode==='exam'&&!scored&&!initialSolution}/>}
 
         {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Academic Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button></div></section>}
 
@@ -1115,7 +1126,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
         </dialog>
       )}
 
-      {showDisplayModal&&<Modal className="reading-display-dialog" label="Reading display settings" onClose={()=>setShowDisplayModal(false)}><div className="studio-modal-heading"><h2>Reading display</h2><button className="quiet-button" aria-label="Close display settings" onClick={()=>setShowDisplayModal(false)}>×</button></div><FontSizeSlider value={textSize} onChange={setTextSize}/><p className="font-size-preview" style={{fontSize:textSize}}>Make reading feel comfortable.</p><div className="studio-actions"><button className="studio-primary" onClick={()=>setShowDisplayModal(false)}>Done</button></div></Modal>}
+      {showDisplayModal&&<Modal className="reading-display-dialog" label="Test settings" onClose={()=>setShowDisplayModal(false)}><div className="studio-modal-heading"><h2>Test settings</h2><button className="quiet-button" aria-label="Close display settings" onClick={()=>setShowDisplayModal(false)}>×</button></div>{test.skill==='listening'&&<div className="listening-settings"><label>Volume <output>{Math.round(volume*100)}%</output><input aria-label="Listening volume" type="range" min={0} max={1} step={.01} value={volume} onInput={e=>setVolume(Number(e.currentTarget.value))} onChange={e=>setVolume(Number(e.target.value))}/></label><label>Playback speed <output>{playbackSpeeds[audioSpeed]}×</output><input aria-label="Listening speed" type="range" min={0} max={9} step={1} value={audioSpeed} disabled={mode==='exam'&&!scored&&!initialSolution} onInput={e=>setAudioSpeed(Number(e.currentTarget.value))} onChange={e=>setAudioSpeed(Number(e.target.value))}/></label></div>}<FontSizeSlider value={textSize} onChange={setTextSize}/><p className="font-size-preview" style={{fontSize:textSize}}>Make reading feel comfortable.</p><div className="studio-actions"><button className="studio-primary" onClick={()=>setShowDisplayModal(false)}>Done</button></div></Modal>}
 
     </div>
   );

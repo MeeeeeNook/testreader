@@ -267,7 +267,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             Skill
             <Select
               value={test.skill}
-              onChange={(e) => setTest({ ...test, skill: e.target.value as 'reading'|'listening', duration:e.target.value==='listening'?30:60 })}
+              onChange={(e) => setTest({ ...test, skill: e.target.value as 'reading'|'listening', duration:e.target.value==='listening'?40:60 })}
             >
               <option value="reading">Academic Reading</option>
               <option value="listening">Listening</option>

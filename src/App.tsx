@@ -1,8 +1,11 @@
 import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
 import {FolderPage} from "./components/FolderPage";
+const WebsiteUISettings=React.lazy(()=>import('./components/WebsiteUISettings').then(m=>({default:m.WebsiteUISettings})));
+import {defaultWebsiteUI,normalizeWebsiteUI} from './services/websiteUI';
+import {requestJson} from './services/apiRequest';
 import {TestSetup} from "./components/TestSetup";
-import {directSession,examMinutes} from "./services/sessionSettings";
+import {directSession,examMinutes,setupLink} from "./services/sessionSettings";
 import {SignInView} from "./components/SignInView";
 import {Select} from "./components/Select";
 import {testLink,resolveTestLink} from "./services/testLinks";
@@ -20,6 +23,7 @@ const ContentAdminView = React.lazy(() => import("./components/ContentAdminView"
 import { createId } from "./services/ids";
 import React, { useState, useEffect, useRef, useCallback, useMemo } from "react";
 import { User } from "firebase/auth";
+import {auth} from "./firebase";
 import { subscribeAuth } from "./services/auth";
 import { firestoreAdapter } from "./services/firestoreAdapter";
 import {
@@ -144,6 +148,8 @@ export default function App() {
   const [setupMode, setSetupMode] = useState<"practice" | "exam">("practice");
   const [setupTime, setSetupTime] = useState(60);
   const [setupSection, setSetupSection] = useState<"all" | number>("all");
+  const [websiteUI,setWebsiteUI]=useState(defaultWebsiteUI);
+  useEffect(()=>{const c=new AbortController();void fetch('/api/website-ui',{signal:c.signal}).then(r=>{if(!r.ok)throw Error('Settings unavailable');return r.json()}).then(s=>setWebsiteUI(normalizeWebsiteUI(s))).catch(()=>{});return()=>c.abort()},[]);
   const [selectedTestFull, setSelectedTestFull] = useState<EditableTest | null>(
     null,
   );
@@ -231,7 +237,7 @@ export default function App() {
     return unsubscribe;
   }, []);
 
-  useEffect(()=>{if(authReady&&user&&route==='home')navigate('/practice',true);},[authReady,user?.uid,route,navigate]);
+
 
   // Sync theme, font size, language with document root
   useEffect(() => {
@@ -371,6 +377,7 @@ export default function App() {
           if(target.section&&!section)throw new Error("This passage is unavailable.");
           const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],duration:full.skill==='listening'?10:full.duration,title:section.title}:full;
           const params=new URL(location,'https://studio.local').searchParams;
+          if(!params.has('attempt')&&!page.solution){navigate(setupLink(full.id,section?.id),true);return;}
           const settings=directSession(params,chosen);setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(settings.mode);setActiveDuration(settings.minutes);setActivePreview(false);
           const attempt=params.get("attempt");setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all")+(attempt&&/^[\w-]{1,128}$/.test(attempt)?":"+attempt:""));
         } else if (page.name === "test" && page.id) {
@@ -1001,7 +1008,7 @@ export default function App() {
       )}
       {/* Sidebar Navigation */}
       <div className="studio-main">
-        <PortalHeader tests={tests} route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
+        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
 
         {/* Account Suspension Alert */}
         {suspended && (
@@ -1099,9 +1106,9 @@ export default function App() {
                 </div>
               )}
             {route === "sign-in" && <SignInView location={location} onNavigate={navigate}/>}
-            {route === "home" && authReady && !user && <HomeView tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
-            {(route==='folder'||(route==='test'&&catalogFolder))&&<FolderPage id={route==='folder'?page.id||'':decodeURIComponent(catalogFolder![1])} folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} location={catalogLocation} onNavigate={navigate} loading={!catalogLoaded} loadSummary={loadCatalogSummary}/>}
-            {["library", "practice", "full", "test"].includes(route) && !(route==='test'&&catalogFolder) && <PracticeCatalog folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"||(route==='test'&&setupBackground.current.startsWith('/full-tests'))} category={page.category} location={route==='test'?setupBackground.current:location} onNavigate={navigate} loadSummary={loadCatalogSummary} />}
+            {route === "home" && authReady && <HomeView settings={websiteUI} tests={visibleCatalog} attempts={attempts} profile={profile} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} />}
+            {route==='folder'&&<FolderPage id={route==='folder'?page.id||'':decodeURIComponent(catalogFolder![1])} folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} location={catalogLocation} onNavigate={navigate} loading={!catalogLoaded} loadSummary={loadCatalogSummary}/>}
+            {["library", "practice", "full"].includes(route) && !(route==='test'&&catalogFolder) && <PracticeCatalog folders={folders} tests={visibleCatalog} profile={profile} attempts={attempts} full={route === "full"||(route==='test'&&setupBackground.current.startsWith('/full-tests'))} category={page.category} location={route==='test'?setupBackground.current:location} onNavigate={navigate} loadSummary={loadCatalogSummary} />}
 
 
 
@@ -1166,7 +1173,8 @@ export default function App() {
                 onNavigate={navigate}
               />
             )}
-            {route === "admin" && userRole === "admin" && (
+            {route === "admin" && page.section === "website-ui" && userRole === "admin" && <WebsiteUISettings settings={websiteUI} folders={folders} tests={tests} onFolders={saveFolders} onSave={async value=>{const saved=await requestJson("/api/admin/website-ui",value,()=>auth.currentUser);setWebsiteUI(normalizeWebsiteUI(saved));}}/>}
+            {route === "admin" && page.section !== "website-ui" && userRole === "admin" && (
               <AdminView
                 key={page.section || "overview"}
                 section={page.section || "overview"}
@@ -1176,6 +1184,7 @@ export default function App() {
                 learners={learners.filter(p=>!p.deletedAt)}
                 adminUid={user?.uid || ""}
                 onNewTest={handleNewTest}
+                onPermanentDelete={async ids=>{try{for(let i=0;i<ids.length;i+=25){notify(`Permanently deleting tests ${i+1}–${Math.min(i+25,ids.length)} of ${ids.length}…`);await requestJson("/api/admin/trash-delete",{testIds:ids.slice(i,i+25),confirm:"DELETE"},()=>auth.currentUser);}notify("Tests and their unused media permanently deleted.");}finally{await loadData();}}}
                 onDeleteTest={handleDeleteTest}
                 folders={folders}
                 onFolderChange={saveFolders}
@@ -1241,7 +1250,7 @@ export default function App() {
               )}
             {/* Dedicated test setup page */}
             {route === "test" && selectedTestFull && !pageLoading && (
-              <TestSetup test={selectedTestFull} mode={setupMode} minutes={setupTime} section={setupSection} onMode={setSetupMode} onMinutes={setSetupTime} onSection={setSetupSection} onStart={handleConfirmStartTest} onClose={()=>navigate(setupBackground.current)}/>
+              <TestSetup attempts={attempts} test={selectedTestFull} mode={setupMode} minutes={setupTime} section={setupSection} onMode={setSetupMode} onMinutes={setSetupTime} onSection={setSetupSection} onStart={handleConfirmStartTest} onClose={()=>navigate(setupBackground.current)}/>
             )}
           </React.Suspense>
         </main>

@@ -23,9 +23,9 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={get currentUser(){return globalThis.__workspaceUser||null}};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const variant of ['practice','exam','solution','member','listening','listening-solution','practice-expiry','exam-expiry']) {
+    for (const variant of ['practice','exam','solution','member','listening','listening-loading','listening-solution','practice-expiry','exam-expiry']) {
       const listening=variant.startsWith('listening'),expiry=variant.endsWith('-expiry');
-      const mode=expiry?variant.split('-')[0]:variant==='listening'?'practice':variant==='listening-solution'?'solution':variant;
+      const mode=expiry?variant.split('-')[0]:variant==='listening'||variant==='listening-loading'?'practice':variant==='listening-solution'?'solution':variant;
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
       Object.assign(window.HTMLElement.prototype,{load(){},pause(){},play(){return Promise.resolve()}});
       const storage=new Map<string,string>();
@@ -43,11 +43,40 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
           const result=scoreTest([{numbers,keys}],payload.responses);
           return {attemptId:payload.attemptId,result,band:estimatedBand(result),keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};
         }});
-      const test={schemaVersion:1,id:'test-one',title:'Test',skill:listening?'listening':'reading',access:'free',status:'published',source:'Forecast',duration:60,createdAt:1,updatedAt:1,parts:[{id:'p0',title:'Airborne Dentists',passageHtml:listening?'':'<p>A passage.</p>',questionHtml:'<p>Question prompt</p><span data-slot="s0"></span>',slots:{s0:{id:'s0',type:'text',numbers:[1],label:'Complete the sentence',options:[]}},questions:questions.map(q=>({...q,answer:'',explanationHtml:''}))}]};
+      const test={schemaVersion:1,id:'test-one',title:'Test',skill:listening?'listening':'reading',access:'free',status:'published',source:'Forecast',duration:60,createdAt:1,updatedAt:1,parts:[{id:'p0',title:'Airborne Dentists',audio:undefined as string|undefined,passageHtml:listening?'':'<p>A passage.</p>',questionHtml:'<p>Question prompt</p><span data-slot="s0"></span>',slots:{s0:{id:'s0',type:'text',numbers:[1],label:'Complete the sentence',options:[]}},questions:questions.map(q=>({...q,answer:'',explanationHtml:''}))}]};
+      const originalFetch=globalThis.fetch;
+      const pendingDownloads:((r:Response)=>void)[]=[];
+      if(variant==='listening-loading'){
+        test.parts[0].audio='https://audio.test/one.mp3';
+        test.parts.push({...test.parts[0],id:'p1',title:'Part 2',audio:'https://audio.test/two.mp3',questions:[{number:41,kind:'fill_blank',answer:'',explanationHtml:''}]});
+        globalThis.fetch=async()=>new Promise(resolve=>pendingDownloads.push(resolve));
+      }
       const noop=()=>{};
       let root=createRoot(document.getElementById('root')!);
       try {
         await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        if(variant==='listening-loading'){
+          assert.match(document.querySelector('.questions-pane')!.textContent!,/Question prompt/);
+          assert.equal(document.querySelector('.audio-loading-gate'),null);
+          assert.ok(document.querySelector('.audio-background-progress'));
+          const play=document.querySelector<HTMLButtonElement>('[aria-label="Play recording"]')!;
+          assert.equal(play.disabled,true);assert.equal(document.querySelector('audio')!.hasAttribute('src'),false);
+          const clock=document.querySelector('.reader-clock')!.textContent;
+          await act(async()=>new Promise(resolve=>setTimeout(resolve,1100)));
+          assert.equal(document.querySelector('.reader-clock')!.textContent,clock,'timer waits for complete recordings');
+          await act(async()=>pendingDownloads.shift()!(new Response('first audio',{headers:{'Content-Type':'audio/mpeg'}})));
+          assert.equal(play.disabled,true,'one complete file must not unlock an incomplete test');
+          await act(async()=>pendingDownloads.shift()!(new Response('second audio',{headers:{'Content-Type':'audio/mpeg'}})));
+          assert.equal(play.disabled,false);assert.match(document.querySelector('audio')!.getAttribute('src')!,/^blob:/);assert.equal(document.querySelector('.audio-background-progress'),null);
+          const pane=document.querySelector('.questions-pane')! as HTMLElement;pane.scrollTop=500;
+          await act(async()=>document.querySelectorAll('.reader-passage-tabs button')[1].dispatchEvent(new window.Event('click',{bubbles:true})));
+          assert.equal(pane.scrollTop,0,'changing parts resets the question scroll position');
+          await act(async()=>document.querySelector('[aria-label="Display settings"]')!.dispatchEvent(new window.Event('click',{bubbles:true})));
+          const volume=document.querySelector<HTMLInputElement>('[aria-label="Listening volume"]')!,speed=document.querySelector<HTMLInputElement>('[aria-label="Listening speed"]')!;
+          volume.value='.4';speed.value='7';await act(async()=>{volume.dispatchEvent(new window.Event('input',{bubbles:true}));speed.dispatchEvent(new window.Event('input',{bubbles:true}))});
+          assert.equal((document.querySelector('audio')! as any).volume,.4);assert.equal((document.querySelector('audio')! as any).playbackRate,1.15);
+          continue;
+        }
         if(mode==='solution'){
           if(listening)assert.match(document.querySelector('.passage-pane')!.textContent!,/PRIVATE LISTENING TRANSCRIPT/);
           assert.equal(requests,1);assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/);assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
@@ -98,7 +127,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         assert.equal(document.querySelectorAll('.solution-score-banner button[aria-pressed]').length,2);
         assert.match(document.querySelector('.explanation-card')!.textContent!,/Correct answer: yes.*Source explanation/s);
         assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
-      } finally {await act(async()=>root.unmount());}
+      } finally {globalThis.fetch=originalFetch;await act(async()=>root.unmount());}
     }
   } finally {rmSync(temp,{recursive:true,force:true});}
 });

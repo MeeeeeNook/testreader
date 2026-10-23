@@ -21,7 +21,7 @@ async function fixture(name:string,audios=4){const zip=new JSZip();const parts=A
 
 test('Listening ZIP import reads audio into memory, scopes identical names per archive and assigns all parts',async()=>{
  dom();const plan=await prepareImport([await fixture('First'),await fixture('Second')]);
- try{assert.equal(plan.candidates.length,2);assert.equal(plan.recordings?.length,8);const first=plan.candidates[0].test,second=plan.candidates[1].test;assert.equal(first.skill,'listening');assert.equal(first.duration,30);assert.equal(first.title,'First');assert.deepEqual(first.parts.map(p=>p.audioName),['part-1.mp3','part-2.mp3','part-3.mp3','part-4.mp3']);assert.notEqual(first.parts[0].audio,second.parts[0].audio);assert.equal(await plan.recordings![0].blob.text(),'ID3-First-0');const uploads=new Map([[first.parts[0].audio!,'https://storage.example/audio.mp3']]);const saved=replaceImportAssets(first,uploads);assert.equal(saved.parts[0].audio,saved.audioFiles![0].url);assert.equal(saved.parts[0].audio,'https://storage.example/audio.mp3');}finally{disposeImport(plan)}
+ try{assert.equal(plan.candidates.length,2);assert.equal(plan.recordings?.length,8);const first=plan.candidates[0].test,second=plan.candidates[1].test;assert.equal(first.skill,'listening');assert.equal(first.duration,40);assert.equal(first.title,'First');assert.deepEqual(first.parts.map(p=>p.audioName),['part-1.mp3','part-2.mp3','part-3.mp3','part-4.mp3']);assert.notEqual(first.parts[0].audio,second.parts[0].audio);assert.equal(await plan.recordings![0].blob.text(),'ID3-First-0');const uploads=new Map([[first.parts[0].audio!,'https://storage.example/audio.mp3']]);const saved=replaceImportAssets(first,uploads);assert.equal(saved.parts[0].audio,saved.audioFiles![0].url);assert.equal(saved.parts[0].audio,'https://storage.example/audio.mp3');}finally{disposeImport(plan)}
 });
 test('a single shared recording plays once; missing section audio never shifts later sections',()=>{
  const test=sample(),one=assignImportedAudio(test,[{id:'full',name:'full.mp3',url:'full'}],[]);assert.equal(listeningTracks(one.parts).length,1);assert.equal(listeningTracks(one.parts)[0].partIds.length,4);
@@ -62,7 +62,7 @@ import {examMinutes} from '../src/services/sessionSettings';
 test('Listening uses its own estimated band boundaries and admin exam timing',()=>{
  const result:any={total:40,ungraded:0,correct:32};assert.equal(estimatedBand(result,'listening'),7.5);assert.equal(estimatedBand(result),7);
  result.correct=15;assert.equal(estimatedBand(result,'listening'),4.5);assert.equal(estimatedBand(result),5);
- assert.equal(examMinutes(sample()),30);assert.equal(examMinutes({...sample(),duration:35}),35);
+ assert.equal(examMinutes(sample()),40);assert.equal(examMinutes({...sample(),duration:35}),40);assert.equal(examMinutes({...sample(),duration:12,parts:[sample().parts[0]]}),12);
 });
 
 test('mislabelled Listening blanks retain their answer control and absent transcripts do not crash import',()=>{
