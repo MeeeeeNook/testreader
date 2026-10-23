@@ -1,3 +1,5 @@
+import {ListeningMediaEditor} from './ListeningMediaEditor';
+import {audioMime} from '../services/listening';
 import {TestCover} from "./TestCover";
 import {createId} from "../services/ids";
 import {RichEditor} from "./RichEditor";
@@ -33,6 +35,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
   const [newQuestionType, setNewQuestionType] = useState<'text' | 'select' | 'radio' | 'multi'>('text');
   const [newQuestionLabel, setNewQuestionLabel] = useState('');
   const [saving, setSaving] = useState(false);
+  const [audioBusy,setAudioBusy]=useState(false);
   const [coverBusy,setCoverBusy]=useState(false);
   const uploadCover=async(file?:File)=>{if(!file)return;if(!/^image\/(png|jpeg|webp|gif)$/.test(file.type)||file.size>5*1024*1024){onNotify('Choose a PNG, JPEG, WebP or GIF image up to 5 MB.');return;}setCoverBusy(true);try{const image=await createImageBitmap(file),scale=Math.min(1,1200/image.width,800/image.height),canvas=document.createElement('canvas');canvas.width=Math.round(image.width*scale);canvas.height=Math.round(image.height*scale);canvas.getContext('2d')!.drawImage(image,0,0,canvas.width,canvas.height);image.close();const blob=await new Promise<Blob>((resolve,reject)=>canvas.toBlob(b=>b?resolve(b):reject(new Error('Could not process this image.')),'image/webp',.82));const url=await firestoreAdapter.uploadMedia(blob,`tests/${test.id}/covers/${Date.now()}.webp`);setTest(prev=>({...prev,coverImage:url}));}catch(error){onNotify((error as Error).message);}finally{setCoverBusy(false);}};
   const [openQuestions,setOpenQuestions]=useState<number[]>([]);
@@ -194,6 +197,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
     }
     setSaving(true);
     try {
+      if(status==='published'&&test.skill==='listening'&&test.parts.some(p=>!p.audio||(p.audioEnd&&p.audioEnd<=(p.audioStart||0))))throw new Error('Assign a valid recording and time range to every Listening part before publishing.');
       const copy = { ...test, status };
       delete copy.contentHash;
       await onSave(copy, status);
@@ -223,14 +227,14 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           <button
             className="studio-secondary"
             onClick={() => handleCommit('draft')}
-            disabled={saving||coverBusy}
+            disabled={saving||coverBusy||audioBusy}
           >
             Save Draft
           </button>
           <button
             className="studio-primary"
             onClick={() => handleCommit('published')}
-            disabled={saving||coverBusy}
+            disabled={saving||coverBusy||audioBusy}
           >
             Publish to Library
           </button>
@@ -263,7 +267,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             Skill
             <Select
               value={test.skill}
-              onChange={(e) => setTest({ ...test, skill: e.target.value as any })}
+              onChange={(e) => setTest({ ...test, skill: e.target.value as 'reading'|'listening', duration:e.target.value==='listening'?30:60 })}
             >
               <option value="reading">Academic Reading</option>
               <option value="listening">Listening</option>
@@ -322,28 +326,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
           </button>
         </div>
 
-        {/* Audio Attachment for Listening */}
-        {test.skill === 'listening' && (
-          <div style={{ margin: '14px 0', padding: '14px', background: 'var(--studio-soft)', borderRadius: '8px' }}>
-            <label style={{ fontWeight: 600, fontSize: '12px', display: 'block', marginBottom: '6px' }}>
-              Section Listening Audio
-            </label>
-            <div style={{ display: 'flex', gap: '10px', alignItems: 'center' }}>
-              <input type="file" accept="audio/*" onChange={handleAudioUpload} />
-              {part.audio && (
-                <button
-                  className="studio-quiet studio-danger"
-                  onClick={() => updatePart((p) => { p.audio = ''; })}
-                >
-                  Remove Audio
-                </button>
-              )}
-            </div>
-            {part.audio && (
-              <audio controls src={part.audio} style={{ marginTop: '10px', width: '100%' }} />
-            )}
-          </div>
-        )}
+        {test.skill==='listening'&&<ListeningMediaEditor test={test} onChange={setTest} onBusyChange={setAudioBusy} onUpload={async file=>{const blob=new Blob([file],{type:audioMime(file.name)});const id=createId();const url=await firestoreAdapter.uploadMedia(blob,`tests/${test.id}/audio/${id}-${file.name.replace(/[^a-zA-Z0-9._-]/g,'_')}`);return {id,name:file.name,url,size:file.size};}}/>}
 
         {/* Passage / Transcript Editor */}
         <div style={{ marginTop: '20px' }}>
@@ -357,7 +340,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             </div>
           </div>
 
-          <RichEditor documentId={part.id+':passage'} label="Reading passage" value={part.passageHtml} slots={part.slots} onUploadImage={uploadEditorImage} onChange={html=>updatePart(p=>{p.passageHtml=html;})}/>
+          <RichEditor documentId={part.id+':passage'} label={test.skill==='listening'?'Transcript (solution screen only)':'Reading passage'} value={part.passageHtml} slots={part.slots} onUploadImage={uploadEditorImage} onChange={html=>updatePart(p=>{p.passageHtml=html;})}/>
         </div>
 
         {/* Question Layout Editor */}

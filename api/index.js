@@ -85,9 +85,28 @@ function scoreTest(parts, responses) {
   result.gradable = result.total - result.ungraded;
   return result;
 }
-function estimatedBand(result) {
+function estimatedBand(result, skill = "reading") {
   if (result.total !== 40 || result.ungraded > 0) return null;
-  const bounds = [
+  const bounds = skill === "listening" ? [
+    [39, 9],
+    [37, 8.5],
+    [35, 8],
+    [32, 7.5],
+    [30, 7],
+    [26, 6.5],
+    [23, 6],
+    [18, 5.5],
+    [16, 5],
+    [13, 4.5],
+    [10, 4],
+    [8, 3.5],
+    [6, 3],
+    [4, 2.5],
+    [3, 2],
+    [2, 1.5],
+    [1, 1],
+    [0, 0]
+  ] : [
     [39, 9],
     [37, 8.5],
     [35, 8],
@@ -128,6 +147,7 @@ async function loadAssessment(store, request, admin) {
   const cache = /* @__PURE__ */ new Map();
   const keys = {};
   const parts = [];
+  const transcripts = {};
   const seenSections = /* @__PURE__ */ new Set();
   let next = 1;
   let skill;
@@ -156,6 +176,7 @@ async function loadAssessment(store, request, admin) {
       const identity = source.testId + ":" + section.id;
       if (seenSections.has(identity)) throw new AssessmentError(400, "Choose distinct source sections.");
       seenSections.add(identity);
+      if (skill === "listening") transcripts[custom ? "p" + parts.length : section.id] = data.keyData.transcripts?.[section.id] ?? section.passageHtml ?? "";
       const questions = section.questions || [];
       const slots = Object.values(section.slots || {});
       if (questions.some((q) => !q.missing && !slots.some((s) => s.numbers.includes(q.number)))) {
@@ -177,7 +198,7 @@ async function loadAssessment(store, request, admin) {
   }
   if (!parts.some((p) => p.numbers.length)) throw new AssessmentError(409, "This test has no questions.");
   const first = cache.values().next().value;
-  return { parts, keys, title: custom ? "Custom Mock" : first.meta.title, skill };
+  return { parts, keys, transcripts, title: custom ? "Custom Mock" : first.meta.title, skill };
 }
 function markAssessment(assessment, responses) {
   if (!responses || typeof responses !== "object" || Array.isArray(responses)) throw new AssessmentError(400, "Answers must be an object.");
@@ -189,7 +210,7 @@ function markAssessment(assessment, responses) {
     clean[Number(number)] = value;
   }
   const result = scoreTest(assessment.parts, clean);
-  return { result, band: estimatedBand(result), responses: clean };
+  return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
 }
 
 // server/publicPages.ts
@@ -625,7 +646,7 @@ app.post("/api/test-review", async (req, res) => {
       req.body,
       isAdmin
     );
-    res.json({ keys: assessment.keys });
+    res.json({ keys: assessment.keys, transcripts: assessment.transcripts });
   } catch (error) {
     apiError(res, error);
   }
@@ -646,7 +667,7 @@ app.post("/api/submit-exam", async (req, res) => {
       req.body.responses || {}
     );
     const attemptId = typeof req.body.attemptId === "string" && /^[\w-]{1,128}$/.test(req.body.attemptId) ? req.body.attemptId : randomUUID2();
-    res.json({ attemptId, result, band, keys: assessment.keys });
+    res.json({ attemptId, result, band, keys: assessment.keys, transcripts: assessment.transcripts });
   } catch (error) {
     apiError(res, error);
   }

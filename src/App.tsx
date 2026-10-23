@@ -6,7 +6,7 @@ import {SignInView} from "./components/SignInView";
 import {Select} from "./components/Select";
 import {testLink,resolveTestLink} from "./services/testLinks";
 import {folderLocation,folderDeletion,trashFolders,restoreFolders,reconcileLibrary,organizationPatch,type LibraryFolder} from "./services/folders";
-import {contentMatch} from "./services/importIdentity";
+import {contentHash,mediaDigests,contentMatch} from "./services/importIdentity";
 import {AdminSidebar} from './components/AdminSidebar';
 import {ImportPreview} from './components/ImportPreview';
 import {prepareImport,disposeImport,replaceImportAssets,type ImportPlan,type ImportCandidate} from './services/importPreview';
@@ -366,7 +366,7 @@ export default function App() {
           if(!alive)return;
           const section=target.section?(full.parts.find(p=>p.id===target.section!.id)||(!target.test.sectionSummaries?full.parts[target.section.index]:undefined)):null;
           if(target.section&&!section)throw new Error("This passage is unavailable.");
-          const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],title:section.title}:full;
+          const chosen=section?{...full,sourceTestId:full.id,sectionIds:[section.id],parts:[section],duration:full.skill==='listening'?10:full.duration,title:section.title}:full;
           const params=new URL(location,'https://studio.local').searchParams;
           const settings=directSession(params,chosen);setActiveTest(chosen);setActiveDirectSlug(page.slug);setActiveMode(settings.mode);setActiveDuration(settings.minutes);setActivePreview(false);
           const attempt=params.get("attempt");setSessionId("direct:"+target.test.id+":"+(target.section?.id||"all")+(attempt&&/^[\w-]{1,128}$/.test(attempt)?":"+attempt:""));
@@ -568,6 +568,7 @@ export default function App() {
       ...testToStart,
       parts: testToStart.parts.map((p) => ({
         ...p,
+        passageHtml:testToStart.skill==='listening'?'':p.passageHtml,
         questions: p.questions.map((q) => ({
           ...q,
           answer: "",
@@ -618,6 +619,7 @@ export default function App() {
         chosen.sourceTestId = selectedTestFull.id;
         chosen.sectionIds = [sectionPart.id];
         chosen.parts = [sectionPart];
+        if(chosen.skill==='listening')chosen.duration=10;
         chosen.id = `${selectedTestFull.id}_part_${setupSection}`;
         chosen.title = `${selectedTestFull.title} — ${sectionPart.title}`;
       }
@@ -849,16 +851,19 @@ export default function App() {
   const confirmImport=async (items:ImportCandidate[])=>{
     const plan=importPlanRef.current;
     if(!plan||userRole!=="admin"||importing.current||!items.length)return;
-    importing.current=true;setImportPlan(null);setUploadProgress("Uploading images…");
+    importing.current=true;setImportPlan(null);setUploadProgress("Uploading test media…");
     let imported=0,duplicates=items.filter(item=>item.match).length,completed=false;
     const errors=[...plan.errors];
     try {
+      const digests=await mediaDigests([...plan.images,...(plan.recordings||[])]);
+      for(const item of items)item.test.contentHash=await contentHash(item.test,digests);
       const assets=new Map<string,string>();
       const selectedContent=JSON.stringify(items);
-      for(const image of plan.images) {
+      for(const image of [...plan.images,...(plan.recordings||[])]) {
         if(!selectedContent.includes(image.url))continue;
         // A missing diagram must never become an expired blob URL in a saved test.
-        assets.set(image.url,await firestoreAdapter.uploadMedia(image.blob,`media/${createId()}-${image.name}`));
+        setUploadProgress(`Uploading ${image.name}…`);
+        assets.set(image.url,await firestoreAdapter.uploadMedia(image.blob,`media/${createId()}-${image.name.split('/').pop()}`));
       }
       const candidates=items.map(c=>({...c,test:replaceImportAssets(c.test,assets)}));
       // 3. Save candidates to Firestore with duplicate detection

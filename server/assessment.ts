@@ -20,6 +20,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
   const cache = new Map<string, { meta: any; sections: any[]; keyData: any }>();
   const keys: Record<number, QuestionKey & { missing?: boolean }> = {};
   const parts: ScoringPart[] = [];
+  const transcripts:Record<string,string>={};
   const seenSections = new Set<string>();
   let next = 1;
   let skill: string | undefined;
@@ -48,6 +49,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
       const identity = source.testId + ':' + section.id;
       if (seenSections.has(identity)) throw new AssessmentError(400, 'Choose distinct source sections.');
       seenSections.add(identity);
+      if(skill==='listening')transcripts[custom?'p'+parts.length:section.id]=data.keyData.transcripts?.[section.id]??section.passageHtml??'';
       const questions = section.questions || [];
       const slots = Object.values(section.slots || {}) as { numbers: number[]; type: string }[];
       if (questions.some((q: any) => !q.missing && !slots.some(s => s.numbers.includes(q.number)))) {
@@ -69,7 +71,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
   }
   if (!parts.some(p => p.numbers.length)) throw new AssessmentError(409, 'This test has no questions.');
   const first = cache.values().next().value!;
-  return { parts, keys, title: custom ? 'Custom Mock' : first.meta.title, skill };
+  return { parts, keys, transcripts, title: custom ? 'Custom Mock' : first.meta.title, skill };
 }
 
 export function markAssessment(assessment: Awaited<ReturnType<typeof loadAssessment>>, responses: unknown) {
@@ -82,5 +84,5 @@ export function markAssessment(assessment: Awaited<ReturnType<typeof loadAssessm
     clean[Number(number)] = value;
   }
   const result = scoreTest(assessment.parts, clean);
-  return { result, band: estimatedBand(result), responses: clean };
+  return { result, band: estimatedBand(result, assessment.skill==='listening'?'listening':'reading'), responses: clean };
 }
