@@ -1,3 +1,5 @@
+import {runMediaQueue,type QueueRow,type QueueResult} from './services/mediaQueue';
+import {TeacherAccounts,TeacherAdminView} from './components/TeacherAccess';
 import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
 import {FolderPage} from "./components/FolderPage";
@@ -93,6 +95,9 @@ export default function App() {
   const [sessionId, setSessionId] = useState("");
   const [activeDirectSlug,setActiveDirectSlug]=useState("");
   const [user, setUser] = useState<User | null>(null);
+  const uploadCache=useRef(new Map<string,QueueResult>());
+  const [queueRows,setQueueRows]=useState<QueueRow[]>([]);
+  const [isTeacher,setIsTeacher]=useState(false);
   const [userRole, setUserRole] = useState<"admin" | "student">("student");
   const [suspended, setSuspended] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(() => {
@@ -161,7 +166,7 @@ export default function App() {
   const importPlanRef=useRef<ImportPlan|null>(null);
   const preparingImport=useRef(false);
   const importing=useRef(false);
-  const closeImportPreview=()=>{if(importPlanRef.current)disposeImport(importPlanRef.current);importPlanRef.current=null;setImportPlan(null);};
+  const closeImportPreview=()=>{uploadCache.current.clear();if(importPlanRef.current)disposeImport(importPlanRef.current);importPlanRef.current=null;setImportPlan(null);};
   useEffect(()=>()=>{if(importPlanRef.current)disposeImport(importPlanRef.current);},[]);
   const [uploadReport, setUploadReport] = useState<{
     imported: number;
@@ -204,6 +209,7 @@ export default function App() {
       previousUser.current = state.user?.uid || null;
       setAuthReady(true);
       setUser(state.user);
+      setIsTeacher(state.teacher===true&&!state.suspended);
       setUserRole(
         state.role === "admin" &&
           state.user?.email === "manhcuong2006ht@gmail.com" &&
@@ -862,39 +868,38 @@ export default function App() {
   const confirmImport=async (items:ImportCandidate[])=>{
     const plan=importPlanRef.current;
     if(!plan||userRole!=="admin"||importing.current||!items.length)return;
-    importing.current=true;setImportPlan(null);setUploadProgress("Uploading test media…");
+    importing.current=true;setQueueRows([]);setImportPlan(null);setUploadProgress("Uploading test media…");
     setImportProgress({phase:'verify',label:'Checking selected media',percent:0});
     let currentStep='Checking selected media';let audioOriginalBytes=0,audioStoredBytes=0;
     let imported=0,duplicates=items.filter(item=>item.match).length,completed=false;
+    const savedIds=new Set<string>();
     const errors=[...plan.errors];
     try {
       const digests=await mediaDigests([...plan.images,...(plan.recordings||[])],(done,total)=>setImportProgress({phase:'verify',label:'Checking selected media',percent:5*done/Math.max(1,total)}));
       for(const item of items)item.test.contentHash=await contentHash(item.test,digests);
       const assets=new Map<string,string>(),audioNames=new Map<string,string>(),audioSizes=new Map<string,number>();
-      const uploadedAudio=new Map<string,{url:string;name:string;size:number}>();
       const selectedContent=JSON.stringify(items);
       const media=[...plan.images,...(plan.recordings||[])].filter(image=>selectedContent.includes(image.url));
-      const totalBytes=media.reduce((sum,image)=>sum+image.blob.size,0);let sentBytes=0;
-      for(const [mediaIndex,image] of media.entries()) {
-        const isAudio=plan.recordings?.some(recording=>recording.url===image.url),digest=digests.get(image.url)!;
-        const reused=isAudio?uploadedAudio.get(digest):undefined;
-        if(reused){audioSizes.set(image.url,reused.size);audioOriginalBytes+=image.blob.size;audioStoredBytes+=reused.size;assets.set(image.url,reused.url);audioNames.set(image.url,image.name.replace(/\.[^.]+$/,'')+'.'+reused.name.split('.').pop());sentBytes+=image.blob.size;continue}
-        const from=5+80*sentBytes/Math.max(1,totalBytes),span=80*image.blob.size/Math.max(1,totalBytes);
-        let blob=image.blob,name=image.name;
-        if(isAudio){
-          currentStep='Compressing '+image.name;setUploadProgress(currentStep);
-          const {compressListeningAudio}=await import('./services/audioCompression');
-          const compressed=await compressListeningAudio(blob,name,(percent,label)=>setImportProgress({phase:'compress',label,percent:from+span*.45*percent/100,detail:image.name}));
-          blob=compressed.blob;name=compressed.name;audioSizes.set(image.url,blob.size);audioOriginalBytes+=image.blob.size;audioStoredBytes+=blob.size;audioNames.set(image.url,name);
-          setImportProgress({phase:'compress',label:'Audio ready',percent:from+span*.45,detail:`${name}: ${(image.blob.size/1048576).toFixed(1)} MB to ${(blob.size/1048576).toFixed(1)} MB`});
-        }
-        currentStep='Uploading '+name;setUploadProgress(currentStep);
-        const path=isAudio?`media/audio/48k-v1/${digest}.${name.split('.').pop()}`:`media/${createId()}-${name.split('/').pop()}`;
-        const existing=isAudio?await firestoreAdapter.existingMedia(path):null;
-        const url=existing||await firestoreAdapter.uploadMedia(blob,path,(sent,total)=>setImportProgress({phase:'upload',label:`Uploading file ${mediaIndex+1} of ${media.length}`,percent:from+span*((isAudio?.45:0)+(isAudio?.55:1)*sent/Math.max(1,total)),detail:`${name} — ${(sent/1048576).toFixed(1)} / ${(total/1048576).toFixed(1)} MB${isAudio?' (original '+(image.blob.size/1048576).toFixed(1)+' MB)':''}`}));
-        assets.set(image.url,url);if(isAudio)uploadedAudio.set(digest,{url,name,size:blob.size});sentBytes+=image.blob.size;
-      }
-      const candidates=items.map(c=>({...c,test:replaceImportAssets({...c.test,parts:c.test.parts.map(p=>({...p,...(p.audio&&audioNames.has(p.audio)?{audioName:audioNames.get(p.audio)}:{})})),audioFiles:c.test.audioFiles?.map(file=>({...file,name:audioNames.get(file.url)||file.name,size:audioSizes.get(file.url)||file.size}))},assets)}));
+      const audioUrls=new Set(plan.recordings?.map(r=>r.url)||[]);
+      const {compressListeningAudio}=await import('./services/audioCompression');
+      const uploadPaths=new Map<string,string>();
+      setUploadProgress('Processing upload queue');
+      const {results,failures}=await runMediaQueue(media.map(image=>({...image,audio:audioUrls.has(image.url),digest:digests.get(image.url)||image.url})),{
+        compressionConcurrency:(navigator as Navigator&{deviceMemory?:number}).deviceMemory&&((navigator as Navigator&{deviceMemory?:number}).deviceMemory||0)<4?1:(navigator.hardwareConcurrency||2)>=4?2:1,
+        uploadConcurrency:3,cache:uploadCache.current,
+        compress:async(job,progress)=>{const result=await compressListeningAudio(job.blob,job.name,p=>progress(p));return {blob:result.blob,name:result.name}},
+        upload:async(job,blob,name,progress)=>{
+          let path=uploadPaths.get(job.url);if(!path){path=job.audio?`media/audio/96k-v1/${job.digest}.${name.split('.').pop()}`:`media/${createId()}-${name.split('/').pop()}`;uploadPaths.set(job.url,path);}
+          const existing=job.audio?await firestoreAdapter.existingMedia(path):null;
+          return existing||await firestoreAdapter.uploadMedia(blob,path,(sent,total)=>progress(100*sent/Math.max(1,total)));
+        },
+        onProgress:rows=>{setQueueRows(rows);const done=rows.filter(r=>r.phase==='complete'||r.phase==='failed').length;setImportProgress({phase:'upload',label:`${done} / ${rows.length} files processed`,percent:5+80*rows.reduce((sum,r)=>sum+r.percent,0)/Math.max(1,rows.length)})}
+      });
+      for(const image of media){const result=results.get(image.url);if(!result){errors.push(image.name+': '+failures.get(image.url));continue}assets.set(image.url,result.url);if(audioUrls.has(image.url)){audioSizes.set(image.url,result.size);audioNames.set(image.url,result.name);audioOriginalBytes+=image.blob.size;audioStoredBytes+=result.size}}
+      const failedItems=items.filter(item=>[...failures.keys()].some(url=>JSON.stringify(item.test).includes(url)));
+      for(const item of failedItems)errors.push(item.name+': not saved because a required media file failed. Retry this test from the preview.');
+      const readyItems=items.filter(item=>!failedItems.includes(item));
+      const candidates=readyItems.map(c=>({...c,test:replaceImportAssets({...c.test,parts:c.test.parts.map(p=>({...p,...(p.audio&&audioNames.has(p.audio)?{audioName:audioNames.get(p.audio)}:{})})),audioFiles:c.test.audioFiles?.map(file=>({...file,name:audioNames.get(file.url)||file.name,size:audioSizes.get(file.url)||file.size}))},assets)}));
       // 3. Save candidates to Firestore with duplicate detection
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
@@ -902,9 +907,10 @@ export default function App() {
           currentStep='Saving '+item.test.title;
           setImportProgress({phase:'save',label:`Saving test ${idx+1} of ${candidates.length}`,percent:85+15*idx/Math.max(1,candidates.length),detail:item.test.title});
           await withImportTimeout(firestoreAdapter.saveTestComplete(item.test,folders),'Saving '+item.test.title);
-          imported++;
+          imported++;savedIds.add(item.test.id);
         } catch (saveErr) {
           if((saveErr as {code?:string}).code==='import/save-timeout')throw saveErr;
+          failedItems.push(item);
           errors.push(
             `${item.name}: saving test: ${importError(saveErr)}`,
           );
@@ -912,12 +918,14 @@ export default function App() {
       }
 
       setImportProgress({phase:'save',label:'Import complete',percent:100});
-      setUploadReport({ imported, duplicates, errors,audioOriginalBytes,audioStoredBytes });completed=true;
+      setUploadReport({ imported, duplicates, errors,audioOriginalBytes,audioStoredBytes });
+      if(failedItems.length){plan.candidates=failedItems;completed=false;}else completed=true;
       await loadData();
       notify(
         `Import complete: ${imported} imported, ${duplicates} content matches kept as new copies.`,
       );
     } catch (topErr) {
+      plan.candidates=items.filter(item=>!savedIds.has(item.test.id));
       // Keep the preview hidden until the error report is dismissed.
       setUploadReport({imported,duplicates,errors:[...errors,currentStep+': '+importError(topErr)]});
     } finally {
@@ -962,6 +970,7 @@ export default function App() {
   };
 
   // If in active test workspace:
+  if(isTeacher&&['admin','students','editor','content-admin','contributions-admin'].includes(route))return <TeacherAdminView onNavigate={navigate}/>;
   if (activeTest && !pageLoading && !pageError && ((route === "reading" && activeDirectSlug===page.slug) || (route === "workspace" && page.session === sessionId))) {
     return (
       <>
@@ -1008,7 +1017,7 @@ export default function App() {
       )}
       {/* Sidebar Navigation */}
       <div className="studio-main">
-        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
+        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={isTeacher?'teacher':userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
 
         {/* Account Suspension Alert */}
         {suspended && (
@@ -1174,7 +1183,8 @@ export default function App() {
               />
             )}
             {route === "admin" && page.section === "website-ui" && userRole === "admin" && <WebsiteUISettings settings={websiteUI} folders={folders} tests={tests} onFolders={saveFolders} onSave={async value=>{const saved=await requestJson("/api/admin/website-ui",value,()=>auth.currentUser);setWebsiteUI(normalizeWebsiteUI(saved));}}/>}
-            {route === "admin" && page.section !== "website-ui" && userRole === "admin" && (
+            {route === "admin" && page.section === "teachers" && userRole === "admin" && <TeacherAccounts/>}
+            {route === "admin" && !["website-ui","teachers"].includes(page.section||"") && userRole === "admin" && (
               <AdminView
                 key={page.section || "overview"}
                 section={page.section || "overview"}
@@ -1310,7 +1320,8 @@ export default function App() {
               <strong>{uploadProgress}</strong>
               <div className="import-progress-track"><progress aria-label="Import progress" max={100} value={importProgress.percent}/><strong>{Math.floor(importProgress.percent)}%</strong></div>
               <p role="status">{importProgress.label}</p><p className="import-progress-file">{importProgress.detail}</p>
-              <p>Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
+              {queueRows.length>0&&<section aria-label="File upload queue" style={{maxHeight:'32vh',overflowY:'auto',textAlign:'left'}}>{queueRows.map(row=><div key={row.id} style={{padding:'9px 0',borderBottom:'1px solid #ddd'}}><strong style={{fontSize:12,overflowWrap:'anywhere'}}>{row.name}</strong><div style={{display:'flex',alignItems:'center',gap:10}}><progress aria-label={row.name+' progress'} max={100} value={row.percent}/><span style={{fontSize:11}}>{row.phase}{row.attempt>1?' · retry '+(row.attempt-1):''}</span></div>{row.error&&<small role="alert">{row.error}</small>}</div>)}</section>}
+              <p>Up to 2 recordings compress and 3 files upload at once. Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
             </div>
           )}
 

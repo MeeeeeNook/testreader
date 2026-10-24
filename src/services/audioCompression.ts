@@ -1,6 +1,6 @@
 import CompressionWorker from './audioCompression.worker?worker';
 export interface CompressedAudio {blob:Blob;name:string;originalSize:number;saved:number;duration:number}
-const bitrate=48000,sampleRate=22050;
+const bitrate=96000,sampleRate=22050;
 function durationOf(blob:Blob){return new Promise<number>((resolve,reject)=>{
  const element=document.createElement('audio'),url=URL.createObjectURL(blob);
  const done=(error?:Error)=>{clearTimeout(timer);element.removeAttribute('src');URL.revokeObjectURL(url);error?reject(error):resolve(duration)};let duration=0;
@@ -20,7 +20,7 @@ export async function compressListeningAudio(blob:Blob,name:string,onProgress?:(
  const encoded=await new Promise<ArrayBuffer>((resolve,reject)=>{
   let timer:ReturnType<typeof setTimeout>;const reset=()=>{clearTimeout(timer);timer=setTimeout(()=>{worker.terminate();reject(new Error('Audio compression stopped responding for 120 seconds. Try a smaller recording.'))},120000)};reset();
   worker.onerror=()=>{clearTimeout(timer);worker.terminate();reject(new Error('Audio compression failed. Try a smaller recording or an MP3 source.'))};
-  worker.onmessage=(event:MessageEvent<{percent?:number;buffer?:ArrayBuffer;error?:string}>)=>{reset();if(event.data.error){clearTimeout(timer);worker.terminate();reject(new Error('Audio compression: '+event.data.error))}else if(event.data.buffer){clearTimeout(timer);worker.terminate();resolve(event.data.buffer)}else if(event.data.percent!==undefined)onProgress?.(10+event.data.percent*.9,'Compressing MP3, mono 48 kbps')};worker.postMessage({pcm:pcm.buffer,sampleRate},[pcm.buffer]);
+  worker.onmessage=(event:MessageEvent<{percent?:number;buffer?:ArrayBuffer;error?:string}>)=>{reset();if(event.data.error){clearTimeout(timer);worker.terminate();reject(new Error('Audio compression: '+event.data.error))}else if(event.data.buffer){clearTimeout(timer);worker.terminate();resolve(event.data.buffer)}else if(event.data.percent!==undefined)onProgress?.(10+event.data.percent*.9,'Compressing MP3, mono 96 kbps')};worker.postMessage({pcm:pcm.buffer,sampleRate},[pcm.buffer]);
  });
  const compressed=new Blob([encoded],{type:'audio/mpeg'});onProgress?.(100,'Compression complete');
  return compressed.size<blob.size?{blob:compressed,name:name.replace(/\.[^.]+$/,'')+'.mp3',originalSize:blob.size,saved:blob.size-compressed.size,duration}:{blob,name,originalSize:blob.size,saved:0,duration};

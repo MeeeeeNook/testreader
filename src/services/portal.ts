@@ -4,7 +4,10 @@ export const questionTypes = [
  ['diagram','Plan, map, diagram labelling'],['sentence','Sentence Completion'],['summary','Summary, form completion'],
  ['true_false','TRUE–FALSE–NOT GIVEN'],['yes_no','YES–NO–NOT GIVEN'],['matching_features','Matching Features'],
 ] as const;
+export const listeningQuestionTypes=[['multiple_choice','Multiple Choice'],['matching_features','Matching'],['diagram','Plan, map, diagram labelling'],['sentence','Sentence Completion'],['summary','Form, note, table, flow-chart, summary completion'],['short_answer','Short-answer questions']] as const;
+export const questionTypesForSkill=(skill:string)=>skill==='listening'?listeningQuestionTypes:questionTypes;
 export function questionFamily(kind: string) {
+ if (/short.?answer/i.test(kind)) return 'short_answer';
  if (/heading/i.test(kind)) return 'heading';
  if (/multiple_choice/i.test(kind)) return 'multiple_choice';
  if (/matching_info/i.test(kind)) return 'matching_info';
@@ -19,13 +22,14 @@ export function sectionSummaries(test: EditableTest) {
  return test.parts.map((p,index)=>{
   const kinds=new Set(p.questions.map(q=>questionFamily(q.kind)));
   const instructions=p.questionHtml.replace(/<[^>]*>/g,' ');
+  if (/answer\s+(?:the\s+)?(?:following\s+)?questions/i.test(instructions)&&test.skill==='listening')kinds.add('short_answer');
   if (/complete[\s\S]{0,60}sentences/i.test(instructions)) kinds.add('sentence');
   if (/label[\s\S]{0,50}(?:diagram|map|plan)/i.test(instructions)) kinds.add('diagram');
   return {id:p.id || `p${index}`,index:p.position ? p.position-1 : index,title:p.title,questions:p.questions.length,kinds:[...kinds]};
  });
 }
 export function catalogSections(test: TestMeta) {
- return test.sectionSummaries || Array.from({length:test.passages},(_,index)=>({id:`p${index}`,index,title:test.passageTitles?.[index] || `${test.skill==='reading'?'Passage':'Section'} ${index+1}`,questions:0,kinds:[] as string[]}));
+ return test.sectionSummaries || Array.from({length:test.passages},(_,index)=>({id:`p${index}`,index,title:test.passageTitles?.[index] || `${test.skill==='reading'?'Passage':'Part'} ${index+1}`,questions:0,kinds:[] as string[]}));
 }
 export function countsAsAttempt(uid: string | null | undefined, manual: boolean, total: number, responses: Record<string, string>, numbers: number[]) {
  return Boolean(uid && uid !== 'guest' && manual && total > 0 && numbers.filter(n=>String(responses[n] || '').trim()).length >= Math.ceil(total / 2));

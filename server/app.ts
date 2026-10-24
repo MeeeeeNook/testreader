@@ -1,3 +1,4 @@
+import {teacherAccess,registerTeacherRoutes} from './teacherRoutes';
 import {registerWebsiteUIRoutes} from './websiteUIRoutes';
 import {registerTrashRoutes} from './trashRoutes';
 import {registerStudentRoutes} from './studentRoutes';
@@ -114,6 +115,7 @@ async function caller(req: express.Request) {
   return { identity, isAdmin, db, profile };
 }
 registerStudentRoutes(app,caller,backend,apiError);
+registerTeacherRoutes(app,caller,backend,apiError);
 registerWebsiteUIRoutes(app,caller,backend,apiError);
 registerTrashRoutes(app,caller,backend,apiError);
 registerMediaRoutes(app,async req=>{const identity=await caller(req);if(!identity.isAdmin)throw new AssessmentError(403,'Administrator access required.');return identity;},()=>backend().bucket);
@@ -199,6 +201,7 @@ app.post("/api/auth/sync", async (req, res) => {
       });
     res.json({
       role: isAdmin ? "admin" : "student",
+      teacher: !isAdmin&&await teacherAccess(db,identity),
       status: profile.data()?.status || "active",
     });
   } catch (error) {
