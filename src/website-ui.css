@@ -105,3 +105,38 @@
 .catalog-folder-link:hover{background:var(--teal-light,#edf4ee);border-color:#b0c6ad}
 .mini-skill-tabs{display:flex;gap:12px;margin-bottom:22px}.mini-skill-tabs button{flex:1;max-width:280px}
 @media(max-width:640px){.catalog-folder-grid{gap:8px}.catalog-folder-link{min-width:0;flex:1 1 calc(50% - 8px);padding:11px;font-size:12px}.mini-skill-tabs button{flex:1;max-width:none}.catalog-folders{margin-bottom:18px}}
+
+/* Collections are simple test-category buttons, with no directory chrome. */
+.catalog-folder-grid{align-items:center;gap:10px}
+.catalog-folder-link{display:inline-flex;justify-content:center;min-width:0;max-width:100%;padding:10px 19px;border-radius:8px;font:500 13px var(--sans,inherit);cursor:pointer;flex:0 1 auto}
+.catalog-folder-link[aria-pressed=true]{color:var(--teal,#397455);background:var(--teal-light,#edf4ee);border-color:#aec5ae}
+.catalog-collection-back{background:transparent;color:var(--muted,#6c7b70)}
+/* Keep the primary links readable; give them a full row before space runs out. */
+.portal-header{display:grid;grid-template-columns:auto minmax(0,1fr) auto;gap:24px;min-height:88px;padding:0 clamp(20px,3vw,48px)}
+.portal-header .portal-brand{flex-shrink:0;margin:0;font-size:24px}
+.portal-header .portal-navigation{display:flex;align-items:center;justify-content:center;gap:clamp(14px,1.6vw,26px);margin:0;padding:0;font-size:14px;min-width:0;white-space:nowrap}
+.portal-header .portal-navigation>a{flex:0 0 auto;gap:6px;min-height:44px;white-space:nowrap}
+.portal-header .account-tools{margin:0;gap:10px;justify-self:end}
+.portal-header .account-trigger{white-space:nowrap}.portal-header .account-name{max-width:100px;overflow:hidden;text-overflow:ellipsis}
+.portal-header .portal-menu-button{display:none}
+@media(min-width:761px) and (max-width:1250px){
+ .portal-header{grid-template-columns:minmax(0,1fr) auto;grid-template-rows:44px 44px;min-height:124px;padding:12px 3vw;row-gap:12px}
+ .portal-header .portal-brand{grid-column:1;grid-row:1;font-size:23px}
+ .portal-header .account-tools{grid-column:2;grid-row:1}
+ .portal-header .portal-navigation{grid-column:1/-1;grid-row:2;flex-direction:row;justify-content:center;gap:28px;order:0;font-size:14px}
+ .portal-header .portal-navigation.is-open{max-height:none;overflow:visible}
+ .portal-header + .app{height:calc(100dvh - 124px)}
+}
+@media(max-width:760px){
+ .portal-header{grid-template-columns:minmax(0,1fr) auto auto;grid-template-rows:auto;min-height:76px;padding:12px 16px;gap:10px}
+ .portal-header .portal-brand{font-size:20px;grid-column:1;grid-row:1}
+ .portal-header .account-tools{grid-column:2;grid-row:1;gap:6px}
+ .portal-header .account-name,.portal-header .admin-shortcut span{display:none}
+ .portal-header .account-trigger{padding:4px;gap:4px}
+ .portal-header .portal-menu-button{display:grid;place-items:center;grid-column:3;grid-row:1;order:0;width:32px;height:36px;padding:0}
+ .portal-header .portal-navigation{display:none;grid-column:1/-1;grid-row:2;flex-direction:column;align-items:stretch;justify-content:flex-start;gap:0;order:0;font-size:14px;padding:8px 0}
+ .portal-header .portal-navigation.is-open{display:flex;max-height:65dvh;overflow:auto}
+ .portal-header .portal-navigation>a{padding:8px 6px;min-height:44px}
+ .portal-header + .app{height:calc(100dvh - 76px)}
+ .catalog-folder-link{flex:0 1 auto;padding:10px 14px}
+}
