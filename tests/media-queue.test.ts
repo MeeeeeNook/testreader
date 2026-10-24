@@ -1,6 +1,6 @@
 import {test} from 'node:test';
 import assert from 'node:assert/strict';
-import {runMediaQueue,type QueueResult} from '../src/services/mediaQueue';
+import {runMediaQueue,mediaQueueProgress,type QueueResult} from '../src/services/mediaQueue';
 const jobs=Array.from({length:8},(_,i)=>({name:'part-'+i+'.mp3',url:'blob:'+i,digest:'digest'+i,audio:true,blob:new Blob(['original'])}));
 const delay=()=>new Promise<void>(r=>setTimeout(r,5));
 test('queue bounds active jobs, overlaps compression with uploads and reports every file',async()=>{
@@ -19,3 +19,5 @@ test('transient upload failure retries without encoding again and progress remai
  const result=await runMediaQueue([jobs[0]],{compressionConcurrency:2,uploadConcurrency:3,onProgress:r=>progress.push(r[0].percent),delay:async()=>{},compress:async j=>{compressed++;return {blob:j.blob,name:j.name}},upload:async(j,b,n,p)=>{p(80);if(++attempts===1)throw Error('Network interrupted');return 'https://media/file'}});
  assert.equal(compressed,1);assert.equal(attempts,2);assert.equal(result.results.size,1);assert.ok(progress.every((p,i)=>!i||p>=progress[i-1]));
 });
+
+test('overall queue progress uses a 5–85 percent media budget, not 100 times the file percentages',()=>{assert.equal(mediaQueueProgress([]),5);assert.equal(mediaQueueProgress([{percent:0}]),5);assert.equal(mediaQueueProgress([{percent:20}]),21);assert.equal(mediaQueueProgress([{percent:100},{percent:0}]),45);assert.equal(mediaQueueProgress([{percent:100},{percent:100}]),85);assert.equal(mediaQueueProgress([{percent:999},{percent:NaN}]),45)});

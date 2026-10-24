@@ -1,5 +1,6 @@
 import type {ImportMedia} from './importPreview';
 export interface QueueRow {id:string;name:string;phase:'queued'|'compressing'|'uploading'|'complete'|'failed';percent:number;attempt:number;error?:string}
+export function mediaQueueProgress(rows:Pick<QueueRow,'percent'>[]){return 5+.8*rows.reduce((sum,row)=>sum+Math.max(0,Math.min(100,Number.isFinite(row.percent)?row.percent:0)),0)/Math.max(1,rows.length)}
 export interface QueueResult {url:string;name:string;size:number}
 interface Job extends ImportMedia {audio:boolean;digest:string}
 export function limiter(limit:number){let active=0;const waiting:(()=>void)[]=[];return async<T>(task:()=>Promise<T>):Promise<T>=>{await new Promise<void>(resolve=>{const start=()=>{active++;resolve()};if(active<limit)start();else waiting.push(start)});try{return await task()}finally{active--;waiting.shift()?.()}}}

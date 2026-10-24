@@ -1,4 +1,4 @@
-import {runMediaQueue,type QueueRow,type QueueResult} from './services/mediaQueue';
+import {runMediaQueue,mediaQueueProgress,type QueueRow,type QueueResult} from './services/mediaQueue';
 import {TeacherAccounts,TeacherAdminView} from './components/TeacherAccess';
 import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
@@ -893,7 +893,7 @@ export default function App() {
           const existing=job.audio?await firestoreAdapter.existingMedia(path):null;
           return existing||await firestoreAdapter.uploadMedia(blob,path,(sent,total)=>progress(100*sent/Math.max(1,total)));
         },
-        onProgress:rows=>{setQueueRows(rows);const done=rows.filter(r=>r.phase==='complete'||r.phase==='failed').length;setImportProgress({phase:'upload',label:`${done} / ${rows.length} files processed`,percent:5+80*rows.reduce((sum,r)=>sum+r.percent,0)/Math.max(1,rows.length)})}
+        onProgress:rows=>{setQueueRows(rows);const done=rows.filter(r=>r.phase==='complete'||r.phase==='failed').length;setImportProgress({phase:'upload',label:`${done} / ${rows.length} files processed`,percent:mediaQueueProgress(rows)})}
       });
       for(const image of media){const result=results.get(image.url);if(!result){errors.push(image.name+': '+failures.get(image.url));continue}assets.set(image.url,result.url);if(audioUrls.has(image.url)){audioSizes.set(image.url,result.size);audioNames.set(image.url,result.name);audioOriginalBytes+=image.blob.size;audioStoredBytes+=result.size}}
       const failedItems=items.filter(item=>[...failures.keys()].some(url=>JSON.stringify(item.test).includes(url)));
