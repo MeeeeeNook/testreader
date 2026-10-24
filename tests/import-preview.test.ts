@@ -41,3 +41,15 @@ test('admin sidebar points to separate reloadable pages with active page state',
  assert.match(html,/href="\/admin\/folders" aria-current="page"/);assert.match(html,/href="\/admin\/upload"/);assert.match(html,/href="\/admin\/students"/);
 });
 
+test('one upload batch preserves different destination folders for its tests',async()=>{
+ const {window}=parseHTML('<html><body><div id="app"></div></body></html>');Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true});
+ const plan=await prepareImport(['One','Two'].map(title=>new File([JSON.stringify({title,parts:[{topic_content:'<p>Passage</p>',question_content:'',questions:[]}]})],title+'.json')));
+ plan.candidates[0].test.folderId='a';plan.candidates[1].test.folderId='b';
+ const folders:any=['a','b'].map(id=>({id,name:id.toUpperCase(),parentId:null,skill:'reading',createdAt:1,updatedAt:1}));
+ const confirmed:ImportCandidate[][]=[],root=createRoot(document.getElementById('app')!);
+ try{await act(async()=>root.render(React.createElement(ImportPreview,{plan,folders,onCancel:()=>{},onConfirm:items=>confirmed.push(items)})));
+ assert.ok(document.querySelector('[aria-label="Destination for this test"]'));assert.equal(confirmed.length,0);
+ const submit=[...document.querySelectorAll('button')].find(b=>b.textContent?.startsWith('Confirm import'))!;await act(async()=>submit.dispatchEvent(new window.Event('click',{bubbles:true})));
+ assert.deepEqual(confirmed[0].map(c=>[c.test.folderId,c.test.folderPath]),[['a','A'],['b','B']]);
+ }finally{await act(async()=>root.unmount());disposeImport(plan)}
+});
