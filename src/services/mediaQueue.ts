@@ -1,12 +1,13 @@
 import type {ImportMedia} from './importPreview';
-export interface QueueRow {id:string;name:string;phase:'queued'|'compressing'|'uploading'|'complete'|'failed';percent:number;attempt:number;error?:string}
+export interface QueueRow {id:string;name:string;context?:string;phase:'queued'|'compressing'|'uploading'|'complete'|'failed';percent:number;attempt:number;error?:string}
+export function mediaQueueProgress(rows:Pick<QueueRow,'percent'>[]){return 5+.8*rows.reduce((sum,row)=>sum+Math.max(0,Math.min(100,Number.isFinite(row.percent)?row.percent:0)),0)/Math.max(1,rows.length)}
 export interface QueueResult {url:string;name:string;size:number}
-interface Job extends ImportMedia {audio:boolean;digest:string}
+interface Job extends ImportMedia {audio:boolean;digest:string;context?:string}
 export function limiter(limit:number){let active=0;const waiting:(()=>void)[]=[];return async<T>(task:()=>Promise<T>):Promise<T>=>{await new Promise<void>(resolve=>{const start=()=>{active++;resolve()};if(active<limit)start();else waiting.push(start)});try{return await task()}finally{active--;waiting.shift()?.()}}}
 /** Bound complete jobs too: decoded PCM and pending compressed blobs cannot pile up. */
 export async function runMediaQueue(jobs:Job[],options:{compressionConcurrency:number;uploadConcurrency:number;cache?:Map<string,QueueResult>;compress:(job:Job,progress:(p:number)=>void)=>Promise<{blob:Blob;name:string}>;upload:(job:Job,blob:Blob,name:string,progress:(p:number)=>void)=>Promise<string>;onProgress:(rows:QueueRow[])=>void;delay?:(ms:number)=>Promise<void>}){
  const compress=limiter(Math.max(1,Math.min(2,options.compressionConcurrency))),upload=limiter(Math.max(1,Math.min(3,options.uploadConcurrency)));
- const rows:QueueRow[]=jobs.map(j=>({id:j.url,name:j.name,phase:'queued',percent:0,attempt:0})),results=new Map<string,QueueResult>(),failures=new Map<string,string>(),shared=new Map<string,Promise<QueueResult>>();
+ const rows:QueueRow[]=jobs.map(j=>({id:j.url,name:j.name,context:j.context,phase:'queued',percent:0,attempt:0})),results=new Map<string,QueueResult>(),failures=new Map<string,string>(),shared=new Map<string,Promise<QueueResult>>();
  const emit=()=>options.onProgress(rows.map(r=>({...r})));emit();let cursor=0;
  const worker=async()=>{while(cursor<jobs.length){const index=cursor++,job=jobs[index],row=rows[index];
   const update=(phase:QueueRow['phase'],percent:number)=>{row.phase=phase;row.percent=Math.max(row.percent,Math.min(100,percent));emit()};

@@ -13,3 +13,5 @@ export function withImportTimeout<T>(pending:Promise<T>,label:string,millisecond
   pending.then(result=>{clearTimeout(timer);resolve(result)},error=>{clearTimeout(timer);reject(error)});
  });
 }
+
+export function importTestLabel(item:{name:string;test:{id:string;title:string;folderPath?:string;source?:string}}){return `Test: ${item.test.title} | Folder: ${item.test.folderPath||'Unfiled'} | Source file: ${item.name} | Test ID: ${item.test.id}`}

@@ -55,3 +55,15 @@ export function dividerIssues(parts:EditablePart[]):string[]{
  }
  return [...new Set(issues)];
 }
+
+export function listeningImportIssues(test:EditableTest):string[]{
+ if(test.skill!=='listening')return [];
+ const issues=dividerIssues(test.parts);
+ if(test.status!=='published')return issues;
+ for(const [index,part]of test.parts.entries()){
+  const label=`Part ${part.position||index+1}${part.title?' ('+part.title+')':''}`;
+  if(!part.audio?.trim())issues.push(label+': no recording assigned. Choose a recording for this part in the import preview.');
+  if(part.audioEnd&&part.audioEnd<=(part.audioStart||0))issues.push(label+`: recording "${part.audioName||'assigned audio'}" ends at ${part.audioEnd}s, which must be after its start at ${part.audioStart||0}s. Edit the start/end times in the preview.`);
+ }
+ return issues;
+}
