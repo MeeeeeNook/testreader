@@ -1,3 +1,5 @@
+import {EditorErrorBoundary} from './components/EditorErrorBoundary';
+import {loadWithRecovery} from './services/moduleRecovery';
 import {AdminSignInView} from './components/AdminSignInView';
 import {AdminPortalHeader} from './components/AdminPortalHeader';
 import {isAdminHost} from './services/siteOrigins';
@@ -54,7 +56,7 @@ const AdminView = React.lazy(() =>
   import("./components/AdminView").then((m) => ({ default: m.AdminView })),
 );
 const TestEditorView = React.lazy(() =>
-  import("./components/TestEditorView").then((m) => ({
+  loadWithRecovery(()=>import("./components/TestEditorView"),"test-editor").then((m) => ({
     default: m.TestEditorView,
   })),
 );
@@ -1255,7 +1257,7 @@ export default function App() {
               userRole === "admin" &&
               editingTest &&
               !pageLoading && (
-                <TestEditorView
+                <EditorErrorBoundary testId={editingTest.id} title={editingTest.title} onBack={()=>navigate("/admin/tests")}><TestEditorView
                   folders={folders}
                   test={editingTest}
                   onSave={async (savedTest, status) => {
@@ -1267,7 +1269,7 @@ export default function App() {
                   }}
                   onClose={() => setRoute("admin")}
                   onNotify={notify}
-                />
+                /></EditorErrorBoundary>
               )}
             {/* Dedicated test setup page */}
             {route === "test" && selectedTestFull && !pageLoading && (
