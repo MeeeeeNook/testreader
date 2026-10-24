@@ -29,7 +29,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
     let data = cache.get(source.testId);
     if (!data) {
       const meta = await store.test(source.testId);
-      if (!meta || (!admin && meta.status !== 'published')) throw new AssessmentError(404, 'This test is unavailable.');
+      if (!meta || (!admin && (meta.status !== 'published'||meta.deletedAt))) throw new AssessmentError(404, 'This test is unavailable.');
       const [sections, keyData] = await Promise.all([store.sections(source.testId), store.keys(source.testId)]);
       if (!keyData) throw new AssessmentError(409, 'Answer keys are missing. Ask an administrator to re-import this test.');
       data = { meta, sections: sections.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), keyData };

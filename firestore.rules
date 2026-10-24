@@ -1,3 +1,8 @@
+// Model: users = private profiles/settings (numeric millisecond dates); vocabulary =
+// owner-scoped notebook; attempts = server-written canonical scores, client-readable.
+// tests = published catalog, sections = published/non-deleted parent content;
+// test_keys = private owner-only answer maps. Teacher/settings/API collections are
+// server-only through the default deny. Guest practice is intentionally public.
 rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
@@ -38,6 +43,47 @@ service cloud.firestore {
         get(/databases/$(database)/documents/users/$(userId)).data.status != 'suspended';
     }
 
+    function optionalString(data, key, max) {
+      return !(key in data) || (data[key] is string && data[key].size() <= max);
+    }
+    function optionalNumber(data, key, min, max) {
+      return !(key in data) || (data[key] is number && data[key] >= min && data[key] <= max);
+    }
+    function validProfile(data, userId) {
+      return data.keys().hasAll(['id','email','name','status']) &&
+        data.keys().hasOnly(['id','email','name','status','target','examDate','language','theme','fontSize','favorites','createdAt','updatedAt','weeklyGoal','vocabularyFolders','activeVocabularyFolder','libraryFolders','libraryFolderVersion','deletedAt']) &&
+        data.id == userId && data.email is string && data.email.size() <= 254 &&
+        data.name is string && data.name.size() <= 200 && data.status in ['active','suspended'] &&
+        optionalNumber(data,'target',0,9) && optionalNumber(data,'fontSize',10,40) &&
+        optionalNumber(data,'weeklyGoal',0,1000) && optionalNumber(data,'createdAt',0,9999999999999) &&
+        optionalNumber(data,'updatedAt',0,9999999999999) &&
+        optionalString(data,'examDate',40) && optionalString(data,'activeVocabularyFolder',128) &&
+        (!('language' in data) || data.language in ['en','vi']) &&
+        (!('theme' in data) || data.theme in ['light','dark']) &&
+        (!('favorites' in data) || (data.favorites is list && data.favorites.size() <= 2000)) &&
+        (!('vocabularyFolders' in data) || (data.vocabularyFolders is list && data.vocabularyFolders.size() <= 200)) &&
+        (!('libraryFolders' in data) || (isAdmin() && data.libraryFolders is list && data.libraryFolders.size() <= 1000)) &&
+        (!('libraryFolderVersion' in data) || (isAdmin() && data.libraryFolderVersion is int && data.libraryFolderVersion >= 0));
+    }
+    function validVocabulary(data,userId) {
+      return data.keys().hasAll(['id','owner','word','meaning','example','partOfSpeech','createdAt']) &&
+        data.keys().hasOnly(['id','owner','word','meaning','example','partOfSpeech','createdAt','updatedAt','folderId','dictionarySource','definitionLanguage','phonetic','archived']) &&
+        data.id is string && data.id.size() <= 128 && data.owner == userId &&
+        data.word is string && data.word.size() > 0 && data.word.size() <= 200 &&
+        data.meaning is string && data.meaning.size() <= 40000 &&
+        data.example is string && data.example.size() <= 10000 &&
+        data.partOfSpeech is string && data.partOfSpeech.size() <= 500 &&
+        data.createdAt is number && data.createdAt >= 0 &&
+        optionalNumber(data,'updatedAt',0,9999999999999) &&
+        optionalString(data,'folderId',128) && optionalString(data,'dictionarySource',40) &&
+        optionalString(data,'definitionLanguage',40) && optionalString(data,'phonetic',500) &&
+        (!('archived' in data) || data.archived is bool);
+    }
+    function publicTest(testId) {
+      let parent = get(/databases/$(database)/documents/tests/$(testId)).data;
+      return parent.status == 'published' && parent.get('deletedAt', null) == null;
+    }
+
     // Administrators registry
     match /admins/{adminUid} {
       allow get: if isAdmin();
@@ -49,37 +95,33 @@ service cloud.firestore {
     match /users/{userId} {
       allow get: if isOwner(userId) || isAdmin();
       allow list: if isAdmin();
-      allow create: if isOwner(userId) &&
+      allow create: if isOwner(userId) && validProfile(incoming(),userId) &&
+        incoming().email == request.auth.token.email &&
         incoming().id == userId &&
         incoming().email is string &&
         incoming().status == 'active';
-      allow update: if (
+      allow update: if validProfile(incoming(),userId) && (
         isOwner(userId) &&
         incoming().id == existing().id &&
         incoming().email == existing().email &&
         incoming().status == existing().status
-      ) || isAdmin();
+      || isAdmin());
       allow delete: if isAdmin();
 
       // Student attempt history
       match /attempts/{attemptId} {
         allow get, list: if (isOwner(userId) && isNotSuspended(userId)) || isAdmin();
-        allow create: if isOwner(userId) && isNotSuspended(userId) &&
-          incoming().owner == userId &&
-          incoming().testId is string &&
-          incoming().mode in ['practice', 'exam'];
-        allow update, delete: if (isOwner(userId) && isNotSuspended(userId)) || isAdmin();
+        // Both students and the owner use the verified server writer for scores.
+        allow create, update: if false;
+        allow delete: if (isOwner(userId) && isNotSuspended(userId)) || isAdmin();
       }
 
       // Student personal vocabulary notebook
       match /vocabulary/{vocabId} {
         allow get, list: if isOwner(userId) && isNotSuspended(userId);
-        allow create: if isOwner(userId) && isNotSuspended(userId) &&
-          incoming().owner == userId &&
-          incoming().word is string && incoming().word.size() <= 200;
-        allow update: if isOwner(userId) && isNotSuspended(userId) &&
-          incoming().owner == userId &&
-          incoming().word is string && incoming().word.size() <= 200;
+        allow create: if isOwner(userId) && isNotSuspended(userId) && validVocabulary(incoming(),userId);
+        allow update: if isOwner(userId) && isNotSuspended(userId) && validVocabulary(incoming(),userId) &&
+          incoming().id == existing().id && incoming().createdAt == existing().createdAt;
         allow delete: if isOwner(userId) && isNotSuspended(userId);
       }
     }
@@ -98,7 +140,7 @@ service cloud.firestore {
 
       // Full section passages & question structures (public content; answer keys are stored separately in test_keys)
       match /sections/{sectionId} {
-        allow get, list: if true;
+        allow get, list: if isAdmin() || publicTest(testId);
         allow create, update, delete: if isAdmin();
       }
     }
@@ -111,11 +153,8 @@ service cloud.firestore {
     // Student content reports
     match /reports/{reportId} {
       allow get, list: if (isSignedIn() && resource.data.owner == request.auth.uid) || isAdmin();
-      allow create: if isSignedIn() &&
-        incoming().owner == request.auth.uid &&
-        incoming().testId is string &&
-        incoming().message is string && incoming().message.size() <= 3000 &&
-        incoming().status == 'open';
+      // Reporting goes through the API's validation and request limits.
+      allow create: if false;
       allow update, delete: if isAdmin();
     }
   }
