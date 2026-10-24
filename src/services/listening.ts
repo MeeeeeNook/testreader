@@ -11,19 +11,20 @@ export function audioReferences(source:string):string[]{
 }
 export function isListeningSource(source:string){return /\bis_exam_listening\s*=\s*true\b/.test(source)||audioReferences(source).length>0}
 
+function recordingPartNumber(name:string){const base=fileName(name);const match=base.match(/(?:part|section|sec)[ _.-]*0?([1-4])(?:[^0-9]|$)/i)||base.match(/^p[ _.-]*0?([1-4])(?:[^0-9]|$)/i);return match?Number(match[1]):undefined}
 export function assignImportedAudio(test:EditableTest,files:ListeningRecording[],references:string[]):EditableTest{
   const assignments:(ListeningRecording|undefined)[]=test.parts.map(()=>undefined);
   if(files.length===1)assignments.fill(files[0]);
   else {
-    test.parts.forEach((p,i)=>{const position=p.position||i+1;const matches=files.filter(f=>new RegExp('(?:part|section|sec)[ _.-]*0?'+position+'(?:[^0-9]|$)','i').test(f.name));if(matches.length===1)assignments[i]=matches[0]});
+    test.parts.forEach((p,i)=>{const position=p.position||i+1;const matches=files.filter(f=>recordingPartNumber(f.name)===position);if(matches.length===1)assignments[i]=matches[0]});
     // Original playback order is useful only when every part has its own reference.
     // Do not shift section 3 into section 2 when a file is missing.
     if(references.length===test.parts.length)test.parts.forEach((p,i)=>{
       if(assignments[i])return;
       const matches=files.filter(f=>fileName(f.name).toLowerCase()===fileName(references[i]).toLowerCase());
       if(matches.length!==1||assignments.includes(matches[0]))return;
-      const named=matches[0].name.match(/(?:part|section|sec)[ _.-]*0?([1-4])(?:[^0-9]|$)/i);
-      if(!named||Number(named[1])===(p.position||i+1))assignments[i]=matches[0];
+      const named=recordingPartNumber(matches[0].name);
+      if(!named||named===(p.position||i+1))assignments[i]=matches[0];
     });
   }
   return {...test,skill:'listening',audioFiles:files,duration:test.parts.length===4?40:test.parts.length*10,parts:test.parts.map((p,i)=>({...p,audio:assignments[i]?.url||'',audioName:assignments[i]?.name||''}))};

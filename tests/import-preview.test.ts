@@ -53,3 +53,13 @@ test('one upload batch preserves different destination folders for its tests',as
  assert.deepEqual(confirmed[0].map(c=>[c.test.folderId,c.test.folderPath]),[['a','A'],['b','B']]);
  }finally{await act(async()=>root.unmount());disposeImport(plan)}
 });
+test('import opens content by default and switches audio/settings without stacking them above the questions',async()=>{
+ const {window}=parseHTML('<html><body><div id="app"></div></body></html>');Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true});
+ const plan=await prepareImport([new File([JSON.stringify({title:'Listening sample',parts:[{topic_content:'<p>Transcript</p>',question_content:'<p>Questions</p>',questions:[]}]})],'sample.json')]);plan.candidates[0].test.skill='listening';
+ const root=createRoot(document.getElementById('app')!);
+ try{await act(async()=>root.render(React.createElement(ImportPreview,{plan,onCancel:()=>{},onConfirm:()=>{}})));
+ assert.equal(document.querySelector('.import-content-panel')!.hasAttribute('hidden'),false);assert.equal(document.querySelector('.import-audio-panel')!.hasAttribute('hidden'),true);assert.equal(document.querySelector('.import-settings-panel')!.hasAttribute('hidden'),true);assert.equal(document.querySelector('.import-batch-settings')!.hasAttribute('open'),false);
+ const buttons=[...document.querySelectorAll('.import-panel-tabs button')];await act(async()=>buttons[1].dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(document.querySelector('.import-content-panel')!.hasAttribute('hidden'),true);assert.equal(document.querySelector('.import-audio-panel')!.hasAttribute('hidden'),false);
+ await act(async()=>buttons[2].dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(document.querySelector('.import-settings-panel')!.hasAttribute('hidden'),false);assert.equal(document.querySelector('.import-audio-panel')!.hasAttribute('hidden'),true);
+ }finally{await act(async()=>root.unmount());disposeImport(plan)}
+});

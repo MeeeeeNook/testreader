@@ -5,8 +5,8 @@ const jobs=Array.from({length:8},(_,i)=>({name:'part-'+i+'.mp3',url:'blob:'+i,di
 const delay=()=>new Promise<void>(r=>setTimeout(r,5));
 test('queue bounds active jobs, overlaps compression with uploads and reports every file',async()=>{
  let compress=0,upload=0,maxCompress=0,maxUpload=0,overlap=false;const rows:any[]=[];
- const result=await runMediaQueue(jobs,{compressionConcurrency:2,uploadConcurrency:3,onProgress:r=>rows.push(r),compress:async(j,p)=>{compress++;maxCompress=Math.max(compress,maxCompress);if(upload)overlap=true;p(50);await delay();compress--;return {blob:j.blob,name:j.name}},upload:async(j,b,n,p)=>{upload++;maxUpload=Math.max(upload,maxUpload);if(compress)overlap=true;p(50);await delay();upload--;return 'https://media/'+n}});
- assert.equal(result.results.size,8);assert.equal(result.failures.size,0);assert.ok(overlap);assert.equal(maxCompress,2);assert.ok(maxUpload<=3);assert.ok(rows.at(-1).every((r:any)=>r.phase==='complete'&&r.percent===100));
+ const result=await runMediaQueue(jobs,{compressionConcurrency:3,uploadConcurrency:3,onProgress:r=>rows.push(r),compress:async(j,p)=>{compress++;maxCompress=Math.max(compress,maxCompress);if(upload)overlap=true;p(50);await delay();compress--;return {blob:j.blob,name:j.name}},upload:async(j,b,n,p)=>{upload++;maxUpload=Math.max(upload,maxUpload);if(compress)overlap=true;p(50);await delay();upload--;return 'https://media/'+n}});
+ assert.equal(result.results.size,8);assert.equal(result.failures.size,0);assert.ok(overlap);assert.equal(maxCompress,3);assert.ok(maxUpload<=3);assert.ok(rows.at(-1).every((r:any)=>r.phase==='complete'&&r.percent===100));
 });
 test('duplicate recordings share one task; failed files do not stop unrelated jobs; successful files are reused on retry',async()=>{
  const cache=new Map<string,QueueResult>();let encoded=0,uploads=0;const batch=[jobs[0],{...jobs[0],url:'duplicate'},jobs[1],jobs[2]];
