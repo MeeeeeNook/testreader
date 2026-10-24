@@ -41,12 +41,15 @@ export async function runSecurityRules({env=process.env,fetcher=fetch,log=consol
  const account=JSON.parse(raw);account.private_key=account.private_key?.replace(/\\n/g,'\n');
  if(account.project_id!==project)throw Error('FIREBASE_RULES_PROJECT_MISMATCH');
  const {access_token}=await cert(account).getAccessToken();
+ const permissionHint=`Firebase Rules were NOT deployed. Grant roles/firebaserules.admin to ${account.client_email} in project ${project}, then redeploy production.`;
  const request=async(path,method='GET',body)=>{
   const response=await fetcher('https://firebaserules.googleapis.com/v1/'+path,{method,headers:{Authorization:'Bearer '+access_token,'Content-Type':'application/json'},...(body?{body:JSON.stringify(body)}:{}),signal:AbortSignal.timeout(30000)});
   const data=await response.json();if(!response.ok){const error=new Error(`FIREBASE_RULES_HTTP_${response.status}: ${data.error?.message||'Rules management request failed.'}`);error.status=response.status;throw error;}return data;
  };
  const content=await readFile(new URL('../firestore.rules',import.meta.url),'utf8'),source={files:[{name:'firestore.rules',content}]};
- const suite=securityTestSuite(database),validation=await request(`projects/${project}:test`,'POST',{source,testSuite:suite});
+ const suite=securityTestSuite(database);let validation;
+ try{validation=await request(`projects/${project}:test`,'POST',{source,testSuite:suite});}
+ catch(error){if(error.status===403){log(permissionHint);return {blocked:true,serviceAccount:account.client_email};}throw error;}
  const errors=(validation.issues||[]).filter(issue=>issue.severity==='ERROR');
  if(errors.length)throw Error('FIREBASE_RULES_INVALID: '+JSON.stringify(errors));
  const failed=(validation.testResults||[]).map((test,index)=>({index,state:test.state,errors:test.errorPosition||test.debugMessages})).filter(test=>test.state!=='SUCCESS');
