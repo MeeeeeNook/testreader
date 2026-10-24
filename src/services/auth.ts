@@ -15,6 +15,7 @@ export interface AuthState {
   role: "admin" | "student";
   loading: boolean;
   suspended: boolean;
+  teacher?:boolean;
 }
 
 type AuthCallback = (state: AuthState) => void;
@@ -86,7 +87,7 @@ async function handleUserSync(user: User | null) {
   notify();
   try {
     // Optional server sync must never prevent loading the owner's saved folders.
-    let status = "active";
+    let status = "active",teacher=false;
     try {
       const res = await fetch("/api/auth/sync", {
       method: "POST",
@@ -105,6 +106,7 @@ async function handleUserSync(user: User | null) {
       if (res.ok) {
         const data = await res.json();
         status = data.status || "active";
+        teacher=data.teacher===true;
       }
     } catch {
       console.warn("Server account sync is unavailable; loading saved profile directly.");
@@ -138,6 +140,7 @@ async function handleUserSync(user: User | null) {
       role,
       loading: false,
       suspended: profile.status === "suspended",
+      teacher,
     };
   } catch (err) {
     if (!isCurrent()) return;

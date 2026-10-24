@@ -198,6 +198,71 @@ function markAssessment(assessment, responses) {
   return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
 }
 
+// server/teacherRoutes.ts
+async function teacherAccess(db, identity) {
+  if (!identity?.email_verified) return false;
+  const doc = await db.doc("teachers/" + identity.uid).get();
+  return doc.data()?.active === true && doc.data()?.email === identity.email;
+}
+function registerTeacherRoutes(app2, caller2, backend2, fail) {
+  const owner = async (req) => {
+    const c = await caller2(req);
+    if (!c.isAdmin || c.identity.email !== "manhcuong2006ht@gmail.com" || c.identity.email_verified !== true) throw new AssessmentError(403, "Only the verified owner can authorize teachers.");
+    return c;
+  };
+  app2.post("/api/admin/teachers/list", async (req, res) => {
+    try {
+      const { db } = await owner(req);
+      const snap = await db.collection("teachers").get();
+      res.json({ teachers: snap.docs.map((d) => ({ uid: d.id, ...d.data() })) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+  app2.post("/api/admin/teachers/set", async (req, res) => {
+    try {
+      const { db, identity } = await owner(req);
+      if (typeof req.body.email !== "string" || !/^\S+@\S+\.\S+$/.test(req.body.email) || typeof req.body.active !== "boolean") throw new AssessmentError(400, "Enter a valid account email and access choice.");
+      const email = req.body.email.trim().toLowerCase();
+      if (email === "manhcuong2006ht@gmail.com") throw new AssessmentError(400, "The owner account always retains owner access.");
+      let user;
+      try {
+        user = await backend2().auth.getUserByEmail(email);
+      } catch (e) {
+        if (e.code === "auth/user-not-found") throw new AssessmentError(404, "This account has not signed in yet. Ask the teacher to sign in with Google first.");
+        throw e;
+      }
+      if (user.disabled && req.body.active) throw new AssessmentError(409, "This account is disabled.");
+      await db.doc("teachers/" + user.uid).set({ email: user.email, active: req.body.active, updatedAt: Date.now(), authorizedBy: identity.uid });
+      res.json({ success: true });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+  app2.post("/api/teacher/admin-view", async (req, res) => {
+    try {
+      const c = await caller2(req);
+      if (!c.isAdmin && !await teacherAccess(c.db, c.identity)) throw new AssessmentError(403, "Teacher access is required.");
+      const section = ["students", "reports"].includes(req.body?.section) ? req.body.section : "tests";
+      if (section !== "tests") {
+        const snap2 = await c.db.collection(section === "students" ? "users" : "reports").limit(500).get();
+        res.json({ items: snap2.docs.map((d) => {
+          const v = d.data();
+          return section === "students" ? { id: d.id, name: v.name, email: v.email, status: v.status, createdAt: v.createdAt } : { id: d.id, testTitle: v.testTitle, category: v.category, message: v.message, status: v.status, createdAt: v.createdAt };
+        }) });
+        return;
+      }
+      const snap = await c.db.collection("tests").get();
+      res.json({ tests: snap.docs.map((d) => {
+        const t = d.data();
+        return { id: d.id, title: t.title, skill: t.skill, status: t.status, source: t.source, questions: t.questions, passages: t.passages, updatedAt: t.updatedAt, deletedAt: t.deletedAt || null };
+      }) });
+    } catch (e) {
+      fail(res, e);
+    }
+  });
+}
+
 // src/services/websiteUI.ts
 var defaultWebsiteUI = { heroTitle: "Prepare for IELTS. Practise at your pace.", heroDescription: "Practise reading and listening. Check your answers and review the explanations.", showFullTestMenu: true, blocks: [
   { id: "reading", title: "Reading practice", description: "Explore passages and build your reading skills.", href: "/practice?skill=reading", icon: "reading", visible: true },
@@ -838,6 +903,7 @@ async function caller(req) {
   return { identity, isAdmin, db, profile };
 }
 registerStudentRoutes(app, caller, backend, apiError);
+registerTeacherRoutes(app, caller, backend, apiError);
 registerWebsiteUIRoutes(app, caller, backend, apiError);
 registerTrashRoutes(app, caller, backend, apiError);
 registerMediaRoutes(app, async (req) => {
@@ -910,6 +976,7 @@ app.post("/api/auth/sync", async (req, res) => {
       });
     res.json({
       role: isAdmin ? "admin" : "student",
+      teacher: !isAdmin && await teacherAccess(db, identity),
       status: profile.data()?.status || "active"
     });
   } catch (error) {

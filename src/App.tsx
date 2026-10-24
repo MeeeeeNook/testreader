@@ -1,3 +1,4 @@
+import {TeacherAccounts,TeacherAdminView} from './components/TeacherAccess';
 import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
 import {FolderPage} from "./components/FolderPage";
@@ -93,6 +94,7 @@ export default function App() {
   const [sessionId, setSessionId] = useState("");
   const [activeDirectSlug,setActiveDirectSlug]=useState("");
   const [user, setUser] = useState<User | null>(null);
+  const [isTeacher,setIsTeacher]=useState(false);
   const [userRole, setUserRole] = useState<"admin" | "student">("student");
   const [suspended, setSuspended] = useState(false);
   const [profile, setProfile] = useState<UserProfile>(() => {
@@ -204,6 +206,7 @@ export default function App() {
       previousUser.current = state.user?.uid || null;
       setAuthReady(true);
       setUser(state.user);
+      setIsTeacher(state.teacher===true&&!state.suspended);
       setUserRole(
         state.role === "admin" &&
           state.user?.email === "manhcuong2006ht@gmail.com" &&
@@ -962,6 +965,7 @@ export default function App() {
   };
 
   // If in active test workspace:
+  if(isTeacher&&['admin','students','editor','content-admin','contributions-admin'].includes(route))return <TeacherAdminView onNavigate={navigate}/>;
   if (activeTest && !pageLoading && !pageError && ((route === "reading" && activeDirectSlug===page.slug) || (route === "workspace" && page.session === sessionId))) {
     return (
       <>
@@ -1008,7 +1012,7 @@ export default function App() {
       )}
       {/* Sidebar Navigation */}
       <div className="studio-main">
-        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
+        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={isTeacher?'teacher':userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
 
         {/* Account Suspension Alert */}
         {suspended && (
@@ -1174,7 +1178,8 @@ export default function App() {
               />
             )}
             {route === "admin" && page.section === "website-ui" && userRole === "admin" && <WebsiteUISettings settings={websiteUI} folders={folders} tests={tests} onFolders={saveFolders} onSave={async value=>{const saved=await requestJson("/api/admin/website-ui",value,()=>auth.currentUser);setWebsiteUI(normalizeWebsiteUI(saved));}}/>}
-            {route === "admin" && page.section !== "website-ui" && userRole === "admin" && (
+            {route === "admin" && page.section === "teachers" && userRole === "admin" && <TeacherAccounts/>}
+            {route === "admin" && !["website-ui","teachers"].includes(page.section||"") && userRole === "admin" && (
               <AdminView
                 key={page.section || "overview"}
                 section={page.section || "overview"}
