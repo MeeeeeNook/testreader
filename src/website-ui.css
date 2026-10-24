@@ -94,3 +94,14 @@
 .vocabulary-bulk .custom-select{max-width:180px}
 .vocabulary-folders .quiet-button{font-size:11px}
 @media(max-width:800px){.vocabulary-layout{grid-template-columns:minmax(0,1fr)}.vocab-notebook{padding:20px 0 40px}.vocabulary-table{min-width:480px}.vocabulary-table th:nth-child(2){width:26%}.vocabulary-table td{padding:12px 10px}.vocabulary-table th:last-child{width:84px}}
+
+.catalog-folders{margin:0 0 24px;padding:0 0 20px;border-bottom:1px solid var(--line,#e4e8df)}
+.catalog-folders .collection-breadcrumbs{margin:0 0 12px;display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:12px}
+.catalog-folders .collection-breadcrumbs a{color:var(--teal,#397455);text-decoration:none}
+.catalog-folders .collection-breadcrumbs [aria-current]{font-weight:600}
+.catalog-folder-grid{display:flex;flex-wrap:wrap;gap:10px}
+.catalog-folder-link{display:flex;align-items:center;gap:10px;padding:13px 16px;min-width:170px;max-width:100%;border:1px solid var(--line,#e4e8df);border-radius:10px;background:var(--white,#fff);color:var(--ink,#304c3a);text-decoration:none;font-size:13px}
+.catalog-folder-link>span{flex:1;overflow-wrap:anywhere}.catalog-folder-link>svg{flex-shrink:0;color:var(--teal,#397455)}
+.catalog-folder-link:hover{background:var(--teal-light,#edf4ee);border-color:#b0c6ad}
+.mini-skill-tabs{display:flex;gap:12px;margin-bottom:22px}.mini-skill-tabs button{flex:1;max-width:280px}
+@media(max-width:640px){.catalog-folder-grid{gap:8px}.catalog-folder-link{min-width:0;flex:1 1 calc(50% - 8px);padding:11px;font-size:12px}.mini-skill-tabs button{flex:1;max-width:none}.catalog-folders{margin-bottom:18px}}
