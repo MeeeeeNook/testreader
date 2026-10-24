@@ -1,3 +1,4 @@
+import {registerCatalogRoutes} from './catalogRoutes';
 import {registerTestPageRoutes} from './testPages';
 import {registerHistoryRoutes} from './historyRoutes';
 import {markFullExam} from './fullExam';
@@ -117,6 +118,7 @@ async function caller(req: express.Request) {
     identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerCatalogRoutes(app,backend,apiError);
 registerHistoryRoutes(app,caller,assessmentStore,apiError);
 registerStudentRoutes(app,caller,backend,apiError);
 registerTeacherRoutes(app,caller,backend,apiError);
@@ -145,6 +147,7 @@ async function optionalCaller(req: express.Request) {
 function apiError(res: express.Response, error: unknown) {
   if (error instanceof AssessmentError)
     return res.status(error.status).json({ error: error.message });
+  if([8,'8','resource-exhausted','RESOURCE_EXHAUSTED'].includes((error as any)?.code)||/quota.*exceed|RESOURCE_EXHAUSTED/i.test((error as Error)?.message||''))return res.status(503).set('Retry-After','3600').json({code:'FIRESTORE_QUOTA_EXCEEDED',error:'The database has reached its free daily read quota. Test data is temporarily unavailable until the quota resets. Saved answers remain on this device.'});
   console.error("Backend request failed:", error);
   const backendCode = (error as { code?: number | string })?.code;
   const message = (error as Error)?.message || "";

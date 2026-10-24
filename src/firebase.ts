@@ -64,6 +64,7 @@ export function handleFirestoreError(error: unknown, operationType: OperationTyp
   };
   console.error('Firestore Error:', JSON.stringify(errInfo));
   const code=(error as {code?:string})?.code;
+  if(code==='resource-exhausted')throw new Error('The database has reached its free daily read quota. Please try again after the quota resets. Your saved answers remain on this device.');
   if(code==='permission-denied'||code==='unauthenticated')throw new Error(auth.currentUser ? 'This action could not be completed. Please retry or contact the site owner.' : 'This resource is temporarily unavailable. Please retry; public tests do not require sign-in.');
   throw new Error('Could not connect to your study data. Please check your connection and retry.');
 }

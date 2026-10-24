@@ -1,3 +1,37 @@
+// server/catalogRoutes.ts
+var publicFields = ["id", "slug", "title", "skill", "source", "originSource", "access", "status", "duration", "audioFiles", "coverImage", "passages", "passageTitles", "sectionSummaries", "questions", "updatedAt", "createdAt", "folderId", "folderPath", "fullTestMenuFolders", "folderPages"];
+function registerCatalogRoutes(app2, backend2, fail, now = Date.now) {
+  let cache, pending;
+  const load = () => {
+    if (cache && cache.until > now()) return Promise.resolve(cache.tests);
+    if (pending) return pending;
+    pending = (async () => {
+      const snapshot = await backend2().db.collection("tests").where("status", "==", "published").get();
+      const tests = snapshot.docs.map((doc) => ({ ...doc.data(), id: doc.id })).filter((test) => test.status === "published" && !test.deletedAt).map((test) => Object.fromEntries(publicFields.filter((field) => test[field] !== void 0).map((field) => [field, test[field]])));
+      cache = { until: now() + 3e5, tests };
+      return tests;
+    })();
+    void pending.finally(() => {
+      pending = void 0;
+    }).catch(() => {
+    });
+    return pending;
+  };
+  app2.get("/api/catalog", async (_req, res) => {
+    try {
+      const tests = await load();
+      res.set("Cache-Control", "public, max-age=300, s-maxage=300, stale-while-revalidate=3600").json({ tests });
+    } catch (error) {
+      if (cache) {
+        cache.until = now() + 6e4;
+        res.set("Cache-Control", "public,max-age=60,s-maxage=60").json({ tests: cache.tests, stale: true });
+        return;
+      }
+      fail(res, error);
+    }
+  });
+}
+
 // server/testPages.ts
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -7,7 +41,7 @@ function humanTestSlug(title) {
   return String(title || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 180).replace(/-$/, "") || "ielts-test";
 }
 function testIntroductionPath(test, sectionId) {
-  const ref = test.slug || humanTestSlug(test.title);
+  const ref = test.slug || test.id || humanTestSlug(test.title);
   return "/tests/" + encodeURIComponent(ref) + (sectionId ? "/sections/" + encodeURIComponent(sectionId) : "");
 }
 function visibleTestSource(source) {
@@ -40,8 +74,8 @@ async function ensureTestUrl(db, testId, title) {
 }
 async function resolvePublicTest(db, reference, allowPrivate = false) {
   if (typeof reference !== "string" || !reference || reference.length > 220 || !/^[\w-]+$/.test(reference)) return null;
-  const route = await db.doc("test_urls/" + reference).get();
-  const id = route.data()?.testId || reference;
+  const route = /^test_[\w-]+$/.test(reference) ? null : await db.doc("test_urls/" + reference).get();
+  const id = route?.data()?.testId || reference;
   const doc = await db.doc("tests/" + id).get(), meta = doc.data();
   if (!meta || !allowPrivate && (meta.status !== "published" || meta.deletedAt)) return null;
   return { ...meta, id: doc.id || id };
@@ -291,6 +325,22 @@ function registerTestPageRoutes(app2, { caller: caller2, optionalCaller: optiona
       apiError2(res, error);
     }
   });
+  app2.post("/api/admin/test-urls/backfill", async (req, res) => {
+    try {
+      const c = await caller2(req);
+      if (!c.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+      const items = req.body?.items;
+      if (!Array.isArray(items) || !items.length || items.length > 20) throw new AssessmentError(400, "Choose up to 20 tests.");
+      const registered = [];
+      for (const item of items) {
+        if (!/^[\w-]{1,128}$/.test(item?.id || "") || typeof item?.title !== "string" || !item.title.trim() || item.title.length > 250) throw new AssessmentError(400, "Invalid test reference.");
+        registered.push({ id: item.id, slug: await ensureTestUrl(c.db, item.id, item.title) });
+      }
+      res.json({ registered });
+    } catch (error) {
+      apiError2(res, error);
+    }
+  });
   app2.post("/api/test-route", async (req, res) => {
     try {
       const db = backend2().db;
@@ -323,7 +373,8 @@ function registerTestPageRoutes(app2, { caller: caller2, optionalCaller: optiona
       res.set("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=60").type("html").send(renderTestIntroduction(await shell, meta, req.params.reference, section));
     } catch (error) {
       console.error("Test introduction failed:", error);
-      res.status(503).set("Retry-After", "60").send("This test is temporarily unavailable. Please retry.");
+      const quota = [8, "8", "resource-exhausted", "RESOURCE_EXHAUSTED"].includes(error?.code);
+      res.status(503).set("Retry-After", quota ? "3600" : "60").send(quota ? "The database has reached its free daily read quota. Please try again after the quota resets." : "This test is temporarily unavailable. Please retry.");
     }
   };
   app2.get("/tests/:reference/sections/:section", introduction);
@@ -1121,6 +1172,7 @@ async function caller(req) {
   const isAdmin = identity.email === "manhcuong2006ht@gmail.com" && identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerCatalogRoutes(app, backend, apiError);
 registerHistoryRoutes(app, caller, assessmentStore, apiError);
 registerStudentRoutes(app, caller, backend, apiError);
 registerTeacherRoutes(app, caller, backend, apiError);
@@ -1150,6 +1202,7 @@ async function optionalCaller(req) {
 function apiError(res, error) {
   if (error instanceof AssessmentError)
     return res.status(error.status).json({ error: error.message });
+  if ([8, "8", "resource-exhausted", "RESOURCE_EXHAUSTED"].includes(error?.code) || /quota.*exceed|RESOURCE_EXHAUSTED/i.test(error?.message || "")) return res.status(503).set("Retry-After", "3600").json({ code: "FIRESTORE_QUOTA_EXCEEDED", error: "The database has reached its free daily read quota. Test data is temporarily unavailable until the quota resets. Saved answers remain on this device." });
   console.error("Backend request failed:", error);
   const backendCode = error?.code;
   const message = error?.message || "";
