@@ -256,7 +256,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
             <input
               value={test.title}
               onChange={(e) => setTest({ ...test, title: e.target.value })}
-              placeholder="e.g. Cambridge 18 — Academic Reading Test 1"
+              placeholder="e.g. Cambridge 18 — Reading Test 1"
             />
           </label>
 
@@ -269,7 +269,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
               value={test.skill}
               onChange={(e) => setTest({ ...test, skill: e.target.value as 'reading'|'listening', duration:e.target.value==='listening'?40:60 })}
             >
-              <option value="reading">Academic Reading</option>
+              <option value="reading">Reading</option>
               <option value="listening">Listening</option>
             </Select>
           </label>
@@ -285,7 +285,7 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
         </div>
       </div>
 
-      <section className="studio-panel cover-editor"><div><h2>Test cover</h2><p>Upload an image for this test. Images are resized and compressed before uploading.</p><label className="studio-secondary">{coverBusy?'Uploading…':'Choose image'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={coverBusy||saving} onChange={e=>{void uploadCover(e.target.files?.[0]);e.target.value='';}}/></label>{test.coverImage&&<button className="quiet-button" disabled={coverBusy} onClick={()=>setTest({...test,coverImage:''})}>Use illustration</button>}</div><TestCover id={test.id} title={test.title} image={test.coverImage}/></section>
+      <section className="studio-panel cover-editor"><div><h2>Test cover</h2><p>Upload an image for this test. Images are resized and compressed before uploading.</p><label className="studio-secondary">{coverBusy?'Uploading…':'Choose image'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={coverBusy||saving} onChange={e=>{void uploadCover(e.target.files?.[0]);e.target.value='';}}/></label>{test.coverImage&&<button className="quiet-button" disabled={coverBusy} onClick={()=>setTest({...test,coverImage:''})}>Use illustration</button>}</div><TestCover id={test.id} title={test.title} image={test.coverImage} skill={test.skill}/></section>
       {/* Section Tabs */}
       <div className="editor-tabs">
         {test.parts.map((p, idx) => (

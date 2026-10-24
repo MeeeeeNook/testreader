@@ -15,23 +15,21 @@ const folders:any[]=[{id:'r',name:'Forecast',parentId:null,skill:'reading'},{id:
 const meta=(id:string,skill:'reading'|'listening',folderId:string)=>({id,skill,folderId,folderPath:'Forecast',source:'Forecast',title:id,status:'published',access:'free',updatedAt:1,createdAt:1,duration:30,questions:40,passages:skill==='reading'?3:4,fullTestMenuFolders:[{id:folderId,path:'Forecast'}]} as any);
 const tests=[meta('reading-test','reading','r'),meta('listening-test','listening','l')];
 function dom(){const {window}=parseHTML('<html><body><div id="app"></div></body></html>');Object.assign(globalThis,{window,document:window.document,Node:window.Node,IS_REACT_ACT_ENVIRONMENT:true});return window}
-test('folders and full-test menus separate skills, retain empty typed folders, and allow matching names',()=>{
- assert.deepEqual(foldersForSkill(folders,tests,'reading').map(f=>f.id),['r']);assert.deepEqual(foldersForSkill(folders,tests,'listening').map(f=>f.id),['l','lc']);
- assert.deepEqual(fullTestMenu(tests,'listening').folders.map(f=>f.id),['l']);assert.equal(folderLink('l','listening'),'/folders/l?skill=listening');
- assert.throws(()=>changeFolder(folders,'new','Forecast',null,'reading'),/already exists/);
- assert.equal(changeFolder([folders[0]],'new','Forecast',null,'listening').length,2);
- assert.equal(reconcileLibrary(folders,[{...meta('legacy','listening','unknown'),fullTestMenuFolders:[]}]).tests[0].folderId,'l');
+test('shared folder choices allow both skills and consolidate legacy duplicates',()=>{
+ const shared=reconcileLibrary(folders,tests);
+ assert.equal(shared.folders.filter(f=>f.name==='Forecast').length,1);
+ assert.equal(shared.tests[0].folderId,shared.tests[1].folderId);
+ assert.deepEqual(foldersForSkill(shared.folders,shared.tests,'reading'),foldersForSkill(shared.folders,shared.tests,'listening'));
+ assert.throws(()=>changeFolder([folders[0]],'new','Forecast',null,'listening'),/already exists/);
+ assert.ok(shared.folders.find(f=>f.name==='Forecast')?.aliases?.length);
 });
 
-test('Listening folder links preserve the skill and practice view; Reading folders stay hidden',async()=>{
- const window=dom(),root=createRoot(document.getElementById('app')!),visited:string[]=[];
- try{await act(async()=>root.render(React.createElement(PracticeCatalog,{folders,tests,profile:{} as any,attempts:[],location:'/practice?skill=listening',onNavigate:path=>visited.push(path)})));
- const links=Array.from(document.querySelectorAll('.collection-folders a'));assert.equal(links.length,1);assert.equal(links[0].getAttribute('href'),'/folders/l?skill=listening&view=practice');
- const click=new window.Event('click',{bubbles:true});Object.defineProperty(click,'button',{value:0});await act(async()=>links[0].dispatchEvent(click));assert.equal(visited[0],'/folders/l?skill=listening&view=practice');
- await act(async()=>root.render(React.createElement(PracticeCatalog,{folders,folder:folders[1],tests,profile:{} as any,attempts:[],full:true,location:'/folders/l',onNavigate:()=>{}})));
- assert.match(document.querySelector('.portal-skill-tabs .active')!.textContent!,/Listening/);assert.equal(document.querySelectorAll('.practice-card').length,1);
- }finally{await act(async()=>root.unmount())}
+test('collection pages default to both skills and retain skill filters in links',async()=>{
+ dom();const shared=reconcileLibrary(folders,tests);
+ const html=renderToStaticMarkup(React.createElement(PracticeCatalog,{folders:shared.folders,folder:shared.folders[0],tests:shared.tests,profile:{} as any,attempts:[],full:true,location:'/folders/r?view=full',onNavigate:()=>{}}));
+ assert.match(html,/All tests/);assert.match(html,/reading-test/);assert.match(html,/listening-test/);
 });
+
 test('admin presents explicit Reading and Listening uploads before file selection',()=>{
  const noop=()=>{},props:any={tests:[],folders:[],reports:[],learners:[],adminUid:'admin',section:'upload',onUploadFiles:async()=>{},onOpenUpload:noop,onNewTest:noop};
  const html=renderToStaticMarkup(React.createElement(AdminView,props));assert.match(html,/Upload Reading/);assert.match(html,/Upload Listening/);assert.match(html,/aria-label="Upload skill"/);

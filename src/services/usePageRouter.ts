@@ -22,6 +22,7 @@ export function usePageRouter() {
       setLocation(path);
       window.scrollTo({ top: 0 });
     });
+    if(window.location.hostname==='admin.ielts.vungocmanhcuong.id.vn'&&window.location.pathname==='/')controller.current.navigate('/admin',true);
     return () => {
       controller.current?.destroy();
       controller.current = null;

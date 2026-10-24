@@ -196,7 +196,7 @@ export const LibraryView: React.FC<Props> = ({
               ) : (
                 <Headphones size={17} />
               )}{" "}
-              {value === "reading" ? "Academic Reading" : "Listening"}
+              {value === "reading" ? "Reading" : "Listening"}
             </button>
           ))}
         </div>
@@ -266,7 +266,7 @@ export const LibraryView: React.FC<Props> = ({
             <article className="reading-card" key={test.id}>
               <div className={`card-art color-${i % 4}`}>
                 <span className="card-art-lines" />
-                <TestCover id={test.id} title={test.title} image={test.coverImage}/>
+                <TestCover id={test.id} title={test.title} image={test.coverImage} skill={test.skill}/>
                 <span className="card-art-label">
                   {test.passages > 1 ? "THE FULL PICTURE" : "A CLOSER LOOK"}
                 </span>

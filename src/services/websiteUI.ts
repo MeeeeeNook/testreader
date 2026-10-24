@@ -4,7 +4,7 @@ export const defaultWebsiteUI:WebsiteUI={heroTitle:'Prepare for IELTS. Practise 
  {id:'reading',title:'Reading practice',description:'Explore passages and build your reading skills.',href:'/practice?skill=reading',icon:'reading',visible:true},
  {id:'listening',title:'Listening practice',description:'Choose a part, listen and review your answers.',href:'/practice?skill=listening',icon:'listening',visible:true},
  {id:'full',title:'Full tests',description:'Complete a Reading or Listening test from start to finish.',href:'/full-tests',icon:'full',visible:true},
- {id:'mix',title:'Mix your own test',description:'Choose the passages and parts you want to practise.',href:'/mock',icon:'mix',visible:true}
+ {id:'mix',title:'Listening + Reading',description:'Build and share a full test. Complete Listening, then Reading.',href:'/full-exam',icon:'mix',visible:true}
 ]};
 export function normalizeWebsiteUI(input:unknown):WebsiteUI {
  const v=input&&typeof input==='object'?input as Record<string,unknown>:{};

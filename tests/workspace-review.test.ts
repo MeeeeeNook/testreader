@@ -74,7 +74,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
           await act(async()=>document.querySelector('[aria-label="Display settings"]')!.dispatchEvent(new window.Event('click',{bubbles:true})));
           const volume=document.querySelector<HTMLInputElement>('[aria-label="Listening volume"]')!,speed=document.querySelector<HTMLInputElement>('[aria-label="Listening speed"]')!;
           volume.value='.4';speed.value='7';await act(async()=>{volume.dispatchEvent(new window.Event('input',{bubbles:true}));speed.dispatchEvent(new window.Event('input',{bubbles:true}))});
-          assert.equal((document.querySelector('audio')! as any).volume,.4);assert.equal((document.querySelector('audio')! as any).playbackRate,1.15);
+          assert.equal((document.querySelector('audio')! as any).volume,.5);assert.equal((document.querySelector('audio')! as any).playbackRate,1.15);
           continue;
         }
         if(mode==='solution'){

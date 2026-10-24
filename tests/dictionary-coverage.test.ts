@@ -21,7 +21,7 @@ test('cancelled dictionary lookups do not start a second request',async()=>{
  const controller=new AbortController();let calls=0;
  await assert.rejects(lookupDictionary('cancelledword',controller.signal,async()=>{calls++;controller.abort();throw new DOMException('Cancelled','AbortError');}),{name:'AbortError'});assert.equal(calls,1);
 });
-test('notebook cards display numbered meanings and no copied passage quotation',()=>{
- const html=renderToStaticMarkup(React.createElement(VocabularyView,{profile:{id:'learner'} as any,vocabulary:[{id:'one',word:'handful',meaning:'A small amount.\nA troublesome person.',partOfSpeech:'noun',example:'An entire irrelevant paragraph copied from the passage.',dictionarySource:'minhqnd'} as any],onSaveWord:async()=>{},onArchiveWord:async()=>{},onNotify:()=>{}}));
- assert.match(html,/<ol class="vocab-meanings">/);assert.match(html,/A small amount/);assert.match(html,/A troublesome person/);assert.doesNotMatch(html,/irrelevant paragraph|blockquote|Needs definition/);
+test('notebook table displays numbered meanings and the requested example column',()=>{
+ const html=renderToStaticMarkup(React.createElement(VocabularyView,{onUpdateProfile:async()=>{},profile:{id:'learner'} as any,vocabulary:[{id:'one',word:'handful',meaning:'A small amount.\nA troublesome person.',partOfSpeech:'noun',example:'An entire irrelevant paragraph copied from the passage.',dictionarySource:'minhqnd'} as any],onSaveWord:async()=>{},onArchiveWord:async()=>{},onNotify:()=>{}}));
+ assert.match(html,/<ol class="vocab-meanings">/);assert.match(html,/A small amount/);assert.match(html,/A troublesome person/);assert.match(html,/<th>Example<\/th>/);assert.match(html,/irrelevant paragraph/);assert.doesNotMatch(html,/blockquote|Needs definition/);
 });

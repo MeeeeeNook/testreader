@@ -1,7 +1,7 @@
 import type {TestMeta} from '../types';
 export type FolderSkill='reading'|'listening';
-export interface LibraryFolder {skill?:FolderSkill;id:string;name:string;parentId:string|null;createdAt:number;updatedAt:number;description?:string;deletedAt?:number|null;showInFullTestMenu?:boolean}
-export interface PublicFolder {skill?:FolderSkill;id:string;name:string;path:string;parentId:string|null;description?:string}
+export interface LibraryFolder {aliases?:string[];skill?:FolderSkill;id:string;name:string;parentId:string|null;createdAt:number;updatedAt:number;description?:string;deletedAt?:number|null;showInFullTestMenu?:boolean}
+export interface PublicFolder {aliases?:string[];skill?:FolderSkill;id:string;name:string;path:string;parentId:string|null;description?:string}
 export interface MenuFolder {id:string;path:string}
 const normalizePath=(path:string)=>path.split(/[\\/]/).map(s=>s.trim().normalize('NFC')).filter(Boolean).join(' / ');
 // Stable, encoded paths avoid random IDs when recovering a missing registry.
@@ -31,7 +31,7 @@ export function reconcileLibrary(folders:LibraryFolder[],tests:TestMeta[]) {
   const path=normalizePath(test.folderPath||'');if(!path)continue;
   const parts=path.split(' / ');let parentId:string|null=null;
   for(let i=0;i<parts.length;i++){
-   const key=parts.slice(0,i+1).join(' / ');let id=next.find(f=>!f.deletedAt&&folderLocation(f.id,next)===key&&folderSkills(f.id,next,tests).includes(test.skill==='listening'?'listening':'reading'))?.id;
+   const key=parts.slice(0,i+1).join(' / ');let id=next.find(f=>!f.deletedAt&&folderLocation(f.id,next)===key)?.id;
    if(!id){
     const preferred=i===parts.length-1?test.folderId:null;
     id=preferred&&!next.some(f=>f.id===preferred)?preferred:recoveredId(key);
@@ -47,7 +47,9 @@ export function reconcileLibrary(folders:LibraryFolder[],tests:TestMeta[]) {
   const folderPath=folderLocation(folderId,next);
   return folderId!==test.folderId||folderPath!==(test.folderPath||'')?{...test,folderId:folderId||null,folderPath}:test;
  });
- return {folders:next,tests:resolved};
+ const shared=sharedFolders(next);
+ const canonical=(id:string|null|undefined)=>shared.find(f=>f.id===id||f.aliases?.includes(id||''))?.id||id;
+ return {folders:shared,tests:resolved.map(test=>{const folderId=canonical(test.folderId);return {...test,folderId,folderPath:folderLocation(folderId,shared),folderPages:publicFolderPages({folderId},shared),fullTestMenuFolders:[...new Map((test.fullTestMenuFolders||[]).map(f=>{const id=canonical(f.id)||f.id;return [id,{id,path:folderLocation(id,shared)||f.path}]})).values()]};})};
 }
 export function menuFoldersForTest(test:Pick<TestMeta,'folderId'>,folders:LibraryFolder[]):MenuFolder[]{
  return folderOptions(folders).filter(f=>folders.find(item=>item.id===f.id)?.showInFullTestMenu===true&&isFolderWithin(test.folderId,f.id,folders)).map(({id,path})=>({id,path}));
@@ -60,10 +62,10 @@ export function fullTestMenu(tests:TestMeta[],skill?:FolderSkill){
 }
 export const folderLink=(id:string,skill?:FolderSkill)=>'/folders/'+encodeURIComponent(id)+(skill?'?skill='+skill:'');
 export function publicFolderPages(test:Pick<TestMeta,'folderId'>,folders:LibraryFolder[]):PublicFolder[]{
- return folderOptions(folders).filter(folder=>isFolderWithin(test.folderId,folder.id,folders)).map(folder=>({id:folder.id,name:folder.name,path:folder.path,parentId:folder.parentId,description:folders.find(f=>f.id===folder.id)?.description?.trim()||'',...(folders.find(f=>f.id===folder.id)?.skill?{skill:folders.find(f=>f.id===folder.id)!.skill}:{})}));
+ return folderOptions(folders).filter(folder=>isFolderWithin(test.folderId,folder.id,folders)).map(folder=>({id:folder.id,name:folder.name,path:folder.path,parentId:folder.parentId,description:folders.find(f=>f.id===folder.id)?.description?.trim()||'',aliases:folders.find(f=>f.id===folder.id)?.aliases||[],...(folders.find(f=>f.id===folder.id)?.skill?{skill:folders.find(f=>f.id===folder.id)!.skill}:{})}));
 }
 export function folderDescription(folder:Pick<PublicFolder,'name'|'path'|'description'>,skill?:FolderSkill){
- return folder.description?.trim()||`Explore IELTS ${skill||'reading and listening'} material in ${folder.path}. Choose a full test or practise one passage or section at your own pace.`;
+ return folder.description?.trim()||`Explore IELTS ${skill||'reading and listening'} material in ${folder.path}. Choose a full test or practise one passage or part at your own pace.`;
 }
 export function organizationPatch(test:TestMeta,folders:LibraryFolder[]){
  return {folderId:test.folderId||null,folderPath:folderLocation(test.folderId,folders),fullTestMenuFolders:menuFoldersForTest(test,folders),folderPages:publicFolderPages(test,folders)};
@@ -86,9 +88,9 @@ export function changeFolder(folders:LibraryFolder[],id:string,name:string,paren
  if(!clean||clean.length>80||/[\\/]/.test(clean))throw new Error('Use a folder name of 1–80 characters, without / or \\.');
  if(parentId&&!folderLocation(parentId,folders))throw new Error('Choose an existing parent folder.');
  if(parentId&&(parentId===id||isFolderWithin(parentId,id,folders)))throw new Error('A folder cannot be moved inside itself or its subfolders.');
- if(folders.some(f=>f.id!==id&&!f.deletedAt&&f.parentId===parentId&&(f.skill||'reading')===(skill||folders.find(f=>f.id===id)?.skill||'reading')&&f.name.toLocaleLowerCase()===clean.toLocaleLowerCase()))throw new Error('A folder with this name already exists here.');
+ if(folders.some(f=>f.id!==id&&!f.deletedAt&&f.parentId===parentId&&f.name.toLocaleLowerCase()===clean.toLocaleLowerCase()))throw new Error('A folder with this name already exists here.');
  const previous=folders.find(f=>f.id===id),now=Date.now();
- const next={...previous,...(skill?{skill}:{}),id,name:clean,parentId,createdAt:previous?.createdAt||now,updatedAt:now,deletedAt:null,showInFullTestMenu:previous?.showInFullTestMenu===true};
+ const next={...previous,id,name:clean,parentId,createdAt:previous?.createdAt||now,updatedAt:now,deletedAt:null,showInFullTestMenu:previous?.showInFullTestMenu===true};
  return previous?folders.map(f=>f.id===id?next:f):[...folders,next];
 }
 export function folderDeletion(folders:LibraryFolder[],tests:TestMeta[],selected:string[]){
@@ -109,4 +111,18 @@ export function folderSkills(id:string,folders:LibraryFolder[],tests:TestMeta[])
  if(!skills.size){let current=folders.find(f=>f.id===id);const seen=new Set<string>();while(current&&!seen.has(current.id)){seen.add(current.id);if(current.skill){skills.add(current.skill);break}current=folders.find(f=>f.id===current!.parentId)}}
  return skills.size?[...skills]:['reading'];
 }
-export function foldersForSkill(folders:LibraryFolder[],tests:TestMeta[],skill:FolderSkill){return folders.filter(f=>!f.deletedAt&&folderSkills(f.id,folders,tests).includes(skill))}
+export function foldersForSkill(folders:LibraryFolder[],tests:TestMeta[],skill:FolderSkill){return folders.filter(f=>!f.deletedAt)}
+
+// Consolidate legacy skill-specific copies by full path; old URLs stay valid.
+export function sharedFolders(folders:LibraryFolder[]):LibraryFolder[]{
+ const result:LibraryFolder[]=[],byPath=new Map<string,LibraryFolder>(),ids=new Map<string,string>();
+ const ordered=[...folders].sort((a,b)=>folderLocation(a.id,folders).split(' / ').length-folderLocation(b.id,folders).split(' / ').length||a.createdAt-b.createdAt||a.id.localeCompare(b.id));
+ for(const folder of ordered){
+  const path=folderLocation(folder.id,folders),key=path.normalize('NFC').toLocaleLowerCase();
+  const existing=path?byPath.get(key):undefined;
+  if(existing){ids.set(folder.id,existing.id);existing.aliases=[...new Set([...(existing.aliases||[]),folder.id,...(folder.aliases||[])])];existing.showInFullTestMenu=existing.showInFullTestMenu||folder.showInFullTestMenu;existing.description=existing.description||folder.description;continue;}
+  const {skill,...rest}=folder;const next={...rest,parentId:folder.parentId?(ids.get(folder.parentId)||folder.parentId):null};
+  result.push(next);ids.set(folder.id,next.id);if(path)byPath.set(key,next);
+ }
+ return result;
+}

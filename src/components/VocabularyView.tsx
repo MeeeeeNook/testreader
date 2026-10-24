@@ -1,26 +1,22 @@
-import {lookupVocabulary} from "../services/dictionary";
-import {BookOpen,Plus,Download,Pencil,RotateCw,Search} from "lucide-react";
-import {Modal} from "./Modal";
-import {Select} from "./Select";
-import React, { useState, useMemo, useEffect, useRef } from 'react';
-import { VocabularyItem, UserProfile } from '../types';
-
-interface VocabularyViewProps {
-  vocabulary: VocabularyItem[];
-  profile: UserProfile;
-  onSaveWord: (word: Partial<VocabularyItem>) => Promise<void>;
-  onArchiveWord: (wordId: string) => Promise<void>;
-  onNotify: (msg: string) => void;
-}
-
-export const VocabularyView: React.FC<VocabularyViewProps> = ({
-  vocabulary,
-  profile,
-  onSaveWord,
-  onArchiveWord,
-  onNotify,
-}) => {
-  const [search, setSearch] = useState('');
+import React,{useState,useEffect,useRef} from 'react';
+import {Plus,Download,Pencil,Search,Folder,Trash2} from 'lucide-react';
+import {lookupVocabulary} from '../services/dictionary';
+import {createId} from '../services/ids';
+import {Modal} from './Modal';
+import {Select} from './Select';
+import type {VocabularyItem,UserProfile} from '../types';
+interface Props {vocabulary:VocabularyItem[];profile:UserProfile;onSaveWord:(word:Partial<VocabularyItem>)=>Promise<void>;onArchiveWord:(id:string)=>Promise<void>;onUpdateProfile:(value:Partial<UserProfile>)=>Promise<void>;onNotify:(message:string)=>void}
+export function VocabularyView({vocabulary,profile,onSaveWord,onArchiveWord,onUpdateProfile,onNotify}:Props){
+ const [search,setSearch]=useState(''),[sort,setSort]=useState('newest'),[selected,setSelected]=useState<string[]>([]),[destination,setDestination]=useState('new'),[busy,setBusy]=useState(false),[error,setError]=useState('');
+ const [editingWord,setEditingWord]=useState<Partial<VocabularyItem>|null>(null),[folderForm,setFolderForm]=useState<{id?:string;name:string}|null>(null);
+ const folders=[{id:'new',name:'Từ mới'},...(profile.vocabularyFolders||[]).filter(f=>f.id!=='new')];
+ const folder=folders.some(f=>f.id===profile.activeVocabularyFolder)?profile.activeVocabularyFolder!:'new';
+ const words=vocabulary.filter(w=>!w.archived&&(w.folderId||'new')===folder&&[w.word,w.meaning,w.example].some(s=>s.toLowerCase().includes(search.toLowerCase()))).sort((a,b)=>sort==='az'?a.word.localeCompare(b.word):sort==='oldest'?a.createdAt-b.createdAt:b.createdAt-a.createdAt);
+ const run=async(action:()=>Promise<void>)=>{if(busy)return;setBusy(true);setError('');try{await action()}catch(e){setError(e instanceof Error?e.message:String(e))}finally{setBusy(false)}};
+ const openFolder=(id:string)=>void run(async()=>{await onUpdateProfile({activeVocabularyFolder:id});setSelected([]);setSearch('')});
+ const saveFolder=()=>void run(async()=>{const name=folderForm?.name.trim();if(!name)throw Error('Enter a folder name.');if(folders.some(f=>f.id!==folderForm?.id&&f.name.toLocaleLowerCase()===name.toLocaleLowerCase()))throw Error('A folder with this name already exists.');const id=folderForm?.id||createId();await onUpdateProfile({vocabularyFolders:[...(profile.vocabularyFolders||[]).filter(f=>f.id!==id),{id,name}],activeVocabularyFolder:id});setFolderForm(null);setSelected([])});
+ const moveWords=()=>void run(async()=>{const items=vocabulary.filter(w=>selected.includes(w.id));for(let i=0;i<items.length;i+=3)await Promise.all(items.slice(i,i+3).map(w=>onSaveWord({...w,folderId:destination})));setSelected([]);onNotify('Selected words moved.');});
+ const exportCsv=()=>{const cell=(s:string)=>'"'+String(/^[=+@\-]/.test(s)?"'"+s:s).replaceAll('"','""')+'"';const blob=new Blob(['\ufeffword,meaning,example,part_of_speech\r\n'+words.map(w=>[w.word,w.meaning,w.example,w.partOfSpeech].map(cell).join(',')).join('\r\n')],{type:'text/csv;charset=utf-8'});const url=URL.createObjectURL(blob),a=document.createElement('a');a.href=url;a.download='IELTS_Vocabulary.csv';a.click();setTimeout(()=>URL.revokeObjectURL(url),10000)};
   const [definitions,setDefinitions]=useState<Record<string,string>>({});
   const jobs=useRef(new Set<string>()),tried=useRef(new Set<string>());
   const latest=useRef({owner:profile.id,vocabulary,onSaveWord});latest.current={owner:profile.id,vocabulary,onSaveWord};
@@ -44,184 +40,15 @@ export const VocabularyView: React.FC<VocabularyViewProps> = ({
       .finally(()=>{jobs.current.delete(key);if(mounted.current)setDefinitions(previous=>({...previous}));});
     }
   },[vocabulary,profile.id,definitions]);
-  const [saveError,setSaveError]=useState('');
-  const [editingWord, setEditingWord] = useState<Partial<VocabularyItem> | null>(null);
 
-  const isVi = false;
-
-  const activeWords = useMemo(() => {
-    return vocabulary
-      .filter((w) => !w.archived)
-      .filter((w) => {
-        if (!search) return true;
-        const q = search.toLowerCase();
-        return (
-          w.word.toLowerCase().includes(q) ||
-          w.meaning.toLowerCase().includes(q) ||
-          w.example.toLowerCase().includes(q)
-        );
-      })
-      .sort((a, b) => (b.createdAt || 0) - (a.createdAt || 0));
-  }, [vocabulary, search]);
-
-  const handleExportCsv = () => {
-    if (activeWords.length === 0) {
-      onNotify('No vocabulary words to export.');
-      return;
-    }
-    const cell = (s: unknown) => `"${String(s || '').replaceAll('"', '""')}"`;
-    const header = '\ufeffword,meaning,example,part_of_speech\r\n';
-    const rows = activeWords
-      .map((w) => [w.word, w.meaning, w.example, w.partOfSpeech].map(cell).join(','))
-      .join('\r\n');
-
-    const blob = new Blob([header + rows], { type: 'text/csv;charset=utf-8' });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = `IELTS_Vocabulary_${new Date().toISOString().slice(0, 10)}.csv`;
-    a.click();
-    setTimeout(() => URL.revokeObjectURL(url), 10000);
-    onNotify('Anki-compatible CSV exported.');
-  };
-
-  const handleSubmitWord = async (e: React.FormEvent) => {
-    e.preventDefault();
-    if (!editingWord?.word?.trim()) {
-      onNotify('Please enter a word or phrase.');
-      return;
-    }
-    try {await onSaveWord(editingWord);setEditingWord(null);setSaveError('');}catch(error){setSaveError((error as Error).message);}
-  };
-
-  return (
-    <div className="vocab-notebook">
-      <header className="vocab-heading"><div><span className="portal-eyebrow">YOUR WORD COLLECTION</span><h1>Vocabulary</h1><p>Your saved words, with their dictionary meanings.</p></div><div className="vocab-heading-actions"><button className="studio-secondary" onClick={handleExportCsv}><Download size={16}/>Export CSV</button><button className="studio-primary" onClick={()=>{setSaveError('');setEditingWord({word:'',meaning:'',example:'',partOfSpeech:''});}}><Plus size={16}/>Add word</button></div></header>
-      <div className="vocab-toolbar"><label className="vocab-search"><Search size={18}/><input aria-label="Search saved vocabulary" placeholder="Search words or meanings…" value={search} onChange={event=>setSearch(event.target.value)}/></label><span>{activeWords.length} {activeWords.length===1?'word':'words'}</span></div>
-      {activeWords.length > 0 ? (
-        <div className="vocab-grid">
-          {activeWords.map(item=>{
-            const meanings=item.meaning.split('\n').map(meaning=>meaning.trim()).filter(Boolean);
-            const failed=!meanings.length&&definitions[item.id]&&definitions[item.id]!=='Looking up meaning…';
-            return <article key={item.id} className="vocab-card"><div className="vocab-card-heading"><div><h2>{item.word}</h2>{item.phonetic&&<span className="vocab-phonetic">{item.phonetic}</span>}</div><button className="vocab-edit" aria-label={'Edit '+item.word} title="Edit word" onClick={()=>{setSaveError('');setEditingWord(item);}}><Pencil size={16}/></button></div>
-              <div className="vocab-labels">{meanings.length&&item.partOfSpeech?<span>{item.partOfSpeech}</span>:null}{item.definitionLanguage==='en'&&<small>English definition</small>}</div>
-              {meanings.length?<><ol className="vocab-meanings">{meanings.slice(0,3).map((meaning,index)=><li key={index}>{meaning}</li>)}</ol>{meanings.length>3&&<details className="vocab-more"><summary>{meanings.length-3} more meanings</summary><ol className="vocab-meanings" start={4}>{meanings.slice(3).map((meaning,index)=><li key={index}>{meaning}</li>)}</ol></details>}</>:<div className="vocab-lookup-state" role="status"><BookOpen size={17}/><p>{failed?'Could not load this definition yet.':'Finding dictionary meanings…'}</p>{failed&&<button title="Retry lookup" onClick={()=>{tried.current.delete(profile.id+':'+item.id+':'+item.word);setDefinitions(previous=>({...previous,[item.id]:''}));}}><RotateCw size={14}/>Retry lookup</button>}</div>}
-              {item.dictionarySource&&<a className="vocab-source" href={item.dictionarySource==='wiktionary'?'https://en.wiktionary.org/':'https://dict.minhqnd.com/'} target="_blank" rel="noreferrer">{item.dictionarySource==='wiktionary'?'Wiktionary':'minhqnd Dictionary'}<span>↗</span></a>}
-            </article>;
-          })}
-        </div>
-      ) : (
-        <div className="studio-empty">
-          <p style={{ fontWeight: 600, fontSize: '14px' }}>
-            {isVi ? 'Chưa có từ vựng nào được lưu.' : 'Your vocabulary notebook is empty.'}
-          </p>
-          <p style={{ maxWidth: '460px', margin: '6px auto 14px' }}>
-            {isVi
-              ? 'Khi đọc bài thi, bôi đen bất kỳ từ hoặc cụm từ nào để tra từ điển và lưu vào sổ tay ngay lập tức.'
-              : 'Highlight any word or phrase while reading a test passage to trigger the dictionary lookup and save it to your notebook.'}
-          </p>
-          <button
-            className="studio-secondary"
-            onClick={() =>
-              setEditingWord({
-                word: '',
-                meaning: '',
-                example: '',
-                partOfSpeech: 'noun',
-              })
-            }
-          >
-            + {isVi ? 'Thêm từ đầu tiên' : 'Add first word'}
-          </button>
-        </div>
-      )}
-
-      <p className="vocab-attribution">Dictionary data: <a href="https://dict.minhqnd.com/" target="_blank" rel="noreferrer">minhqnd</a> · <a href="https://en.wiktionary.org/" target="_blank" rel="noreferrer">Wiktionary</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/" target="_blank" rel="noreferrer">CC BY-SA</a></p>
-      {/* Add / Edit Word Modal */}
-      {editingWord && (
-        <Modal className="vocab-edit-dialog" label={editingWord.id?'Edit word':'Add word'} onClose={()=>setEditingWord(null)}>
-          <div className="studio-modal-heading">
-            <h2>{editingWord.id ? 'Edit Word' : 'Save Vocabulary Word'}</h2>
-            <button className="studio-quiet" onClick={() => setEditingWord(null)}>
-              ✕
-            </button>
-          </div>
-
-          <form onSubmit={handleSubmitWord}>{saveError&&<p role="alert">{saveError}</p>}
-            <label className="studio-field">
-              Word / Phrase
-              <input
-                required
-                value={editingWord.word || ''}
-                onChange={(e) => setEditingWord({ ...editingWord, word: e.target.value })}
-                placeholder="e.g. ubiquitous, viable alternative"
-              />
-            </label>
-
-            <label className="studio-field">
-              Part of Speech
-              <Select
-                value={editingWord.partOfSpeech || ''}
-                onChange={(e) => setEditingWord({ ...editingWord, partOfSpeech: e.target.value })}
-              >
-                <option value="">From dictionary</option>{editingWord.partOfSpeech&&!['noun','verb','adjective','adverb','phrase'].includes(editingWord.partOfSpeech)&&<option value={editingWord.partOfSpeech}>{editingWord.partOfSpeech}</option>}<option value="noun">Noun</option>
-                <option value="verb">Verb</option>
-                <option value="adjective">Adjective</option>
-                <option value="adverb">Adverb</option>
-                <option value="phrase">Phrase / Collocation</option>
-              </Select>
-            </label>
-
-            <label className="studio-field">
-              Meaning (English or Vietnamese)
-              <textarea rows={4}
-                value={editingWord.meaning || ''}
-                onChange={(e) => setEditingWord({ ...editingWord, meaning: e.target.value })}
-                placeholder="Leave blank to look up the dictionary automatically"
-              />
-            </label>
-
-            <label className="studio-field">
-              Example Context Sentence
-              <textarea
-                value={editingWord.example || ''}
-                onChange={(e) => setEditingWord({ ...editingWord, example: e.target.value })}
-                placeholder="Sentence from the IELTS passage..."
-                rows={3}
-              />
-            </label>
-
-            <div className="studio-actions" style={{ marginTop: '20px' }}>
-              <button type="submit" className="studio-primary">
-                Save Word
-              </button>
-
-              {editingWord.id && (
-                <button
-                  type="button"
-                  className="studio-quiet studio-danger"
-                  onClick={async () => {
-                    await onArchiveWord(editingWord.id!);
-                    setEditingWord(null);
-                    onNotify('Word archived.');
-                  }}
-                >
-                  Archive Word
-                </button>
-              )}
-
-              <button
-                type="button"
-                className="studio-secondary"
-                onClick={() => setEditingWord(null)}
-              >
-                Cancel
-              </button>
-            </div>
-          </form>
-        </Modal>
-      )}
-    </div>
-  );
-};
-
+ return <div className="vocab-notebook"><header className="vocab-heading"><div><span className="portal-eyebrow">YOUR PERSONAL NOTEBOOK</span><h1>Vocabulary</h1><p>Keep words, meanings and examples together in your own folders.</p></div><div className="vocab-heading-actions"><button className="studio-secondary" onClick={exportCsv}><Download size={16}/>Export folder</button><button className="studio-primary" onClick={()=>setEditingWord({word:'',meaning:'',example:'',partOfSpeech:'',folderId:folder})}><Plus size={16}/>Add word</button></div></header>
+ {error&&<p role="alert" className="studio-callout">{error}</p>}
+ <div className="vocabulary-layout"><aside className="vocabulary-folders"><h2><Folder size={17}/>My folders</h2>{folders.map(f=><div key={f.id}><button disabled={busy} className={f.id===folder?'active':''} onClick={()=>openFolder(f.id)}><Folder size={16}/><span>{f.name}</span><small>{vocabulary.filter(w=>!w.archived&&(w.folderId||'new')===f.id).length}</small></button>{f.id!=='new'&&<button title={'Rename '+f.name} aria-label={'Rename '+f.name} onClick={()=>setFolderForm(f)}><Pencil size={13}/></button>}</div>)}<button className="studio-secondary" onClick={()=>setFolderForm({name:''})}><Plus size={16}/>New folder</button>{folder!=='new'&&<button className="quiet-button" disabled={busy} onClick={()=>void run(async()=>{for(const word of vocabulary.filter(w=>w.folderId===folder))await onSaveWord({...word,folderId:'new'});await onUpdateProfile({vocabularyFolders:(profile.vocabularyFolders||[]).filter(f=>f.id!==folder),activeVocabularyFolder:'new'});setSelected([])})}><Trash2 size={14}/>Remove folder · keep words</button>}</aside>
+ <section className="vocabulary-content"><div className="vocab-toolbar"><label className="vocab-search"><Search size={17}/><input aria-label="Search saved vocabulary" placeholder="Search this folder…" value={search} onChange={e=>setSearch(e.target.value)}/></label><Select aria-label="Sort vocabulary" value={sort} onChange={e=>setSort(e.target.value)}><option value="newest">Newest first</option><option value="oldest">Oldest first</option><option value="az">Word A–Z</option></Select></div>
+ {selected.length>0&&<div className="vocabulary-bulk"><span>{selected.length} selected</span><Select aria-label="Move vocabulary to folder" value={destination} onChange={e=>setDestination(e.target.value)}>{folders.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</Select><button className="studio-secondary" disabled={busy} onClick={moveWords}>Move words</button><button className="quiet-button" onClick={()=>setSelected([])}>Clear</button></div>}
+ <div className="vocabulary-table-scroll"><table className="vocabulary-table"><thead><tr><th><input type="checkbox" aria-label="Select all words" checked={!!words.length&&words.every(w=>selected.includes(w.id))} onChange={e=>setSelected(e.target.checked?words.map(w=>w.id):[])}/></th><th>Word</th><th>Meaning</th><th>Example</th><th><span className="sr-only">Actions</span></th></tr></thead><tbody>{words.map(w=><tr key={w.id}><td><input type="checkbox" aria-label={'Select '+w.word} checked={selected.includes(w.id)} onChange={e=>setSelected(prev=>e.target.checked?[...prev,w.id]:prev.filter(id=>id!==w.id))}/></td><td><strong>{w.word}</strong><small>{w.phonetic}</small><small>{w.partOfSpeech}</small></td><td>{w.meaning?<ol className="vocab-meanings">{w.meaning.split('\n').filter(Boolean).map((meaning,i)=><li key={i}>{meaning}</li>)}</ol>:<span role="status">{definitions[w.id]&&!definitions[w.id].startsWith('Looking')?'Could not load this definition. '+definitions[w.id]:definitions[w.id]||'Looking up meaning…'}</span>}{!w.meaning&&definitions[w.id]&&!definitions[w.id].startsWith('Looking')&&<button onClick={()=>{tried.current.delete(profile.id+':'+w.id+':'+w.word);setDefinitions(prev=>({...prev,[w.id]:''}))}}>Retry lookup</button>}</td><td>{w.example||'—'}</td><td><button className="quiet-button" aria-label={'Edit '+w.word} onClick={()=>setEditingWord(w)}><Pencil size={15}/></button></td></tr>)}</tbody></table></div>{!words.length&&<p className="studio-empty">No words in this folder. Save words while practising, or add one above.</p>}</section></div>
+ <p className="vocab-attribution">Dictionary data: <a href="https://dict.minhqnd.com/">minhqnd</a> · <a href="https://en.wiktionary.org/">Wiktionary</a> · <a href="https://creativecommons.org/licenses/by-sa/4.0/">CC BY-SA</a></p>
+ {folderForm&&<Modal className="vocab-edit-dialog" label="Vocabulary folder" onClose={()=>setFolderForm(null)}><form onSubmit={e=>{e.preventDefault();saveFolder()}}><h2>{folderForm.id?'Rename folder':'New folder'}</h2>{error&&<p role="alert">{error}</p>}<label>Folder name<input required autoFocus maxLength={80} value={folderForm.name} onChange={e=>setFolderForm({...folderForm,name:e.target.value})}/></label><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setFolderForm(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save folder</button></div></form></Modal>}
+ {editingWord&&<Modal className="vocab-edit-dialog" label={editingWord.id?'Edit word':'Add word'} onClose={()=>setEditingWord(null)}><form onSubmit={e=>{e.preventDefault();void run(async()=>{if(!editingWord.word?.trim())throw Error('Enter a word.');await onSaveWord({...editingWord,folderId:editingWord.folderId||folder});setEditingWord(null)})}}><h2>{editingWord.id?'Edit word':'Add word'}</h2>{error&&<p role="alert">{error}</p>}<label>Word<input required value={editingWord.word||''} onChange={e=>setEditingWord({...editingWord,word:e.target.value})}/></label><label>Folder<Select value={editingWord.folderId||folder} onChange={e=>setEditingWord({...editingWord,folderId:e.target.value})}>{folders.map(f=><option key={f.id} value={f.id}>{f.name}</option>)}</Select></label><label>Meaning<textarea rows={4} value={editingWord.meaning||''} placeholder="Leave blank for dictionary lookup" onChange={e=>setEditingWord({...editingWord,meaning:e.target.value})}/></label><label>Example<textarea rows={3} value={editingWord.example||''} onChange={e=>setEditingWord({...editingWord,example:e.target.value})}/></label><div className="studio-actions"><button className="studio-primary" disabled={busy}>Save word</button>{editingWord.id&&<button type="button" disabled={busy} className="quiet-button" onClick={()=>void run(async()=>{await onArchiveWord(editingWord.id!);setEditingWord(null)})}>Archive</button>}<button type="button" className="studio-secondary" onClick={()=>setEditingWord(null)}>Cancel</button></div></form></Modal>}
+ </div>;
+}

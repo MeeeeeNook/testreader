@@ -198,6 +198,19 @@ function markAssessment(assessment, responses) {
   return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
 }
 
+// server/fullExam.ts
+async function markFullExam(store, request) {
+  if (!request || !request.listening || !request.reading) throw new AssessmentError(400, "Both Listening and Reading answers are required.");
+  const output = {};
+  for (const skill of ["listening", "reading"]) {
+    const payload = request[skill];
+    const assessment = await loadAssessment(store, { testId: payload.testId }, false);
+    if (assessment.skill !== skill || assessment.parts.length !== (skill === "listening" ? 4 : 3) || Object.keys(assessment.keys).length !== 40) throw new AssessmentError(400, "Choose a complete 40-question " + skill + " test.");
+    output[skill] = { ...markAssessment(assessment, payload.responses), keys: assessment.keys, transcripts: assessment.transcripts };
+  }
+  return output;
+}
+
 // server/teacherRoutes.ts
 async function teacherAccess(db, identity) {
   if (!identity?.email_verified) return false;
@@ -268,7 +281,7 @@ var defaultWebsiteUI = { heroTitle: "Prepare for IELTS. Practise at your pace.",
   { id: "reading", title: "Reading practice", description: "Explore passages and build your reading skills.", href: "/practice?skill=reading", icon: "reading", visible: true },
   { id: "listening", title: "Listening practice", description: "Choose a part, listen and review your answers.", href: "/practice?skill=listening", icon: "listening", visible: true },
   { id: "full", title: "Full tests", description: "Complete a Reading or Listening test from start to finish.", href: "/full-tests", icon: "full", visible: true },
-  { id: "mix", title: "Mix your own test", description: "Choose the passages and parts you want to practise.", href: "/mock", icon: "mix", visible: true }
+  { id: "mix", title: "Listening + Reading", description: "Build and share a full test. Complete Listening, then Reading.", href: "/full-exam", icon: "mix", visible: true }
 ] };
 function normalizeWebsiteUI(input) {
   const v = input && typeof input === "object" ? input : {};
@@ -1041,6 +1054,14 @@ app.post("/api/test-review", async (req, res) => {
       isAdmin
     );
     res.json({ keys: assessment.keys, transcripts: assessment.transcripts });
+  } catch (error) {
+    apiError(res, error);
+  }
+});
+app.post("/api/full-exam/submit", async (req, res) => {
+  try {
+    const { db } = await caller(req);
+    res.json(await markFullExam(assessmentStore(db), req.body));
   } catch (error) {
     apiError(res, error);
   }

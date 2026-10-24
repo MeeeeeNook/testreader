@@ -24,8 +24,8 @@ test('public folder links recover existing menu IDs, survive renames and publish
 test('folder page shows its description, child links and only its own descendant tests across view changes',async()=>{
  const window=environment(),paths:string[]=[],folders=changeFolder(changeFolder([],'parent','Cambridge',null),'child','Cam 16','parent').map(folder=>({...folder,description:'A curated collection of reading tests.'}));
  const root=createRoot(document.getElementById('app')!);
- try{await act(async()=>root.render(React.createElement(FolderPage,{id:'parent',folders,tests:[meta('one','child','Cambridge / Cam 16'),meta('other','elsewhere','Forecast')],profile,attempts:[],location:'/folders/parent',onNavigate:path=>paths.push(path)})));
- assert.match(document.body.textContent!,/A curated collection/);assert.ok(document.querySelector('a[href="/folders/child?skill=reading&view=full"]'));
+ try{await act(async()=>root.render(React.createElement(FolderPage,{id:'parent',folders,tests:[meta('one','child','Cambridge / Cam 16'),meta('other','elsewhere','Forecast')],profile,attempts:[],location:'/folders/parent?view=full',onNavigate:path=>paths.push(path)})));
+ assert.match(document.body.textContent!,/A curated collection/);assert.ok(document.querySelector('a[href="/folders/child?view=full"]'));
  assert.deepEqual([...document.querySelectorAll('.practice-card h2')].map(node=>node.textContent),['Test one']);
  const switcher=[...document.querySelectorAll('button')].find(button=>button.textContent==='Passages & parts')!;
  await act(async()=>switcher.dispatchEvent(new window.Event('click',{bubbles:true})));assert.match(paths[0],/^\/folders\/parent\?view=practice/);
@@ -39,13 +39,13 @@ test('automatic vocabulary lookup saves dictionary meanings and actual parts of 
 test('notebook repairs legacy blanks automatically, skips existing definitions and retains record IDs',async()=>{
  environment();const original=globalThis.fetch,records:any[]=[];globalThis.fetch=async()=>new Response(JSON.stringify({exists:true,word:'district',results:[{meanings:[{definition:'An area of a city or country.',pos:'noun'}]}]}));
  const root=createRoot(document.getElementById('app')!),word:any={id:'legacy',word:'district',meaning:'',example:'The Guntur district.',partOfSpeech:'noun',owner:'learner',createdAt:1};
- try{await act(async()=>root.render(React.createElement(VocabularyView,{profile,vocabulary:[word,{...word,id:'manual',meaning:'My own definition.'}],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
+ try{await act(async()=>root.render(React.createElement(VocabularyView,{onUpdateProfile:async()=>{},profile,vocabulary:[word,{...word,id:'manual',meaning:'My own definition.'}],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
  assert.equal(records.length,1);assert.equal(records[0].id,'legacy');assert.equal(records[0].meaning,'An area of a city or country.');assert.equal(records[0].example,'The Guntur district.');assert.doesNotMatch(document.body.textContent!,/Needs definition|Look up definition/);
  }finally{await act(async()=>root.unmount());globalThis.fetch=original;}
 });
 test('a failed automatic lookup offers retry and never saves an empty word',async()=>{
  environment();const original=globalThis.fetch,records:any[]=[];globalThis.fetch=async()=>new Response('{}',{status:503});const root=createRoot(document.getElementById('app')!);
- try{await act(async()=>root.render(React.createElement(VocabularyView,{profile,vocabulary:[{id:'missing',word:'unavailable',meaning:'',example:'',partOfSpeech:'noun'} as any],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
+ try{await act(async()=>root.render(React.createElement(VocabularyView,{onUpdateProfile:async()=>{},profile,vocabulary:[{id:'missing',word:'unavailable',meaning:'',example:'',partOfSpeech:'noun'} as any],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
  assert.equal(records.length,0);assert.match(document.body.textContent!,/Could not load this definition/);assert.ok([...document.querySelectorAll('button')].some(button=>button.textContent==='Retry lookup'));
  }finally{await act(async()=>root.unmount());globalThis.fetch=original;}
 });
