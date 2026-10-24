@@ -14,12 +14,12 @@ test('catalog folders occupy a top row, reveal one level at a time and preserve 
  const window=environment(),root=createRoot(document.getElementById('app')!);let location='';
  function Catalog(){const [path,setPath]=React.useState('/full-tests?skill=listening');location=path;const route=parseRoute(path),props={folders,tests,profile,attempts:[],location:path,onNavigate:setPath};return route.name==='folder'?React.createElement(FolderPage,{...props,id:route.id!}):React.createElement(PracticeCatalog,{...props,full:true});}
  const click=async(selector:string,label:string)=>act(async()=>[...document.querySelectorAll(selector)].find(node=>node.textContent===label)!.dispatchEvent(Object.assign(new window.Event('click',{bubbles:true,cancelable:true}),{button:0})));
- try{await act(async()=>root.render(React.createElement(Catalog)));const names=()=>[...document.querySelectorAll('.catalog-folder-link')].map(node=>node.textContent);
- assert.deepEqual(names(),['Cambridge','Forecast']);assert.equal(document.querySelector('.catalog-filter-panel .folder-tree'),null);assert.equal(document.querySelector('.mini-skill-tabs'),null);
+ try{await act(async()=>root.render(React.createElement(Catalog)));const names=()=>[...document.querySelectorAll('.catalog-collection-option')].map(node=>node.textContent);
+ assert.deepEqual(names(),['Cambridge','Forecast']);assert.equal(document.querySelector('.catalog-filter-panel .folder-tree'),null);assert.equal(document.querySelector('.mini-skill-tabs'),null);assert.doesNotMatch(document.querySelector('.catalog-folders')!.textContent!,/folders/i);assert.equal(document.querySelector('.catalog-folders svg'),null);
  assert.ok([...document.querySelector('.practice-page')!.children].indexOf(document.querySelector('.catalog-folders')!)<[...document.querySelector('.practice-page')!.children].indexOf(document.querySelector('.catalog-layout')!));
  await click('.catalog-folder-link','Cambridge');assert.deepEqual(names(),['Cam 16']);assert.equal(new URL(location,'https://test.local').searchParams.get('skill'),'listening');assert.equal(new URL(location,'https://test.local').searchParams.get('view'),'full');
  await click('.catalog-folder-link','Cam 16');assert.deepEqual(names(),['Test 1']);assert.equal(document.querySelectorAll('.practice-card').length,1);
- await click('.collection-breadcrumbs a','All folders');assert.deepEqual(names(),['Cambridge','Forecast']);assert.match(location,/^\/full-tests\?skill=listening/);
+ await click('.catalog-collection-all','All');assert.deepEqual(names(),['Cambridge','Forecast']);assert.match(location,/^\/full-tests\?skill=listening/);
  }finally{await act(async()=>root.unmount());}
 });
 test('Mini Test defaults to Reading, restores passage/type filters and switches to four Listening parts',async()=>{
@@ -34,4 +34,18 @@ test('Mini Test defaults to Reading, restores passage/type filters and switches 
  await click('[aria-label="Passage or section"]');await act(async()=>[...document.querySelectorAll('[role="option"]')].find(option=>option.textContent==='Part 4')!.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(document.querySelectorAll('.practice-card').length,1);assert.match(document.querySelector('.practice-card')!.textContent!,/PART 4/);
  const matching=[...document.querySelectorAll('.catalog-filter-panel label')].find(node=>node.textContent==='Matching')!.querySelector('input')!;await act(async()=>{(matching as any).checked=true;matching.dispatchEvent(new window.Event('click',{bubbles:true}));});assert.equal(new URL(location,'https://test.local').searchParams.get('types'),'matching_features');assert.equal(document.querySelectorAll('.practice-card').length,1);
  }finally{await act(async()=>root.unmount());}
+});
+
+test('Reading and Listening complete-test catalogs expose filters and match type within the chosen passage or part',async()=>{
+ const window=environment(),root=createRoot(document.getElementById('app')!);
+ const additional=tests.map((t:any)=>({...t,id:t.id+'-other',title:'Other '+t.title,sectionSummaries:t.sectionSummaries.map((section:any)=>({...section,kinds:['multiple_choice']}))}));
+ const click=async(selector:string)=>act(async()=>document.querySelector(selector)!.dispatchEvent(new window.Event('click',{bubbles:true})));
+ try{for(const skill of ['reading','listening']){
+  function Catalog(){const [path,setPath]=React.useState('/full-tests?skill='+skill);return React.createElement(PracticeCatalog,{tests:[...tests,...additional],folders,profile,attempts:[],full:true,location:path,onNavigate:setPath});}
+  await act(async()=>root.render(React.createElement(Catalog,{key:skill})));assert.equal(document.querySelectorAll('.practice-card').length,2);assert.ok(document.querySelector('[aria-label="Passage or section"]'));assert.match(document.querySelector('.catalog-filter-panel')!.textContent!,/Question type/);
+  await click('[aria-label="Passage or section"]');await act(async()=>[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent===(skill==='reading'?'Passage 2':'Part 2'))!.dispatchEvent(new window.Event('click',{bubbles:true})));
+  const matching=[...document.querySelectorAll('.catalog-filter-panel label')].find(node=>node.textContent===(skill==='reading'?'Matching Features':'Matching'))!.querySelector('input')!;await act(async()=>{(matching as any).checked=true;matching.dispatchEvent(new window.Event('click',{bubbles:true}));});
+  assert.equal(document.querySelectorAll('.practice-card').length,1);assert.ok(document.querySelector('.practice-card')!.textContent!.includes(skill+' test'));assert.match(document.querySelector('.passage-badge')!.textContent!,/FULL TEST/);
+  await click('[aria-label="Passage or section"]');await act(async()=>[...document.querySelectorAll('[role="option"]')].find(node=>node.textContent===(skill==='reading'?'Passage 1':'Part 1'))!.dispatchEvent(new window.Event('click',{bubbles:true})));assert.equal(document.querySelectorAll('.practice-card').length,0);
+ }}finally{await act(async()=>root.unmount());}
 });
