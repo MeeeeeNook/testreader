@@ -887,7 +887,7 @@ export default function App() {
       const uploadPaths=new Map<string,string>();
       setUploadProgress('Processing upload queue');
       const {results,failures}=await runMediaQueue(media.map(image=>({...image,audio:audioUrls.has(image.url),digest:digests.get(image.url)||image.url,context:items.filter(item=>JSON.stringify(item.test).includes(image.url)).map(item=>item.test.title+' — '+item.name).join('; ')})),{
-        compressionConcurrency:(navigator as Navigator&{deviceMemory?:number}).deviceMemory&&((navigator as Navigator&{deviceMemory?:number}).deviceMemory||0)<4?1:(navigator.hardwareConcurrency||2)>=4?2:1,
+        compressionConcurrency:3,
         uploadConcurrency:3,cache:uploadCache.current,
         compress:async(job,progress)=>{const result=await compressListeningAudio(job.blob,job.name,p=>progress(p));return {blob:result.blob,name:result.name}},
         upload:async(job,blob,name,progress)=>{
@@ -1323,7 +1323,7 @@ export default function App() {
               <div className="import-progress-track"><progress aria-label="Import progress" max={100} value={importProgress.percent}/><strong>{Math.floor(importProgress.percent)}%</strong></div>
               <p role="status">{importProgress.label}</p><p className="import-progress-file">{importProgress.detail}</p>
               {queueRows.length>0&&<section aria-label="File upload queue" style={{maxHeight:'32vh',overflowY:'auto',textAlign:'left'}}>{queueRows.map(row=><div key={row.id} style={{padding:'9px 0',borderBottom:'1px solid #ddd'}}><strong style={{fontSize:12,overflowWrap:'anywhere'}}>{row.name}</strong>{row.context&&<small style={{display:'block',overflowWrap:'anywhere'}}>{row.context}</small>}<div style={{display:'flex',alignItems:'center',gap:10}}><progress aria-label={row.name+' progress'} max={100} value={row.percent}/><span style={{fontSize:11}}>{row.phase}{row.attempt>1?' · retry '+(row.attempt-1):''}</span></div>{row.error&&<small role="alert">{row.error}</small>}</div>)}</section>}
-              <p>Up to 2 recordings compress and 3 files upload at once. Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
+              <p>Up to 3 recordings compress and 3 files upload at once. Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
             </div>
           )}
 
