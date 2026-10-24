@@ -1039,7 +1039,7 @@ export default function App() {
         )}
 
         <div className={userRole === "admin" && ["admin","students","editor","content-admin","contributions-admin"].includes(route) ? "admin-shell" : undefined}>
-        {userRole === "admin" && ["admin","students","editor","content-admin","contributions-admin"].includes(route) && <AdminSidebar location={location} onNavigate={navigate} />}
+        {userRole === "admin" && ["admin","students","editor","content-admin","contributions-admin"].includes(route) && <AdminSidebar location={location} onNavigate={navigate} tests={tests} learners={learners} reportCount={reports.filter(r=>r.status==="open").length} />}
         <main id="studioContent">
           <React.Suspense
             fallback={<div className="studio-empty">Loading page…</div>}
@@ -1192,8 +1192,9 @@ export default function App() {
             {route === "admin" && page.section === "teachers" && userRole === "admin" && <TeacherAccounts/>}
             {route === "admin" && !["website-ui","teachers"].includes(page.section||"") && userRole === "admin" && (
               <AdminView
-                key={page.section || "overview"}
+                key={location}
                 section={page.section || "overview"}
+                location={location}
                 onNavigate={navigate}
                 tests={tests}
                 reports={reports}

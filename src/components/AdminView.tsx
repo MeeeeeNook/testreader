@@ -1,3 +1,5 @@
+import {AdminDashboard} from './AdminDashboard';
+import {downloadCsv} from '../services/adminTools';
 import {startLibraryDrag} from '../services/libraryDrag';
 import {PaginatedTable} from './PaginatedTable';
 import {MediaStorageStatus} from './MediaStorageStatus';
@@ -15,6 +17,7 @@ import { TestMeta, ContentReport, UserProfile } from "../types";
 
 interface AdminViewProps {
   section?: string;
+  location?: string;
   folders?: LibraryFolder[];
   onFolderChange?: (folders:LibraryFolder[])=>Promise<void>;
   onDeleteFolders?: (folderIds:string[],trashTests:boolean)=>Promise<void>;
@@ -50,7 +53,7 @@ interface AdminViewProps {
 }
 
 export const AdminView: React.FC<AdminViewProps> = ({
-  section="tests",onNavigate,onDeleteFolders,folders=[],onFolderChange,
+  section="tests",location="",onNavigate,onDeleteFolders,folders=[],onFolderChange,
   tests,
   reports,
   learners,
@@ -78,7 +81,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const go=(path:string)=>onNavigate?.(path);
   const [search, setSearch] = useState("");
   const [reportFilter, setReportFilter] = useState<"all" | "open" | "resolved">(
-    "all",
+    "open",
   );
 
   const [purgeIds,setPurgeIds]=useState<string[]>([]);
@@ -88,17 +91,20 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [skillFilter,setSkillFilter]=useState(section==='folders'?'':'reading');
+  const [skillFilter,setSkillFilter]=useState('');
   const [uploadSkill,setUploadSkill]=useState<'reading'|'listening'>('reading');
-  const [statusFilter,setStatusFilter]=useState('');
-  const [qualityFilter,setQualityFilter]=useState(false);
-  const [page,setPage]=useState(0);
+  const [statusFilter,setStatusFilter]=useState(()=>new URLSearchParams(location.split('?')[1]||'').get('status')||'');
+  const [qualityFilter,setQualityFilter]=useState(()=>new URLSearchParams(location.split('?')[1]||'').get('quality')==='review');
+  const [compact,setCompact]=useState(true);
+  const [reportSearch,setReportSearch]=useState("");
+  const [reportCategory,setReportCategory]=useState("");
   const [renameTest,setRenameTest]=useState<TestMeta|null>(null);
   const [newTitle,setNewTitle]=useState('');
-  useEffect(()=>{setPage(0);setSelected([]);},[tab,search,collectionFilter,skillFilter,statusFilter,qualityFilter]);
+  const [recursive, setRecursive] = useState(section!=='folders');
+  useEffect(()=>{setSelected([]);},[tab,search,collectionFilter,skillFilter,statusFilter,qualityFilter,recursive]);
   useEffect(()=>{if(section==='folders'){setSkillFilter('');setRecursive(false);}},[section]);
   const [renamePath, setRenamePath] = useState("");
-  const [recursive, setRecursive] = useState(section!=='folders');
+
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -132,24 +138,24 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (section==='folders'&&!recursive&&!collectionFilter&&folderLocation(t.folderId,folders))return false;
       if (!testInFolder(t,collectionFilter,folders,recursive)) return false;
       if (!search) return true;
-      const q = search.toLowerCase();
+      const q = search.trim().toLowerCase();
       return (
         t.title.toLowerCase().includes(q) ||
+        (t.passageTitles || []).some(title=>title.toLowerCase().includes(q)) ||
         folderLocation(t.folderId,folders).toLowerCase().includes(q)
       );
     })
     .sort((a, b) => compareTests({...a,source:folderLocation(a.folderId,folders)},{...b,source:folderLocation(b.folderId,folders)},sort));
 
-  const pages=Math.max(1,Math.ceil(filteredTests.length/25));
-  const currentPage=Math.min(page,pages-1);
+
   const visibleTests=filteredTests;
 
-  const filteredReports = reports.filter((r) => {
-    if (reportFilter === "all") return true;
-    return r.status === reportFilter;
-  });
+  const filteredReports = reports.filter(r => (reportFilter==='all'||r.status===reportFilter) && (!reportCategory||r.category===reportCategory) && (r.testTitle+' '+r.message+' '+r.category).toLowerCase().includes(reportSearch.trim().toLowerCase())).sort((a,b)=>b.createdAt-a.createdAt);
+  const clearFilters=()=>{setSearch('');setSkillFilter('');setStatusFilter('');setQualityFilter(false);setCollectionFilter('');};
+  const exportCatalog=()=>downloadCsv('test-catalog.csv',[['Title','Skill','Status','Folder','Questions','Parts','Updated','Warnings'],...filteredTests.map(t=>[t.title,t.skill,t.status,folderLocation(t.folderId,folders),t.questions,t.passages,new Date(t.updatedAt).toISOString(),catalogIssues(t).join('; ')])]);
 
-  const renderTestList=()=> <div className="folder-tests-content">          <h3 className="folder-tests-heading">Tests {collectionFilter==='unfiled'?'without a folder':collectionFilter?'in '+(folders.find(f=>f.id===collectionFilter)?.name||'this folder'):section==='folders'?'at top level':''} <small>({filteredTests.length})</small></h3>
+  const renderTestList=()=> <div className={"folder-tests-content "+(compact?"admin-density-compact":"")}>          <h3 className="folder-tests-heading">Tests {collectionFilter==='unfiled'?'without a folder':collectionFilter?'in '+(folders.find(f=>f.id===collectionFilter)?.name||'this folder'):section==='folders'?'at top level':''} <small>({filteredTests.length})</small></h3>
+          <div className="admin-view-tabs" aria-label="Quick library filters">{[['','All tests'],['published','Published'],['draft','Drafts']].map(([value,label])=><button key={label} aria-pressed={statusFilter===value&&!qualityFilter} onClick={()=>{setStatusFilter(value);setQualityFilter(false)}}>{label}</button>)}<button aria-pressed={qualityFilter} onClick={()=>{setQualityFilter(v=>!v);setStatusFilter('')}}>Needs review</button><span className="admin-results-count" role="status">{filteredTests.length} results</span></div>
           <div className="admin-filters">{section==='folders'&&<label><input type="checkbox" checked={recursive} onChange={e=>setRecursive(e.target.checked)}/>Include subfolders</label>}
             <label>Skill<Select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></Select></label>
             <label>Status<Select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></Select></label>
@@ -177,10 +183,10 @@ export const AdminView: React.FC<AdminViewProps> = ({
               View student attempts
             </button>
           </div>
-          <p className="studio-lead">Select tests to move them together, or drag a test onto a folder in the sidebar.</p>
+          <div className="admin-list-tools"><span>Select rows for bulk actions.</span><button className="studio-quiet" onClick={clearFilters}>Reset filters</button><button className="studio-quiet" aria-pressed={compact} onClick={()=>setCompact(v=>!v)}>{compact?'Show passage titles':'Compact rows'}</button><button className="studio-secondary" disabled={!filteredTests.length} onClick={exportCatalog}>Export filtered CSV</button></div>
           {selected.length > 0 && (
             <div className="admin-bulk">
-              <strong>{selected.length} selected</strong>
+              <strong>{selected.length} selected</strong><button className="studio-quiet" disabled={busy} onClick={()=>setSelected([])}>Clear selection</button>
               {onExportSelected&&<button className="studio-secondary" disabled={busy} onClick={()=>void run(()=>onExportSelected(selected))}>Export selected</button>}
               <FolderPicker folders={folders} value={collection} onChange={setCollection} label="Move to"/>
               <button
@@ -241,17 +247,17 @@ export const AdminView: React.FC<AdminViewProps> = ({
             <div className="studio-empty">
               {tab === "archive"
                 ? "No archived tests."
-                : 'No tests found. Click "+ New Test" or "Upload Files" to get started.'}
+                : 'No tests match this view. Reset filters, create a test or import files.'}
             </div>
           ) : (
             <div className="studio-table-wrap">
-              <PaginatedTable className="studio-table">
+              <PaginatedTable key={[search,skillFilter,statusFilter,qualityFilter,collectionFilter,sort,tab].join(":")} className="studio-table">
                 <thead>
                   <tr>
                     <th>
                       <input
                         type="checkbox"
-                        aria-label="Select all visible tests"
+                        aria-label="Select all filtered tests (all pages)"
                         checked={
                           filteredTests.length > 0 &&
                           visibleTests.every((t) => selected.includes(t.id))
@@ -290,7 +296,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         />
                       </td>
                       <td>
-                        <strong>{t.title}</strong>
+                        {t.deletedAt?<strong>{t.title}</strong>:<a className="admin-test-link" href={'/admin/tests/'+encodeURIComponent(t.id)} onClick={e=>{if(!e.ctrlKey&&!e.metaKey&&!e.shiftKey&&!e.altKey&&e.button===0){e.preventDefault();onEditTest(t.id)}}}>{t.title}</a>}
                         {t.passageTitles?.length ? <ul className="admin-passage-list">{t.passageTitles.map((title,i)=><li key={i}>{title}</li>)}</ul>:null}
                         {catalogIssues(t).map(issue=><span className="admin-quality-tag" key={issue}>{issue}</span>)}
                         <br />
@@ -304,8 +310,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
                       </td>
                       <td>
                         <span
-                          className="studio-tag"
-                          style={{ textTransform: "uppercase" }}
+                          className={"admin-status "+t.status}
+                          style={{ textTransform: "capitalize" }}
                         >
                           {t.status}
                         </span>
@@ -430,8 +436,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
           }}
         />
       </section></>}
-      {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
-      <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
+      {section === "overview" && <><AdminDashboard tests={tests} learners={learners} reports={reports} onNavigate={go} onReview={()=>go('/admin/tests?quality=review')}/><details className="admin-storage-details"><summary>Storage & usage</summary><StorageOverview tests={tests}/></details></>}
       {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are published by default. Choose Draft in the preview if you want to review them privately.</p></section>}
       {/* Test Bank & Archive Tab */}
       {(tab === "tests" || tab === "archive" || tab === "trash") && (
@@ -471,6 +476,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
             </Select>
           </div>
 
+          <div className="admin-filters"><label>Search reports<input value={reportSearch} onChange={e=>setReportSearch(e.target.value)} placeholder="Test title, message or category"/></label><label>Category<select value={reportCategory} onChange={e=>setReportCategory(e.target.value)}><option value="">All categories</option>{[...new Set(reports.map(r=>r.category))].sort().map(v=><option key={v}>{v}</option>)}</select></label><span role="status">{filteredReports.length} reports</span><button className="studio-secondary" disabled={!filteredReports.length} onClick={()=>downloadCsv('content-reports.csv',[['Test','Question','Category','Message','Status','Created'],...filteredReports.map(r=>[r.testTitle,r.question,r.category,r.message,r.status,new Date(r.createdAt).toISOString()])])}>Export CSV</button></div>
           {filteredReports.length === 0 ? (
             <div className="studio-empty">
               No content reports matching filter.
@@ -512,9 +518,11 @@ export const AdminView: React.FC<AdminViewProps> = ({
                     "{report.message}"
                   </p>
 
+                  <button className="studio-secondary" disabled={!tests.some(t=>t.id===report.testId&&!t.deletedAt)} onClick={()=>onEditTest(report.testId)}>Open test editor</button>
                   <button
                     className="studio-quiet"
-                    onClick={() => onToggleReportStatus(report)}
+                    disabled={busy}
+                    onClick={() => void run(()=>onToggleReportStatus(report))}
                   >
                     {report.status === "resolved"
                       ? "Reopen Issue"
