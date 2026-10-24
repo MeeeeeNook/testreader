@@ -1,6 +1,7 @@
+import {listeningImportIssues} from './services/listening';
 import {runMediaQueue,mediaQueueProgress,type QueueRow,type QueueResult} from './services/mediaQueue';
 import {TeacherAccounts,TeacherAdminView} from './components/TeacherAccess';
-import {importError,withImportTimeout,type ImportProgress} from './services/importProgress';
+import {importTestLabel,importError,withImportTimeout,type ImportProgress} from './services/importProgress';
 import {lookupVocabulary} from "./services/dictionary";
 import {FolderPage} from "./components/FolderPage";
 const WebsiteUISettings=React.lazy(()=>import('./components/WebsiteUISettings').then(m=>({default:m.WebsiteUISettings})));
@@ -874,17 +875,18 @@ export default function App() {
     let imported=0,duplicates=items.filter(item=>item.match).length,completed=false;
     const savedIds=new Set<string>();
     const errors=[...plan.errors];
+    const preflightFailed=items.filter(item=>{const issues=listeningImportIssues(item.test);if(!issues.length)return false;errors.push(importTestLabel(item)+' | Step: checking Listening settings | '+issues.join(' '));return true});
     try {
       const digests=await mediaDigests([...plan.images,...(plan.recordings||[])],(done,total)=>setImportProgress({phase:'verify',label:'Checking selected media',percent:5*done/Math.max(1,total)}));
-      for(const item of items)item.test.contentHash=await contentHash(item.test,digests);
+      for(const item of items){currentStep='Checking '+importTestLabel(item);item.test.contentHash=await contentHash(item.test,digests);}
       const assets=new Map<string,string>(),audioNames=new Map<string,string>(),audioSizes=new Map<string,number>();
-      const selectedContent=JSON.stringify(items);
+      const selectedContent=JSON.stringify(items.filter(item=>!preflightFailed.includes(item)));
       const media=[...plan.images,...(plan.recordings||[])].filter(image=>selectedContent.includes(image.url));
       const audioUrls=new Set(plan.recordings?.map(r=>r.url)||[]);
       const {compressListeningAudio}=await import('./services/audioCompression');
       const uploadPaths=new Map<string,string>();
       setUploadProgress('Processing upload queue');
-      const {results,failures}=await runMediaQueue(media.map(image=>({...image,audio:audioUrls.has(image.url),digest:digests.get(image.url)||image.url})),{
+      const {results,failures}=await runMediaQueue(media.map(image=>({...image,audio:audioUrls.has(image.url),digest:digests.get(image.url)||image.url,context:items.filter(item=>JSON.stringify(item.test).includes(image.url)).map(item=>item.test.title+' — '+item.name).join('; ')})),{
         compressionConcurrency:(navigator as Navigator&{deviceMemory?:number}).deviceMemory&&((navigator as Navigator&{deviceMemory?:number}).deviceMemory||0)<4?1:(navigator.hardwareConcurrency||2)>=4?2:1,
         uploadConcurrency:3,cache:uploadCache.current,
         compress:async(job,progress)=>{const result=await compressListeningAudio(job.blob,job.name,p=>progress(p));return {blob:result.blob,name:result.name}},
@@ -895,16 +897,16 @@ export default function App() {
         },
         onProgress:rows=>{setQueueRows(rows);const done=rows.filter(r=>r.phase==='complete'||r.phase==='failed').length;setImportProgress({phase:'upload',label:`${done} / ${rows.length} files processed`,percent:mediaQueueProgress(rows)})}
       });
-      for(const image of media){const result=results.get(image.url);if(!result){errors.push(image.name+': '+failures.get(image.url));continue}assets.set(image.url,result.url);if(audioUrls.has(image.url)){audioSizes.set(image.url,result.size);audioNames.set(image.url,result.name);audioOriginalBytes+=image.blob.size;audioStoredBytes+=result.size}}
-      const failedItems=items.filter(item=>[...failures.keys()].some(url=>JSON.stringify(item.test).includes(url)));
-      for(const item of failedItems)errors.push(item.name+': not saved because a required media file failed. Retry this test from the preview.');
+      for(const image of media){const result=results.get(image.url);if(!result){const affected=items.filter(item=>JSON.stringify(item.test).includes(image.url)).map(importTestLabel).join('\n');errors.push(affected+' | Media: '+image.name+' | Step: compression/upload | '+failures.get(image.url));continue}assets.set(image.url,result.url);if(audioUrls.has(image.url)){audioSizes.set(image.url,result.size);audioNames.set(image.url,result.name);audioOriginalBytes+=image.blob.size;audioStoredBytes+=result.size}}
+      const failedItems=[...preflightFailed,...items.filter(item=>!preflightFailed.includes(item)&&[...failures.keys()].some(url=>JSON.stringify(item.test).includes(url)))];
+      for(const item of failedItems){if(!preflightFailed.includes(item))errors.push(importTestLabel(item)+': not saved because a required media file failed. Retry this test from the preview.')};
       const readyItems=items.filter(item=>!failedItems.includes(item));
       const candidates=readyItems.map(c=>({...c,test:replaceImportAssets({...c.test,parts:c.test.parts.map(p=>({...p,...(p.audio&&audioNames.has(p.audio)?{audioName:audioNames.get(p.audio)}:{})})),audioFiles:c.test.audioFiles?.map(file=>({...file,name:audioNames.get(file.url)||file.name,size:audioSizes.get(file.url)||file.size}))},assets)}));
       // 3. Save candidates to Firestore with duplicate detection
       for (const [idx, item] of candidates.entries()) {
         setUploadProgress(`Saving test ${idx + 1} of ${candidates.length}…`);
         try {
-          currentStep='Saving '+item.test.title;
+          currentStep='Saving '+importTestLabel(item);
           setImportProgress({phase:'save',label:`Saving test ${idx+1} of ${candidates.length}`,percent:85+15*idx/Math.max(1,candidates.length),detail:item.test.title});
           await withImportTimeout(firestoreAdapter.saveTestComplete(item.test,folders),'Saving '+item.test.title);
           imported++;savedIds.add(item.test.id);
@@ -912,7 +914,7 @@ export default function App() {
           if((saveErr as {code?:string}).code==='import/save-timeout')throw saveErr;
           failedItems.push(item);
           errors.push(
-            `${item.name}: saving test: ${importError(saveErr)}`,
+            `${importTestLabel(item)} | Step: saving test | ${importError(saveErr)}`,
           );
         }
       }
@@ -1320,7 +1322,7 @@ export default function App() {
               <strong>{uploadProgress}</strong>
               <div className="import-progress-track"><progress aria-label="Import progress" max={100} value={importProgress.percent}/><strong>{Math.floor(importProgress.percent)}%</strong></div>
               <p role="status">{importProgress.label}</p><p className="import-progress-file">{importProgress.detail}</p>
-              {queueRows.length>0&&<section aria-label="File upload queue" style={{maxHeight:'32vh',overflowY:'auto',textAlign:'left'}}>{queueRows.map(row=><div key={row.id} style={{padding:'9px 0',borderBottom:'1px solid #ddd'}}><strong style={{fontSize:12,overflowWrap:'anywhere'}}>{row.name}</strong><div style={{display:'flex',alignItems:'center',gap:10}}><progress aria-label={row.name+' progress'} max={100} value={row.percent}/><span style={{fontSize:11}}>{row.phase}{row.attempt>1?' · retry '+(row.attempt-1):''}</span></div>{row.error&&<small role="alert">{row.error}</small>}</div>)}</section>}
+              {queueRows.length>0&&<section aria-label="File upload queue" style={{maxHeight:'32vh',overflowY:'auto',textAlign:'left'}}>{queueRows.map(row=><div key={row.id} style={{padding:'9px 0',borderBottom:'1px solid #ddd'}}><strong style={{fontSize:12,overflowWrap:'anywhere'}}>{row.name}</strong>{row.context&&<small style={{display:'block',overflowWrap:'anywhere'}}>{row.context}</small>}<div style={{display:'flex',alignItems:'center',gap:10}}><progress aria-label={row.name+' progress'} max={100} value={row.percent}/><span style={{fontSize:11}}>{row.phase}{row.attempt>1?' · retry '+(row.attempt-1):''}</span></div>{row.error&&<small role="alert">{row.error}</small>}</div>)}</section>}
               <p>Up to 2 recordings compress and 3 files upload at once. Large audio files can take a few minutes. A stalled upload stops with a diagnostic error after 120 seconds without progress.</p>
             </div>
           )}
