@@ -1,3 +1,4 @@
+import {startLibraryDrag} from '../services/libraryDrag';
 import {PaginatedTable} from './PaginatedTable';
 import {MediaStorageStatus} from './MediaStorageStatus';
 import {StorageOverview} from "./StorageOverview";
@@ -29,6 +30,7 @@ interface AdminViewProps {
   onRestoreTest: (id: string) => Promise<void>;
   onSetCollection: (ids: string[], collection: string) => Promise<void>;
   onRenameTest?: (id:string,title:string) => Promise<void>;
+  onCopyTests?:(ids:string[],folderId:string,registry?:LibraryFolder[])=>Promise<void>;
   onDuplicateTest?: (id:string) => Promise<void>;
   onExportSelected?: (ids:string[]) => Promise<void>;
   onRefreshTitles?: (ids: string[]) => Promise<void>;
@@ -59,7 +61,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   onRestoreTest,
   onSetCollection,
   onRefreshTitles,
-  onRenameTest, onDuplicateTest, onExportSelected,
+  onRenameTest, onDuplicateTest, onCopyTests, onExportSelected,
   onSetStatus,
   onViewStudents,
   onEditTest,
@@ -86,7 +88,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [collection, setCollection] = useState("");
   const [selected, setSelected] = useState<string[]>([]);
   const [busy, setBusy] = useState(false);
-  const [skillFilter,setSkillFilter]=useState('reading');
+  const [skillFilter,setSkillFilter]=useState(section==='folders'?'':'reading');
   const [uploadSkill,setUploadSkill]=useState<'reading'|'listening'>('reading');
   const [statusFilter,setStatusFilter]=useState('');
   const [qualityFilter,setQualityFilter]=useState(false);
@@ -94,8 +96,9 @@ export const AdminView: React.FC<AdminViewProps> = ({
   const [renameTest,setRenameTest]=useState<TestMeta|null>(null);
   const [newTitle,setNewTitle]=useState('');
   useEffect(()=>{setPage(0);setSelected([]);},[tab,search,collectionFilter,skillFilter,statusFilter,qualityFilter]);
+  useEffect(()=>{if(section==='folders'){setSkillFilter('');setRecursive(false);}},[section]);
   const [renamePath, setRenamePath] = useState("");
-  const [recursive, setRecursive] = useState(true);
+  const [recursive, setRecursive] = useState(section!=='folders');
   const run = async (action: () => Promise<void>) => {
     setBusy(true);
     try {
@@ -126,6 +129,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
       if (skillFilter && t.skill !== skillFilter) return false;
       if (statusFilter && t.status !== statusFilter) return false;
       if (qualityFilter && !catalogIssues(t).length) return false;
+      if (section==='folders'&&!recursive&&!collectionFilter&&folderLocation(t.folderId,folders))return false;
       if (!testInFolder(t,collectionFilter,folders,recursive)) return false;
       if (!search) return true;
       const q = search.toLowerCase();
@@ -145,101 +149,8 @@ export const AdminView: React.FC<AdminViewProps> = ({
     return r.status === reportFilter;
   });
 
-  return (
-    <div className="admin-page" style={{ paddingBottom: "40px" }}>
-      {renameTest && <dialog open className="studio-modal admin-rename-dialog" aria-label="Rename test"><form onSubmit={e=>{e.preventDefault();if(!newTitle.trim()||!onRenameTest)return;const id=renameTest.id;void run(async()=>{await onRenameTest(id,newTitle.trim());setRenameTest(null);});}}><h2>Rename test</h2><input aria-label="New test title" value={newTitle} onChange={e=>setNewTitle(e.target.value)} required maxLength={250}/><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setRenameTest(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save title</button></div></form></dialog>}
-      {purgeIds.length>0&&<ConfirmActionDialog title="Permanently delete tests?" confirmLabel="Delete permanently" onCancel={()=>setPurgeIds([])} onConfirm={()=>{const ids=purgeIds;setPurgeIds([]);void run(async()=>{await onPermanentDelete?.(ids);setSelected([])})}}>{purgeIds.length} tests, their answer keys and unused audio/images will be deleted permanently. Files shared with other tests are kept. This cannot be undone.</ConfirmActionDialog>}
-      {tab==='trash'&&<section className="trash-actions studio-panel"><div><h2>Free up storage</h2><p>Permanently remove deleted tests and media no other test uses.</p></div><button className="studio-secondary studio-danger" disabled={busy||!trashedTests.length||!onPermanentDelete} onClick={()=>setPurgeIds(trashedTests.map(t=>t.id))}>Empty Trash ({trashedTests.length})</button></section>}
-      {deleteIds.length > 0 && (
-        <ConfirmActionDialog
-          title="Move tests to Trash?"
-          confirmLabel="Move to Trash"
-          onCancel={() => setDeleteIds([])}
-          onConfirm={() => {
-            const ids = deleteIds;
-            setDeleteIds([]);
-            void run(async () => {
-              for (const id of ids) await onDeleteTest(id);
-            });
-          }}
-        >
-          {deleteIds.length} test(s) will be removed from the library. You can
-          restore them from Trash.
-        </ConfirmActionDialog>
-      )}
-      <div className="studio-page-head">
-        <div>
-          <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
-          <h1 className="studio-heading">{{overview:"Overview",tests:"Tests",folders:"Folders",upload:"Upload & Import",reports:"Content reports",users:"Students",archive:"Archive",trash:"Trash"}[section]||"Admin Studio"}</h1>
-          <p className="studio-lead">
-            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Create folders and subfolders. Open a folder to manage its tests, or select several folders for bulk actions.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests or permanently delete them to free storage."}[section]}
-          </p>
-        </div>
-
-        <div className="studio-actions">
-          <button className="studio-primary" onClick={onNewTest}>
-            <Plus size={16}/> New test
-          </button>
-          <button className="studio-secondary" onClick={()=>onOpenUpload('reading')}>
-            <Upload size={16}/> Upload Reading
-          </button><button className="studio-secondary" onClick={()=>onOpenUpload('listening')}><Upload size={16}/> Upload Listening</button>
-        </div>
-      </div>
-
-      {section === "upload" && <><MediaStorageStatus/><div className="collection-view-tabs" aria-label="Upload skill">{(['reading','listening'] as const).map(skill=><button key={skill} aria-pressed={uploadSkill===skill} className={uploadSkill===skill?'active':''} onClick={()=>setUploadSkill(skill)}>Upload {skill==='reading'?'Reading':'Listening'}</button>)}</div><section
-        className="admin-dropzone"
-        onDragOver={(e) => e.preventDefault()}
-        onDrop={(e) => {
-          e.preventDefault();
-          void onUploadFiles(Array.from(e.dataTransfer.files),uploadSkill);
-        }}
-      >
-        <strong>Drop {uploadSkill==='reading'?'Reading':'Listening'} ZIP, HTML, or JSON tests here</strong>
-        <p>
-          {uploadSkill==='listening'?'Include the audio files inside the ZIP. Review recordings and transcripts before importing.':'Include the passages, questions and diagrams. Review the test before importing.'}
-        </p>
-        <button
-          className="studio-secondary"
-          onClick={() => folderInput.current?.click()}
-        >
-          Upload {uploadSkill==='reading'?'Reading':'Listening'} folder
-        </button>
-        <input
-          ref={(e) => {
-            folderInput.current = e;
-            if (e) e.setAttribute("webkitdirectory", "");
-          }}
-          type="file"
-          multiple
-          hidden
-          onChange={(e) => {
-            if (e.target.files) void onUploadFiles(Array.from(e.target.files),uploadSkill);
-            e.target.value = "";
-          }}
-        />
-      </section></>}
-      {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
-      <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
-      {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are published by default. Choose Draft in the preview if you want to review them privately.</p></section>}
-      {/* Test Bank & Archive Tab */}
-      {(tab === "tests" || tab === "archive" || tab === "trash") && (
-        <div className="studio-panel">
-          <div className="studio-toolbar">
-            <div className="studio-search">
-              <input
-                placeholder="Search test title or collection source…"
-                value={search}
-                onChange={(e) => setSearch(e.target.value)}
-              />
-            </div>
-
-            <button className="studio-secondary" onClick={onExportBank}>
-              Export Entire Bank (JSON)
-            </button>
-          </div>
-
-          {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} skill={skillFilter==='listening'?'listening':'reading'} onSkillChange={skill=>{setSkillFilter(skill);setCollectionFilter('');setSelected([]);}} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}/>}
-          <div className="admin-filters">
+  const renderTestList=()=> <div className="folder-tests-content">          <h3 className="folder-tests-heading">Tests {collectionFilter==='unfiled'?'without a folder':collectionFilter?'in '+(folders.find(f=>f.id===collectionFilter)?.name||'this folder'):section==='folders'?'at top level':''} <small>({filteredTests.length})</small></h3>
+          <div className="admin-filters">{section==='folders'&&<label><input type="checkbox" checked={recursive} onChange={e=>setRecursive(e.target.checked)}/>Include subfolders</label>}
             <label>Skill<Select value={skillFilter} onChange={e=>setSkillFilter(e.target.value)}><option value="">All skills</option><option value="reading">Reading</option><option value="listening">Listening</option></Select></label>
             <label>Status<Select value={statusFilter} onChange={e=>setStatusFilter(e.target.value)}><option value="">All statuses</option><option value="published">Published</option><option value="draft">Draft</option><option value="archived">Archived</option></Select></label>
             <label><input type="checkbox" checked={qualityFilter} onChange={e=>setQualityFilter(e.target.checked)}/> Needs content review</label>
@@ -249,7 +160,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 {sortOptions.map(([id,label]) => <option key={id} value={id}>{label}</option>)}
               </Select>
             </label>
-            <label>
+            {section!=="folders"&&<label>
               Folder
               <Select
                 value={collectionFilter}
@@ -261,12 +172,12 @@ export const AdminView: React.FC<AdminViewProps> = ({
               >
                 <option value="">All folders</option><option value="unfiled">Unfiled</option>{folderOptions(folders).map(f=><option key={f.id} value={f.id}>{f.path}</option>)}
               </Select>
-            </label>
+            </label>}
             <button className="studio-secondary" onClick={onViewStudents}>
               View student attempts
             </button>
           </div>
-          <p className="studio-lead">Select tests below and choose Move to. Create folders on the Folders page.</p>
+          <p className="studio-lead">Select tests to move them together, or drag a test onto a folder in the sidebar.</p>
           {selected.length > 0 && (
             <div className="admin-bulk">
               <strong>{selected.length} selected</strong>
@@ -363,7 +274,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                 </thead>
                 <tbody>
                   {visibleTests.map((t) => (
-                    <tr key={t.id}>
+                    <tr key={t.id} draggable={section==='folders'&&!busy&&!t.deletedAt} onDragStart={e=>startLibraryDrag(e.dataTransfer,{kind:'tests',ids:selected.includes(t.id)?selected:[t.id]})}>
                       <td>
                         <input
                           type="checkbox"
@@ -400,7 +311,7 @@ export const AdminView: React.FC<AdminViewProps> = ({
                         </span>
                       </td>
                       <td>
-                        <div style={{ display: "flex", gap: "6px" }}>
+                        <details className="admin-file-menu"><summary>Actions</summary><div>
                           <button
                             className="studio-quiet"
                             disabled={Boolean(t.deletedAt) || busy}
@@ -437,14 +348,110 @@ export const AdminView: React.FC<AdminViewProps> = ({
                           >
                             {t.status === "archived" ? "Restore" : "Archive"}
                           </button>
-                        </div>
+                        </div></details>
                       </td>
                     </tr>
                   ))}
                 </tbody>
               </PaginatedTable>
             </div>
-          )}
+          )}</div>;
+
+  return (
+    <div className="admin-page" style={{ paddingBottom: "40px" }}>
+      {renameTest && <dialog open className="studio-modal admin-rename-dialog" aria-label="Rename test"><form onSubmit={e=>{e.preventDefault();if(!newTitle.trim()||!onRenameTest)return;const id=renameTest.id;void run(async()=>{await onRenameTest(id,newTitle.trim());setRenameTest(null);});}}><h2>Rename test</h2><input aria-label="New test title" value={newTitle} onChange={e=>setNewTitle(e.target.value)} required maxLength={250}/><div className="studio-actions"><button type="button" className="studio-secondary" onClick={()=>setRenameTest(null)}>Cancel</button><button className="studio-primary" disabled={busy}>Save title</button></div></form></dialog>}
+      {purgeIds.length>0&&<ConfirmActionDialog title="Permanently delete tests?" confirmLabel="Delete permanently" onCancel={()=>setPurgeIds([])} onConfirm={()=>{const ids=purgeIds;setPurgeIds([]);void run(async()=>{await onPermanentDelete?.(ids);setSelected([])})}}>{purgeIds.length} tests, their answer keys and unused audio/images will be deleted permanently. Files shared with other tests are kept. This cannot be undone.</ConfirmActionDialog>}
+      {tab==='trash'&&<section className="trash-actions studio-panel"><div><h2>Free up storage</h2><p>Permanently remove deleted tests and media no other test uses.</p></div><button className="studio-secondary studio-danger" disabled={busy||!trashedTests.length||!onPermanentDelete} onClick={()=>setPurgeIds(trashedTests.map(t=>t.id))}>Empty Trash ({trashedTests.length})</button></section>}
+      {deleteIds.length > 0 && (
+        <ConfirmActionDialog
+          title="Move tests to Trash?"
+          confirmLabel="Move to Trash"
+          onCancel={() => setDeleteIds([])}
+          onConfirm={() => {
+            const ids = deleteIds;
+            setDeleteIds([]);
+            void run(async () => {
+              for (const id of ids) await onDeleteTest(id);
+            });
+          }}
+        >
+          {deleteIds.length} test(s) will be removed from the library. You can
+          restore them from Trash.
+        </ConfirmActionDialog>
+      )}
+      <div className="studio-page-head">
+        <div>
+          <div className="studio-eyebrow">YOUR CONTENT WORKSPACE</div>
+          <h1 className="studio-heading">{{overview:"Overview",tests:"Tests",folders:"Folders",upload:"Upload & Import",reports:"Content reports",users:"Students",archive:"Archive",trash:"Trash"}[section]||"Admin Studio"}</h1>
+          <p className="studio-lead">
+            {{overview:"Your library, content and learner progress in one place.",tests:"Find, edit and publish tests, individually or in bulk.",folders:"Choose a source or book on the left. Rename or move any folder using its row actions. Reading and Listening live together.",upload:"Choose files or drag them here to preview. Nothing is imported until you confirm.",reports:"Review and resolve content issues reported by learners.",users:"Manage learner accounts and review their attempts.",archive:"Tests set aside for now. Restore them whenever you need.",trash:"Restore tests or permanently delete them to free storage."}[section]}
+          </p>
+        </div>
+
+        <div className="studio-actions">
+          <button className="studio-primary" onClick={onNewTest}>
+            <Plus size={16}/> New test
+          </button>
+          <button className="studio-secondary" onClick={()=>onOpenUpload('reading')}>
+            <Upload size={16}/> Upload Reading
+          </button><button className="studio-secondary" onClick={()=>onOpenUpload('listening')}><Upload size={16}/> Upload Listening</button>
+        </div>
+      </div>
+
+      {section === "upload" && <><MediaStorageStatus/><div className="collection-view-tabs" aria-label="Upload skill">{(['reading','listening'] as const).map(skill=><button key={skill} aria-pressed={uploadSkill===skill} className={uploadSkill===skill?'active':''} onClick={()=>setUploadSkill(skill)}>Upload {skill==='reading'?'Reading':'Listening'}</button>)}</div><section
+        className="admin-dropzone"
+        onDragOver={(e) => e.preventDefault()}
+        onDrop={(e) => {
+          e.preventDefault();
+          void onUploadFiles(Array.from(e.dataTransfer.files),uploadSkill);
+        }}
+      >
+        <strong>Drop {uploadSkill==='reading'?'Reading':'Listening'} ZIP, HTML, or JSON tests here</strong>
+        <p>
+          {uploadSkill==='listening'?'Include the audio files inside the ZIP. Review recordings and transcripts before importing.':'Include the passages, questions and diagrams. Review the test before importing.'}
+        </p>
+        <button
+          className="studio-secondary"
+          onClick={() => folderInput.current?.click()}
+        >
+          Upload {uploadSkill==='reading'?'Reading':'Listening'} folder
+        </button>
+        <input
+          ref={(e) => {
+            folderInput.current = e;
+            if (e) e.setAttribute("webkitdirectory", "");
+          }}
+          type="file"
+          multiple
+          hidden
+          onChange={(e) => {
+            if (e.target.files) void onUploadFiles(Array.from(e.target.files),uploadSkill);
+            e.target.value = "";
+          }}
+        />
+      </section></>}
+      {section === "overview" && <><StorageOverview tests={tests}/><div className="admin-stat-grid">{[['Published',tests.filter(t=>t.status==='published'&&!t.deletedAt).length],['Drafts',tests.filter(t=>t.status==='draft'&&!t.deletedAt).length],['Needs review',tests.filter(t=>!t.deletedAt&&catalogIssues(t).length>0).length],['Students',learners.length]].map(([label,count])=><div key={String(label)}><strong>{count}</strong><span>{label}</span></div>)}</div>
+      <div className="admin-overview-grid"><section className="studio-panel"><h2>Your workspace</h2><p>Import new tests, organise your folders and review content before publishing.</p><div className="admin-shortcuts">{[['/admin/upload','Import tests','Preview files before importing'],['/admin/folders','Organise folders','Manage sources and subfolders'],['/admin/tests','Manage tests','Edit, publish and manage in bulk'],['/admin/students','Review students','View attempt history and results']].map(([url,title,description])=><button key={url} onClick={()=>go(url)}><strong>{title} <span aria-hidden="true">›</span></strong><span>{description}</span></button>)}</div></section><section className="studio-panel"><h2>Needs attention</h2><p>{reports.filter(r=>r.status==='open').length} unresolved content reports</p><p>{tests.filter(t=>!t.deletedAt&&catalogIssues(t).length).length} tests need content review</p><p>{trashedTests.length} tests in Trash</p><button className="studio-secondary" onClick={()=>go('/admin/reports')}>Review reports</button></section></div></>}
+      {section === "upload" && <section className="studio-panel"><h2>Before you import</h2><ol><li>Choose ZIP, HTML, JSON files or a folder.</li><li>Review tests, passages, questions and warnings.</li><li>Select tests, adjust names, destination and status.</li><li>Confirm to upload images and save tests.</li></ol><p>Tests are published by default. Choose Draft in the preview if you want to review them privately.</p></section>}
+      {/* Test Bank & Archive Tab */}
+      {(tab === "tests" || tab === "archive" || tab === "trash") && (
+        <div className="studio-panel">
+          <div className="studio-toolbar">
+            <div className="studio-search">
+              <input
+                placeholder="Search test title or collection source…"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+              />
+            </div>
+
+            <button className="studio-secondary" onClick={onExportBank}>
+              Export Entire Bank (JSON)
+            </button>
+          </div>
+
+          {section === "folders" && <FolderManager tests={tests} folders={folders} value={collectionFilter} skill={skillFilter==='listening'?'listening':'reading'} onSkillChange={skill=>{setSkillFilter(skill);setCollectionFilter('');setSelected([]);}} onOpen={id=>{setCollectionFilter(id);setSelected([]);}} onChange={onFolderChange} onMoveTests={onSetCollection} onCopyTests={onCopyTests} selectedTests={selected} onClearTests={()=>setSelected([])} onDelete={onDeleteFolders|| (async()=>{throw new Error("Folder saving unavailable.");})}>{renderTestList()}</FolderManager>}
+          {section!=="folders"&&renderTestList()}
         </div>
       )}
 
