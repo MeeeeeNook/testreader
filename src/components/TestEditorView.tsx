@@ -1,3 +1,4 @@
+import {TestCoverUpload} from './TestCoverUpload';
 import {ListeningMediaEditor} from './ListeningMediaEditor';
 import {audioMime} from '../services/listening';
 import {TestCover} from "./TestCover";
@@ -285,7 +286,8 @@ export const TestEditorView: React.FC<TestEditorViewProps> = ({
         </div>
       </div>
 
-      <section className="studio-panel cover-editor"><div><h2>Test cover</h2><p>Upload an image for this test. Images are resized and compressed before uploading.</p><label className="studio-secondary">{coverBusy?'Uploading…':'Choose image'}<input type="file" accept="image/png,image/jpeg,image/webp,image/gif" disabled={coverBusy||saving} onChange={e=>{void uploadCover(e.target.files?.[0]);e.target.value='';}}/></label>{test.coverImage&&<button className="quiet-button" disabled={coverBusy} onClick={()=>setTest({...test,coverImage:''})}>Use illustration</button>}</div><TestCover id={test.id} title={test.title} image={test.coverImage} skill={test.skill}/></section>
+      <TestCoverUpload test={test} busy={coverBusy||saving} onUpload={uploadCover} onReset={()=>setTest({...test,coverImage:''})} onNotify={onNotify}/>
+
       {/* Section Tabs */}
       <div className="editor-tabs">
         {test.parts.map((p, idx) => (
