@@ -1,3 +1,4 @@
+import {requestJson} from './apiRequest';
 import {normalizePassageHeadings} from './passageFormatting';
 import {listeningImportIssues} from './listening';
 import {importError} from "./importProgress";
@@ -93,6 +94,7 @@ export class FirestoreAdapter {
 
   // Generic item put
   async put(kind: string, value: any): Promise<any> {
+    if(kind==="attempts")throw new Error("Results must be verified and saved by the scoring server.");
     const user = auth.currentUser;
     const id = value.id;
     const path = this.getPath(kind, id, user?.uid);
@@ -172,33 +174,12 @@ export class FirestoreAdapter {
     }
   }
 
-  async getStudentAttempt(uid: string, id: string) {
-    if ((await this.getRole()) !== "admin")
-      throw new Error("Administrator access required.");
-    if (![uid, id].every((value) => /^[\w-]{1,128}$/.test(value)))
-      throw new Error("Invalid record identifier.");
-    const snap = await getDoc(doc(db, `users/${uid}/attempts`, id));
-    return snap.exists() ? { ...snap.data(), id: snap.id } : null;
+  async getStudentAttempt(uid:string,id:string){
+    const data=await requestJson<{attempt:any}>('/api/admin/student-attempts',{targetUserId:uid,id},()=>auth.currentUser);
+    return data.attempt;
   }
-
-  async listStudentAttempts(uid: string, cursor?: DocumentSnapshot) {
-    if ((await this.getRole()) !== "admin")
-      throw new Error("Administrator access required.");
-    if (!/^[\w-]{1,128}$/.test(uid))
-      throw new Error("Invalid student identifier.");
-    const constraints: any[] = [
-      orderBy("createdAt", "desc"),
-      firestoreLimit(30),
-    ];
-    if (cursor) constraints.push(startAfter(cursor));
-    const snap = await getDocs(
-      query(collection(db, `users/${uid}/attempts`), ...constraints),
-    );
-    return {
-      attempts: snap.docs.map((d) => ({ ...d.data(), id: d.id })),
-      cursor: snap.docs.at(-1),
-      hasMore: snap.size === 30,
-    };
+  async listStudentAttempts(uid:string,cursor?:{createdAt:number;id:string}){
+    return requestJson<{attempts:any[];hasMore:boolean;cursor:{createdAt:number;id:string}|null}>('/api/admin/student-attempts',{targetUserId:uid,...(cursor?{cursor}:{})},()=>auth.currentUser);
   }
 
   // Efficient Paginated Test Catalog Fetching (reads lightweight metadata only!)

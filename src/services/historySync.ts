@@ -1,3 +1,4 @@
+import {requestJson} from './apiRequest';
 import { auth } from "../firebase";
 import { firestoreAdapter } from "./firestoreAdapter";
 import { syncHistoryRecords } from "./localHistory.js";
@@ -10,7 +11,10 @@ export function syncHistory(uid: string): Promise<AttemptRecord[]> {
     uid,
     {
       list: () => firestoreAdapter.list("attempts"),
-      put: (data: AttemptRecord) => firestoreAdapter.put("attempts", data),
+      put: async (data:AttemptRecord)=>{
+        const response=await requestJson<{attempt:AttemptRecord}>('/api/history/save',data,()=>auth.currentUser);
+        return response.attempt;
+      },
     },
     () => auth.currentUser?.uid === uid,
   ) as Promise<AttemptRecord[]>;

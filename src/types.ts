@@ -123,6 +123,8 @@ export interface UserProfile {
 }
 
 export interface AttemptRecord {
+  serverVerified?:boolean;
+  verifiedAt?:number;
   fullExamId?:string;
   startedAt?:number;
   completedAt?:number;

@@ -110,21 +110,31 @@ export async function syncHistoryRecords(
   );
   writeAttempts(storage, owner, records);
   // Drain again after each upload: another tab/session can finish while sync is in flight.
-  let pending = readAttempts(storage, owner).filter((a) => !a.syncedAt);
+  let pending = readAttempts(storage, owner).filter((a) => !a.syncedAt && !a.syncBlocked);
   while (pending.length) {
     const record = pending[0];
     check();
     const { syncedAt, definition, ...data } = record;
-    await remote.put({ ...data, owner });
+    let canonical;
+    try {canonical = await remote.put({ ...data, owner });}
+    catch(error) {
+      if(![404,409].includes(error?.status))throw error;
+      check();
+      // Keep historical results whose original test has been removed or needs repair.
+      // They remain local and unverified; other sessions can still synchronize.
+      writeAttempts(storage,owner,mergeAttempts(readAttempts(storage,owner),[{...record,syncBlocked:true,syncError:'The original test is unavailable for verification.'}]));
+      pending=readAttempts(storage,owner).filter(a=>!a.syncedAt&&!a.syncBlocked);
+      continue;
+    }
     check();
     writeAttempts(
       storage,
       owner,
       mergeAttempts(readAttempts(storage, owner), [
-        { ...record, syncedAt: Date.now() },
+        { ...record, ...(valid(canonical) ? canonical : {}), owner, syncedAt: Date.now() },
       ]),
     );
-    pending = readAttempts(storage, owner).filter((a) => !a.syncedAt);
+    pending = readAttempts(storage, owner).filter((a) => !a.syncedAt && !a.syncBlocked);
   }
   return readAttempts(storage, owner);
 }

@@ -1,3 +1,6 @@
+// server/gradeSignature.ts
+import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+
 // src/services/scoring.ts
 function normalizeAnswer(value) {
   return String(value ?? "").normalize("NFKC").replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/[‐‑–—]/g, "-").replace(/\s+/g, " ").trim().toLowerCase();
@@ -141,7 +144,7 @@ async function loadAssessment(store, request, admin) {
     let data = cache.get(source.testId);
     if (!data) {
       const meta = await store.test(source.testId);
-      if (!meta || !admin && meta.status !== "published") throw new AssessmentError(404, "This test is unavailable.");
+      if (!meta || !admin && (meta.status !== "published" || meta.deletedAt)) throw new AssessmentError(404, "This test is unavailable.");
       const [sections, keyData] = await Promise.all([store.sections(source.testId), store.keys(source.testId)]);
       if (!keyData) throw new AssessmentError(409, "Answer keys are missing. Ask an administrator to re-import this test.");
       data = { meta, sections: sections.sort((a, b) => (a.index ?? 0) - (b.index ?? 0)), keyData };
@@ -196,6 +199,95 @@ function markAssessment(assessment, responses) {
   }
   const result = scoreTest(assessment.parts, clean);
   return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
+}
+
+// server/gradeSignature.ts
+function stable(value) {
+  return Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
+}
+function gradeSigner(secret) {
+  const key = createHash("sha256").update("ielts-history-v1\0" + secret).digest();
+  const sign = (record) => {
+    const { gradeSignature, ...data } = record;
+    return createHmac("sha256", key).update(JSON.stringify(stable(data))).digest("hex");
+  };
+  const verify = (record) => {
+    if (!record || typeof record.gradeSignature !== "string" || !/^[a-f0-9]{64}$/.test(record.gradeSignature)) return false;
+    return timingSafeEqual(Buffer.from(record.gradeSignature, "hex"), Buffer.from(sign(record), "hex"));
+  };
+  return { sign, verify };
+}
+function configuredGradeSigner() {
+  const key = process.env.HISTORY_SIGNING_SECRET || process.env.FIREBASE_SERVICE_ACCOUNT_JSON || process.env.FIREBASE_SERVICE_ACCOUNT || process.env.FIREBASE_SERVICE_ACCOUNT_BASE64;
+  if (!key) throw new AssessmentError(503, "Result verification is not configured. Your result is saved on this device.");
+  return gradeSigner(key);
+}
+
+// server/historyRoutes.ts
+import { FieldPath } from "firebase-admin/firestore";
+var validId2 = (id) => typeof id === "string" && /^[\w-]{1,128}$/.test(id);
+function registerHistoryRoutes(app2, caller2, storeFor, fail, signerFor = configuredGradeSigner) {
+  const trusted = (record) => ({ ...record, serverVerified: signerFor().verify(record) });
+  app2.post("/api/admin/student-attempts", async (req, res) => {
+    try {
+      const { isAdmin, db } = await caller2(req);
+      if (!isAdmin) throw new AssessmentError(403, "Administrator access required.");
+      const { targetUserId, id, cursor } = req.body || {};
+      if (!validId2(targetUserId) || id !== void 0 && !validId2(id)) throw new AssessmentError(400, "Invalid result identifiers.");
+      const collection = db.collection(`users/${targetUserId}/attempts`);
+      if (id) {
+        const record = await collection.doc(id).get();
+        res.json({ attempt: record.exists ? trusted(record.data()) : null });
+        return;
+      }
+      let query = collection.orderBy("createdAt", "desc").orderBy(FieldPath.documentId(), "desc");
+      if (cursor) {
+        if (!Number.isSafeInteger(cursor.createdAt) || !validId2(cursor.id)) throw new AssessmentError(400, "Invalid result page.");
+        query = query.startAfter(cursor.createdAt, cursor.id);
+      }
+      const page = await query.limit(26).get(), docs = page.docs.slice(0, 25), last = docs.at(-1);
+      res.json({ attempts: docs.map((doc) => trusted({ ...doc.data(), id: doc.id })), hasMore: page.docs.length > 25, cursor: last ? { createdAt: last.data().createdAt, id: last.id } : null });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
+  app2.post("/api/history/save", async (req, res) => {
+    try {
+      const { identity, isAdmin, db } = await caller2(req), body = req.body;
+      if (!validId2(body?.id) || !validId2(body?.testId) || !["practice", "exam"].includes(body?.mode)) throw new AssessmentError(400, "Invalid result identifiers or mode.");
+      const ref = db.doc(`users/${identity.uid}/attempts/${body.id}`), previous = await ref.get();
+      if (signerFor().verify(previous.data())) {
+        res.json({ attempt: previous.data() });
+        return;
+      }
+      const limiter = db.doc(`api_limits/history_${identity.uid}`), windowMs = 6e4;
+      await db.runTransaction(async (tx) => {
+        const now2 = Date.now(), snapshot = await tx.get(limiter), old = snapshot.data(), reset = !old || old.until <= now2;
+        if (!reset && old.count >= 30) throw new AssessmentError(429, "Please wait a minute before saving more results. Your result is kept on this device.");
+        tx.set(limiter, { count: reset ? 1 : old.count + 1, until: reset ? now2 + windowMs : old.until });
+      });
+      const assessment = await loadAssessment(storeFor(db), body, isAdmin);
+      const marked = markAssessment(assessment, body.responses), now = Date.now();
+      const time = (value) => typeof value === "number" && Number.isSafeInteger(value) && value > 0 && value <= now + 6e4 ? value : null;
+      const completedAt = time(body.completedAt) || time(body.createdAt) || now, startedAt = time(body.startedAt);
+      const record = { id: body.id, owner: identity.uid, testId: body.testId, testTitle: assessment.title, skill: assessment.skill, mode: body.mode, createdAt: completedAt, completedAt, ...marked, serverVerified: true, verifiedAt: now };
+      if (startedAt && startedAt <= completedAt) record.startedAt = startedAt;
+      if (Number.isSafeInteger(body.elapsedSeconds) && body.elapsedSeconds >= 0 && body.elapsedSeconds <= 604800) record.elapsedSeconds = body.elapsedSeconds;
+      if (Array.isArray(body.sourceSections)) record.sourceSections = body.sourceSections.map(({ testId, sectionId }) => ({ testId, sectionId }));
+      else if (Array.isArray(body.sectionIds)) record.sectionIds = [...new Set(body.sectionIds)];
+      if (validId2(body.fullExamId)) record.fullExamId = body.fullExamId;
+      record.gradeSignature = signerFor().sign(record);
+      const saved = await db.runTransaction(async (tx) => {
+        const snapshot = await tx.get(ref);
+        if (signerFor().verify(snapshot.data())) return snapshot.data();
+        tx.set(ref, record);
+        return record;
+      });
+      res.json({ attempt: saved });
+    } catch (error) {
+      fail(res, error);
+    }
+  });
 }
 
 // server/fullExam.ts
@@ -315,7 +407,7 @@ function registerWebsiteUIRoutes(app2, authorize, backend2, fail) {
 }
 
 // server/r2Storage.ts
-import { createHash, createHmac } from "node:crypto";
+import { createHash as createHash2, createHmac as createHmac2 } from "node:crypto";
 var MediaStorageError = class extends Error {
   constructor(code, message, status = 503) {
     super(message);
@@ -334,8 +426,8 @@ function readR2Config(env = process.env) {
   return { accountId: env.R2_ACCOUNT_ID, accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, bucket: env.R2_BUCKET_NAME, publicUrl: publicUrl.href.replace(/\/$/, "") };
 }
 var encode = (value) => encodeURIComponent(value).replace(/[!'()*]/g, (char) => "%" + char.charCodeAt(0).toString(16).toUpperCase());
-var hash = (value) => createHash("sha256").update(value).digest("hex");
-var hmac = (key, value) => createHmac("sha256", key).update(value).digest();
+var hash = (value) => createHash2("sha256").update(value).digest("hex");
+var hmac = (key, value) => createHmac2("sha256", key).update(value).digest();
 function presign(url, method, credentials, headers = {}, now = /* @__PURE__ */ new Date(), expires = 600, region = "auto") {
   const result = new URL(url), timestamp = now.toISOString().replace(/[:-]|\.\d{3}/g, ""), day = timestamp.slice(0, 8), scope = day + "/" + region + "/s3/aws4_request";
   const normalized = Object.fromEntries(Object.entries({ host: result.host, ...headers }).map(([key, value]) => [key.toLowerCase(), value.trim().replace(/\s+/g, " ")]));
@@ -348,7 +440,7 @@ function presign(url, method, credentials, headers = {}, now = /* @__PURE__ */ n
   const query = [...result.searchParams.entries()].map(([key, value]) => [encode(key), encode(value)]).sort(([a, av], [b, bv]) => a < b ? -1 : a > b ? 1 : av < bv ? -1 : av > bv ? 1 : 0).map(([key, value]) => key + "=" + value).join("&");
   const canonical = [method, result.pathname, query, names.map((name) => name + ":" + normalized[name] + "\n").join(""), names.join(";"), "UNSIGNED-PAYLOAD"].join("\n");
   const signingKey = hmac(hmac(hmac(hmac("AWS4" + credentials.secretAccessKey, day), region), "s3"), "aws4_request");
-  const signature = createHmac("sha256", signingKey).update("AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hash(canonical)).digest("hex");
+  const signature = createHmac2("sha256", signingKey).update("AWS4-HMAC-SHA256\n" + timestamp + "\n" + scope + "\n" + hash(canonical)).digest("hex");
   result.search = query + "&X-Amz-Signature=" + signature;
   return result.href;
 }
@@ -608,7 +700,7 @@ var slugify = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").to
 var answerPath = (id, sectionId, title) => `/answers/${encodeURIComponent(id)}/${encodeURIComponent(sectionId)}/${slugify(title)}`;
 
 // server/portalRoutes.ts
-import { createHash as createHash2, randomUUID } from "node:crypto";
+import { createHash as createHash3, randomUUID } from "node:crypto";
 
 // server/publicPages.ts
 var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
@@ -635,7 +727,7 @@ function validateContribution(body) {
   if (body.tests.some((test) => !test || !Array.isArray(test.parts) || !test.parts.length || test.parts.some((p) => !p || typeof p.passageHtml !== "string" || typeof p.questionHtml !== "string" || !Array.isArray(p.questions)))) throw new AssessmentError(400, "The uploaded test content is incomplete.");
   const content = JSON.stringify(body.tests);
   if (Buffer.byteLength(content, "utf8") > 7e5) throw new AssessmentError(400, "This contribution is too large. Upload a smaller test ZIP (under 700 KB after conversion).");
-  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash2("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
+  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash3("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
 }
 function registerPortalRoutes(app2, { caller: caller2, backend: backend2, apiError: apiError2 }) {
   const admin = async (req) => {
@@ -821,7 +913,6 @@ async function verifyIdentity(verify, token) {
 // server/app.ts
 import { randomUUID as randomUUID2 } from "node:crypto";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
 import {
   initializeApp,
   getApps,
@@ -848,6 +939,7 @@ var firebase_applet_config_default = {
 // server/app.ts
 dotenv.config();
 var app = express();
+app.disable("x-powered-by");
 app.use(express.json({ limit: "4mb" }));
 app.get("/api/health", (_req, res) => res.json({ ok: true, service: "ielts-studio-api" }));
 function parseServiceAccount(raw) {
@@ -906,7 +998,7 @@ async function caller(req) {
   if (!token) throw new AssessmentError(401, "Sign in to continue.");
   const { auth, db } = backend();
   const identity = await verifyIdentity(
-    (value) => auth.verifyIdToken(value),
+    (value) => auth.verifyIdToken(value, true),
     token
   );
   const profile = await db.doc(`users/${identity.uid}`).get();
@@ -915,6 +1007,7 @@ async function caller(req) {
   const isAdmin = identity.email === "manhcuong2006ht@gmail.com" && identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerHistoryRoutes(app, caller, assessmentStore, apiError);
 registerStudentRoutes(app, caller, backend, apiError);
 registerTeacherRoutes(app, caller, backend, apiError);
 registerWebsiteUIRoutes(app, caller, backend, apiError);
@@ -931,7 +1024,7 @@ async function optionalCaller(req) {
     return { identity: null, isAdmin: false, db };
   }
   const identity = await verifyIdentity(
-    (value) => auth.verifyIdToken(value),
+    (value) => auth.verifyIdToken(value, true),
     token
   );
   const profile = await db.doc(`users/${identity.uid}`).get();
@@ -996,50 +1089,7 @@ app.post("/api/auth/sync", async (req, res) => {
     apiError(res, error);
   }
 });
-app.post("/api/dictionary", async (req, res) => {
-  try {
-    if (!process.env.GEMINI_API_KEY)
-      throw new AssessmentError(503, "Dictionary lookup is not configured.");
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const { text, context, language = "en" } = req.body;
-    if (!text || typeof text !== "string" || text.length > 500 || context && (typeof context !== "string" || context.length > 5e3)) {
-      return res.status(400).json({ error: "Text is required for dictionary lookup" });
-    }
-    const prompt = `You are a world-class IELTS Academic English lexicographer.
-Explain the word or phrase "${text}" as used in this context:
-"${context || text}"
-
-Provide the output in pure JSON format without markdown code blocks.
-Fields required:
-- "word": "${text}",
-- "partOfSpeech": "noun" | "verb" | "adjective" | "adverb" | "phrase",
-- "meaning": clear concise definition ${language === "vi" ? "written in Vietnamese with Vietnamese translation and explanation" : "written in clear English with nuance"},
-- "example": a high-quality illustrative sentence matching IELTS style`;
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json"
-      }
-    });
-    const parsed = JSON.parse(response.text || "{}");
-    res.json({
-      word: parsed.word || text,
-      partOfSpeech: parsed.partOfSpeech || "word",
-      meaning: parsed.meaning || "No definition available",
-      example: parsed.example || context || ""
-    });
-  } catch (error) {
-    if (error instanceof AssessmentError) return apiError(res, error);
-    console.error("Dictionary API error:", error);
-    res.json({
-      word: req.body.text,
-      partOfSpeech: "phrase",
-      meaning: req.body.language === "vi" ? "Kh\uFFFDng th? tra t? t? d?ng l\uFFFDc n\uFFFDy." : "Automatic lookup unavailable.",
-      example: req.body.context || ""
-    });
-  }
-});
+app.post("/api/dictionary", (_req, res) => res.status(410).json({ code: "AI_DICTIONARY_RETIRED", error: "Use the dictionary in the test or vocabulary screen." }));
 app.post("/api/test-review", async (req, res) => {
   try {
     const { db, isAdmin } = await optionalCaller(req);

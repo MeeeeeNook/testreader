@@ -1,3 +1,4 @@
+import {registerHistoryRoutes} from './historyRoutes';
 import {markFullExam} from './fullExam';
 import {teacherAccess,registerTeacherRoutes} from './teacherRoutes';
 import {registerWebsiteUIRoutes} from './websiteUIRoutes';
@@ -12,7 +13,6 @@ import express from "express";
 import { verifyIdentity } from "./identity";
 import { randomUUID } from "node:crypto";
 import dotenv from "dotenv";
-import { GoogleGenAI } from "@google/genai";
 import {
   initializeApp,
   getApps,
@@ -33,6 +33,7 @@ dotenv.config();
 
 
 const app = express();
+app.disable("x-powered-by");
 
 
 app.use(express.json({ limit: "4mb" }));
@@ -104,7 +105,7 @@ async function caller(req: express.Request) {
   if (!token) throw new AssessmentError(401, "Sign in to continue.");
   const { auth, db } = backend();
   const identity = await verifyIdentity(
-    (value) => auth.verifyIdToken(value),
+    (value) => auth.verifyIdToken(value, true),
     token,
   );
   const profile = await db.doc(`users/${identity.uid}`).get();
@@ -115,6 +116,7 @@ async function caller(req: express.Request) {
     identity.email_verified === true;
   return { identity, isAdmin, db, profile };
 }
+registerHistoryRoutes(app,caller,assessmentStore,apiError);
 registerStudentRoutes(app,caller,backend,apiError);
 registerTeacherRoutes(app,caller,backend,apiError);
 registerWebsiteUIRoutes(app,caller,backend,apiError);
@@ -127,7 +129,7 @@ async function optionalCaller(req: express.Request) {
     return { identity: null, isAdmin: false, db };
   }
   const identity = await verifyIdentity(
-    (value) => auth.verifyIdToken(value),
+    (value) => auth.verifyIdToken(value, true),
     token,
   );
   // Database/configuration failures must not be reported as expired sign-in.
@@ -210,65 +212,9 @@ app.post("/api/auth/sync", async (req, res) => {
   }
 });
 
-// Secure AI Dictionary & Vocabulary Lookup
-app.post("/api/dictionary", async (req, res) => {
-  try {
-    if (!process.env.GEMINI_API_KEY)
-      throw new AssessmentError(503, "Dictionary lookup is not configured.");
-    const ai = new GoogleGenAI({ apiKey: process.env.GEMINI_API_KEY });
-    const { text, context, language = "en" } = req.body;
-    if (
-      !text ||
-      typeof text !== "string" ||
-      text.length > 500 ||
-      (context && (typeof context !== "string" || context.length > 5000))
-    ) {
-      return res
-        .status(400)
-        .json({ error: "Text is required for dictionary lookup" });
-    }
-
-    const prompt = `You are a world-class IELTS Academic English lexicographer.
-Explain the word or phrase "${text}" as used in this context:
-"${context || text}"
-
-Provide the output in pure JSON format without markdown code blocks.
-Fields required:
-- "word": "${text}",
-- "partOfSpeech": "noun" | "verb" | "adjective" | "adverb" | "phrase",
-- "meaning": clear concise definition ${language === "vi" ? "written in Vietnamese with Vietnamese translation and explanation" : "written in clear English with nuance"},
-- "example": a high-quality illustrative sentence matching IELTS style`;
-
-    const response = await ai.models.generateContent({
-      model: "gemini-2.5-flash",
-      contents: prompt,
-      config: {
-        responseMimeType: "application/json",
-      },
-    });
-
-    const parsed = JSON.parse(response.text || "{}");
-    res.json({
-      word: parsed.word || text,
-      partOfSpeech: parsed.partOfSpeech || "word",
-      meaning: parsed.meaning || "No definition available",
-      example: parsed.example || context || "",
-    });
-  } catch (error) {
-    if (error instanceof AssessmentError) return apiError(res, error);
-    console.error("Dictionary API error:", error);
-    // Graceful fallback
-    res.json({
-      word: req.body.text,
-      partOfSpeech: "phrase",
-      meaning:
-        req.body.language === "vi"
-          ? "Kh�ng th? tra t? t? d?ng l�c n�y."
-          : "Automatic lookup unavailable.",
-      example: req.body.context || "",
-    });
-  }
-});
+// The website uses its existing external dictionary providers. Retire the unused
+// unauthenticated AI proxy so a future provider key cannot create an open billing endpoint.
+app.post('/api/dictionary',(_req,res)=>res.status(410).json({code:'AI_DICTIONARY_RETIRED',error:'Use the dictionary in the test or vocabulary screen.'}));
 
 // Practice review is explicit; question content and exam setup never receive private keys.
 app.post("/api/test-review", async (req, res) => {
