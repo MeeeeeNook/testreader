@@ -63,3 +63,34 @@
 .thumbnail-share{position:absolute;top:10px;right:10px;z-index:3;opacity:0;transition:opacity .15s}.practice-card-art{position:relative}.practice-card:hover .thumbnail-share,.thumbnail-share:focus-within{opacity:1}.thumbnail-share .reader-icon{width:32px;height:32px;background:#ffffffeb;border:1px solid #ded6e8;border-radius:50%;box-shadow:0 2px 8px #30234218;color:#6b4b91}.thumbnail-share .share-message{right:0;left:auto;white-space:nowrap}.portal-navigation{gap:20px}@media(hover:none){.thumbnail-share{opacity:1}}
 
 .reading-card:hover .thumbnail-share{opacity:1}.reading-card .thumbnail-share{right:48px}
+
+/* Share controls use the same centered box in covers and reader toolbars. */
+.share-test{vertical-align:middle;flex:0 0 auto;line-height:1}
+.share-test>button.share-button{display:inline-flex;align-items:center;justify-content:center;gap:8px;box-sizing:border-box;line-height:1.2}
+.share-test>button.share-button-compact{padding:0!important}
+.share-test .share-button>svg{display:block;width:18px;height:18px;flex:0 0 18px;margin:0;position:static;transform:none}
+.intro-overview .intro-test-id{font-size:11px;overflow-wrap:anywhere;margin:10px 0;color:var(--muted,#6c7b70)}
+.intro-test-id span{font-family:ui-monospace,monospace}
+.vocab-notebook{max-width:1440px;padding:24px 12px 48px}
+.vocabulary-layout{grid-template-columns:200px minmax(0,1fr);gap:22px}
+.vocab-folder-heading{display:flex;align-items:baseline;gap:12px;margin:0 0 14px}
+.vocab-folder-heading h2{font:500 22px var(--serif,Georgia);margin:0}
+.vocab-folder-heading>span{font-size:12px;color:var(--muted)}
+.vocabulary-table{table-layout:auto}
+.vocabulary-table th:first-child{width:42px}
+.vocabulary-table th:nth-child(2){width:24%}
+.vocabulary-table th:nth-child(3){width:auto}
+.vocabulary-table th:last-child{width:96px}
+.vocabulary-table td{padding:16px;white-space:normal;line-height:1.6}
+.vocabulary-table td>strong{font-size:16px;display:block}
+.vocabulary-table td>small{font-size:11px;line-height:1.6;margin-top:5px}
+.vocabulary-table .vocab-meanings{font-size:13px;line-height:1.65}
+.vocabulary-table .vocab-meanings li{margin:0 0 7px}
+.vocab-row-actions{display:flex;gap:4px;justify-content:flex-end}
+.vocab-row-actions button{width:32px;height:32px;display:inline-flex;justify-content:center;align-items:center;padding:0;border:1px solid var(--line);border-radius:7px;background:var(--white,#fff);cursor:pointer}
+.vocab-delete-button{color:#a44646;display:inline-flex;align-items:center;justify-content:center;gap:6px;font:inherit;cursor:pointer}
+.vocab-delete-button:hover{background:#fff0ed}
+.vocabulary-bulk{flex-wrap:wrap;gap:10px}
+.vocabulary-bulk .custom-select{max-width:180px}
+.vocabulary-folders .quiet-button{font-size:11px}
+@media(max-width:800px){.vocabulary-layout{grid-template-columns:minmax(0,1fr)}.vocab-notebook{padding:20px 0 40px}.vocabulary-table{min-width:480px}.vocabulary-table th:nth-child(2){width:26%}.vocabulary-table td{padding:12px 10px}.vocabulary-table th:last-child{width:84px}}

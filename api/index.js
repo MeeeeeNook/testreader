@@ -44,10 +44,6 @@ function testIntroductionPath(test, sectionId) {
   const ref = test.slug || test.id || humanTestSlug(test.title);
   return "/tests/" + encodeURIComponent(ref) + (sectionId ? "/sections/" + encodeURIComponent(sectionId) : "");
 }
-function visibleTestSource(source) {
-  const text = String(source || "").trim();
-  return /^(?:test_|[0-9a-f]{8}-[0-9a-f-]{27,})/i.test(text) ? "" : text;
-}
 
 // server/testUrlRegistry.mjs
 import { createHash } from "node:crypto";
@@ -308,7 +304,7 @@ function renderTestIntroduction(template, test, reference, section) {
   const path = testIntroductionPath(test, section), canonical = STUDENT_ORIGIN + path;
   const description = `${title}. IELTS ${test.skill === "listening" ? "Listening" : "Reading"} practice with ${chosen?.questions || test.questions} questions. Start free, choose practice or test mode, and review your answers after submitting.`;
   const parts = (test.sectionSummaries || []).map((part) => `<li><a href="${escapeHtml(testIntroductionPath(test, part.id))}">${escapeHtml(part.title)}</a></li>`).join("");
-  const body = `<article class="test-introduction"><nav><a href="/full-tests?skill=${test.skill}">${test.skill === "listening" ? "Listening" : "Reading"}</a></nav><h1>${escapeHtml(title)}</h1><p>${escapeHtml(visibleTestSource(test.source))}</p><p>${escapeHtml(description)}</p><p>${test.duration} minutes \xB7 ${test.passages} ${test.skill === "listening" ? "parts" : "passages"}</p><ul>${parts}</ul><a href="${escapeHtml(path)}?open=1">Choose a mode and start</a></article>`;
+  const body = `<article class="test-introduction"><nav><a href="/full-tests?skill=${test.skill}">${test.skill === "listening" ? "Listening" : "Reading"}</a></nav><h1>${escapeHtml(title)}</h1><p>Test ID: ${escapeHtml(test.id)}</p><p>${escapeHtml(description)}</p><p>${test.duration} minutes \xB7 ${test.passages} ${test.skill === "listening" ? "parts" : "passages"}</p><ul>${parts}</ul><a href="${escapeHtml(path)}?open=1">Choose a mode and start</a></article>`;
   const json = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
   const structured = { "@context": "https://schema.org", "@type": "LearningResource", name: title, description, url: canonical, inLanguage: "en", learningResourceType: "Practice test", isAccessibleForFree: true };
   const head2 = `<title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:url" content="${escapeHtml(canonical)}"><link rel="canonical" href="${escapeHtml(canonical)}"><meta name="robots" content="index,follow"><script type="application/ld+json">${json(structured)}</script><script>window.__TEST_ROUTE__=${json({ reference, testId: test.id, slug: test.slug })}</script>`;
