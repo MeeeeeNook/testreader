@@ -1,3 +1,4 @@
+import {canonicalSiteLocation} from './siteOrigins';
 import { useCallback, useEffect, useRef, useState } from "react";
 import {
   createBrowserHistory,
@@ -18,17 +19,23 @@ export function usePageRouter() {
   } | null>(null);
   useEffect(() => {
     controller.current = createBrowserHistory(window, (path: string) => {
+      const url=new URL(path,window.location.href);
+      const destination=canonicalSiteLocation(window.location.hostname,url.pathname,url.search);
+      if(destination){window.location.replace(destination);return;}
       guarded.current = false;
       setLocation(path);
       window.scrollTo({ top: 0 });
     });
-    if(window.location.hostname==='admin.ielts.vungocmanhcuong.id.vn'&&window.location.pathname==='/')controller.current.navigate('/admin',true);
+
     return () => {
       controller.current?.destroy();
       controller.current = null;
     };
   }, []);
   const navigate = useCallback((path: string, replace = false) => {
+    const target=new URL(path,window.location.href);
+    const destination=canonicalSiteLocation(window.location.hostname,target.pathname,target.search);
+    if(destination){window.location.assign(destination);return true;}
     if (path === window.location.pathname + window.location.search) return true;
     return controller.current?.navigate(path, replace) ?? false;
   }, []);

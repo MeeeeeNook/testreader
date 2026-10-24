@@ -1,3 +1,6 @@
+import {AdminSignInView} from './components/AdminSignInView';
+import {AdminPortalHeader} from './components/AdminPortalHeader';
+import {isAdminHost} from './services/siteOrigins';
 import {FullExamView} from './components/FullExamView';
 import {listeningImportIssues} from './services/listening';
 import {runMediaQueue,mediaQueueProgress,type QueueRow,type QueueResult} from './services/mediaQueue';
@@ -975,6 +978,7 @@ export default function App() {
   };
 
   // If in active test workspace:
+  if(isAdminHost(window.location.hostname)&&(!authReady||!user||(userRole!=='admin'&&!isTeacher)))return <AdminSignInView ready={authReady} signedIn={!!user}/>;
   if(isTeacher&&['admin','students','editor','content-admin','contributions-admin'].includes(route))return <TeacherAdminView onNavigate={navigate}/>;
   if (activeTest && !pageLoading && !pageError && ((route === "reading" && activeDirectSlug===page.slug) || (route === "workspace" && page.session === sessionId))) {
     return (
@@ -1022,7 +1026,7 @@ export default function App() {
       )}
       {/* Sidebar Navigation */}
       <div className="studio-main">
-        <PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={isTeacher?'teacher':userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />
+        {isAdminHost(window.location.hostname)?<AdminPortalHeader crumb="" user={user} profile={profile} role={isTeacher?'teacher':userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={()=>setRoute('settings')}/>:<PortalHeader settings={websiteUI} tests={tests} route={route} user={user} profile={profile} role={isTeacher?'teacher':userRole} onNavigate={navigate} onUpdateProfile={handleUpdateProfile} onOpenProfileModal={() => setRoute("settings")} />}
 
         {/* Account Suspension Alert */}
         {suspended && (
