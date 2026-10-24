@@ -27,7 +27,7 @@ test('shared folder choices allow both skills and consolidate legacy duplicates'
 test('collection pages default to both skills and retain skill filters in links',async()=>{
  dom();const shared=reconcileLibrary(folders,tests);
  const html=renderToStaticMarkup(React.createElement(PracticeCatalog,{folders:shared.folders,folder:shared.folders[0],tests:shared.tests,profile:{} as any,attempts:[],full:true,location:'/folders/r?view=full',onNavigate:()=>{}}));
- assert.match(html,/All tests/);assert.match(html,/reading-test/);assert.match(html,/listening-test/);
+ assert.doesNotMatch(html,/portal-skill-tabs/);assert.match(html,/reading-test/);assert.match(html,/listening-test/);
 });
 
 test('admin presents explicit Reading and Listening uploads before file selection',()=>{

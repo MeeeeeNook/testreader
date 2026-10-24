@@ -1,3 +1,4 @@
+import {createTestLaunch} from './services/sessionLaunch';
 import {testIntroductionPath} from './services/testUrls.js';
 import {EditorErrorBoundary} from './components/EditorErrorBoundary';
 import {loadWithRecovery} from './services/moduleRecovery';
@@ -405,6 +406,7 @@ export default function App() {
           setSelectedTestFull(null);
           const resolved=await firestoreAdapter.resolveTestReference(page.id);
           const test = await firestoreAdapter.getTestComplete(resolved.testId);
+          if (!alive) return;
           test.slug=resolved.slug||test.slug;
           const canonical=testIntroductionPath(test,page.section);
           if(!page.solution&&new URL(location,'https://studio.local').pathname!==canonical){navigate(canonical,true);return;}
@@ -514,11 +516,16 @@ export default function App() {
     }
   };
 
+  const deletedVocabularyIds = useRef(new Set<string>());
+  useEffect(() => { deletedVocabularyIds.current.clear(); }, [user?.uid]);
+
   // Vocabulary handlers
   const handleSaveWord = async (word: Partial<VocabularyItem>) => {
     if (!user) { notify(false ? "Đăng nhập để lưu từ vựng." : "Sign in to save vocabulary."); throw new Error("Sign in to save vocabulary."); }
     const owner=user.uid;
+    if(word.id&&deletedVocabularyIds.current.has(word.id))return;
     if(!word.meaning?.trim())word={...word,...await lookupVocabulary(word.word||'',word.example||'')};
+    if(word.id&&deletedVocabularyIds.current.has(word.id))return;
     if(previousUser.current!==owner)throw new Error('Your account changed. Please save the word again.');
     const duplicate=!word.id?vocabulary.find(item=>!item.archived&&item.word.toLowerCase()===word.word?.trim().toLowerCase()&&item.meaning===word.meaning?.trim()&&(item.folderId||'new')===(word.folderId||profile.activeVocabularyFolder||'new')):undefined;
     const id = word.id || duplicate?.id || createId();
@@ -528,8 +535,8 @@ export default function App() {
       folderId:(word.folderId||profile.activeVocabularyFolder)==='new'||profile.vocabularyFolders?.some(f=>f.id===(word.folderId||profile.activeVocabularyFolder))?(word.folderId||profile.activeVocabularyFolder)!:'new',
       word: word.word?.trim() || "",
       meaning: word.meaning?.trim() || "",
-      example: word.example?.trim() || "",
-      exampleSource:word.exampleSource,
+      example: "",
+
       partOfSpeech: word.partOfSpeech || "term",
       dictionarySource: word.dictionarySource,
       definitionLanguage: word.definitionLanguage,
@@ -555,26 +562,18 @@ export default function App() {
     notify(`“${item.word}” saved to vocabulary.`);
   };
 
-  const handleArchiveWord = async (wordId: string) => {
-    const target = vocabulary.find((w) => w.id === wordId);
-    if (target) {
-      const updated = { ...target, archived: true };
-      if (user) {
-        try {
-          await firestoreAdapter.put("vocabulary", updated);
-        } catch {}
-      }
-      setVocabulary((prev) => {
-        const next = prev.map((w) => (w.id === wordId ? updated : w));
-        try {
-          localStorage.setItem(
-            `reading-room:vocabulary:${profile.id}`,
-            JSON.stringify(next),
-          );
-        } catch {}
-        return next;
-      });
-    }
+  const handleDeleteWord = async (wordId: string) => {
+    if (!user) throw new Error("Sign in to delete vocabulary.");
+    const owner = user.uid;
+    deletedVocabularyIds.current.add(wordId);
+    try { await firestoreAdapter.delete("vocabulary", wordId); }
+    catch (error) { deletedVocabularyIds.current.delete(wordId); throw error; }
+    if (previousUser.current !== owner) return;
+    setVocabulary(previous => {
+      const next = previous.filter(word => word.id !== wordId);
+      try { localStorage.setItem(`reading-room:vocabulary:${owner}`, JSON.stringify(next)); } catch {}
+      return next;
+    });
   };
 
   // Toggle Favorite Test
@@ -594,34 +593,14 @@ export default function App() {
     durationMinutes: number,
     preview = false,
   ) => {
-    if(!preview&&!testToStart.sourceSections?.length){
-      const parent={id:testToStart.sourceTestId||testToStart.id,title:testToStart.title};
-      const section=testToStart.sectionIds?.length===1?{id:testToStart.sectionIds[0],title:testToStart.parts[0].title}:null;
-      const path=testLink(parent,section);const params=new URLSearchParams();params.set('attempt',createId());if(modeToUse==='exam')params.set('mode','exam');if(modeToUse==='practice'&&durationMinutes>0)params.set('minutes',String(durationMinutes));navigate(path+(params.size?'?'+params:''));return;
-    }
     const launchId = createId();
-    const safe = {
-      ...testToStart,
-      parts: testToStart.parts.map((p) => ({
-        ...p,
-        passageHtml:testToStart.skill==='listening'?'':p.passageHtml,
-        questions: p.questions.map((q) => ({
-          ...q,
-          answer: "",
-          explanationHtml: "",
-          referenceQuote: "",
-        })),
-      })),
-    };
+    const launch = createTestLaunch(testToStart, modeToUse, durationMinutes, launchId);
+    const safe = launch.snapshot.test;
     try {
       if (!preview)
         sessionStorage.setItem(
           `reading-room:launch:${profile.id}:${launchId}`,
-          JSON.stringify({
-            test: safe,
-            mode: modeToUse,
-            minutes: durationMinutes,
-          }),
+          JSON.stringify(launch.snapshot),
         );
     } catch {
       notify(
@@ -630,7 +609,7 @@ export default function App() {
     }
     if (
       !navigate(
-        `/tests/${encodeURIComponent(testToStart.sourceTestId || testToStart.id)}/take/${launchId}`,
+        launch.path,
       )
     )
       return;
@@ -1178,7 +1157,7 @@ export default function App() {
                 onUpdateProfile={handleUpdateProfile}
                 profile={profile}
                 onSaveWord={handleSaveWord}
-                onArchiveWord={handleArchiveWord}
+                onDeleteWord={handleDeleteWord}
                 onNotify={notify}
               />
             )}

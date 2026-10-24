@@ -52,9 +52,9 @@ export async function lookupVocabulary(word:string,_context='') {
  const meanings=entry.results.flatMap(result=>result.meanings);
  const unique=[...new Set(meanings.map(meaning=>meaning.definition.trim()))];
  const parts=[...new Set(meanings.map(meaning=>meaning.pos?.trim()).filter((part):part is string=>!!part))];
- const example=meanings.map(meaning=>shortDictionaryExample(meaning.example)).filter(Boolean).sort((a,b)=>a.length-b.length)[0]||'';
+ const example='';
  return {word:entry.word,meaning:unique.join('\n'),partOfSpeech:parts.join(' · ')||'term',example,exampleSource:'dictionary' as const,dictionarySource:entry.source||'minhqnd',definitionLanguage:entry.source==='wiktionary'?'en':meanings[0]?.definition_lang||'',phonetic:entry.results.flatMap(result=>result.pronunciations||[]).find(pronunciation=>pronunciation.ipa)?.ipa||''};
 }
 export function vocabularyFromMeaning(entry:DictionaryEntry,meaning:DictionaryMeaning,_context='') {
- return {word:entry.word,meaning:meaning.definition,example:shortDictionaryExample(meaning.example),exampleSource:'dictionary' as const,partOfSpeech:meaning.pos||'term',dictionarySource:entry.source||'minhqnd',definitionLanguage:meaning.definition_lang||'',phonetic:entry.results.flatMap(result=>result.pronunciations||[]).find(pronunciation=>pronunciation.ipa)?.ipa||''};
+ return {word:entry.word,meaning:meaning.definition,example:'',exampleSource:'dictionary' as const,partOfSpeech:meaning.pos||'term',dictionarySource:entry.source||'minhqnd',definitionLanguage:meaning.definition_lang||'',phonetic:entry.results.flatMap(result=>result.pronunciations||[]).find(pronunciation=>pronunciation.ipa)?.ipa||''};
 }
