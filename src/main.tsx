@@ -1,8 +1,11 @@
+import {canonicalSiteLocation} from './services/siteOrigins';
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./index.css";
 
-createRoot(document.getElementById("root")!).render(<App />);
+const destination=canonicalSiteLocation(window.location.hostname,window.location.pathname,window.location.search);
+if(destination)window.location.replace(destination);
+else createRoot(document.getElementById("root")!).render(<App />);
 
 import "./studio-refresh.css";
 
