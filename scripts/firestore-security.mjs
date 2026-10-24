@@ -3,6 +3,11 @@ import {pathToFileURL} from 'node:url';
 import {createHash} from 'node:crypto';
 import {cert} from 'firebase-admin/app';
 
+export function rulesAttachmentPoint(config){
+ const projectNumber=config.messagingSenderId||config.appId?.split(':')[1];
+ if(!/^\d+$/.test(projectNumber||''))throw Error('FIREBASE_RULES_PROJECT_NUMBER_MISSING');
+ return `firestore.googleapis.com/projects/${projectNumber}/databases/${config.firestoreDatabaseId||'(default)'}`;
+}
 export function securityTestSuite(database){
  const base=`/databases/${database}/documents`,student={uid:'audit-student',token:{email:'student@example.test',email_verified:true}},owner={uid:'audit-owner',token:{email:'manhcuong2006ht@gmail.com',email_verified:true}};
  const tests=[];
@@ -59,7 +64,7 @@ export async function runSecurityRules({env=process.env,fetcher=fetch,log=consol
  let current;try{current=await request(releaseName);}catch(e){if(e.status!==404)throw e;}
  if(env.VERCEL_ENV!=='production'){log('Security rules: preview validation only; production release unchanged.');return;}
  if(current?.rulesetName){const previous=await request(current.rulesetName);if(previous.source?.files?.[0]?.content===content){log('Security rules: production already matches the checked source.');return;}}
- const created=await request(`projects/${project}/rulesets`,'POST',{source,attachment_point:`firestore.googleapis.com/databases/${database}`});
+ const created=await request(`projects/${project}/rulesets`,'POST',{source,attachment_point:rulesAttachmentPoint(config)});
  const release={name:releaseName,rulesetName:created.name};
  if(current)await request(releaseName,'PATCH',{release,updateMask:'rulesetName'});else await request(`projects/${project}/releases`,'POST',release);
  const verified=await request(releaseName);if(verified.rulesetName!==created.name)throw Error('FIREBASE_RULES_RELEASE_VERIFICATION_FAILED');
