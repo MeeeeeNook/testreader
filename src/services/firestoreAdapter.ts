@@ -80,6 +80,11 @@ export class FirestoreAdapter {
     this.testCache.clear();
   }
 
+  async resolveTestReference(reference:string):Promise<{testId:string;slug:string}>{
+    const embedded=(window as any).__TEST_ROUTE__;
+    if(embedded?.reference===reference)return embedded;
+    return requestJson('/api/test-route',{reference},()=>auth.currentUser);
+  }
   // Generic item get
   async get(kind: string, id: string): Promise<any | null> {
     const user = auth.currentUser;
@@ -275,6 +280,7 @@ export class FirestoreAdapter {
       const fullTest: EditableTest = {
         schemaVersion: 1,
         id: meta.id,
+        slug:meta.slug,
         title: meta.title,
         skill: meta.skill,
         audioFiles:meta.audioFiles||[],
@@ -340,6 +346,8 @@ export class FirestoreAdapter {
     const user = auth.currentUser;
     if (!user || (await this.getRole()) !== "admin")
       throw new Error("Administrator access required.");
+    const registered=await requestJson<{slug:string}>('/api/admin/test-url',{id:test.id,title:test.title},()=>auth.currentUser);
+    test.slug=registered.slug;
     const mediaIssues=listeningImportIssues(test);if(mediaIssues.length)throw new Error(mediaIssues.join(' '));
     const now = Date.now();
     test.updatedAt = now;
@@ -347,6 +355,7 @@ export class FirestoreAdapter {
     // 1. Lightweight metadata
     const meta: TestMeta = {
       id: test.id,
+      slug:test.slug,
       title: test.skill==='reading'&&test.parts.length === 1 ? passageTitle(test.parts[0].passageHtml, test.parts[0].title, 0) : test.title,
       skill: test.skill,
       source: test.source || "My Collection",

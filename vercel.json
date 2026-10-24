@@ -5,10 +5,19 @@
   "outputDirectory": "dist",
   "functions": {
     "api/index.js": {
-      "maxDuration": 60
+      "maxDuration": 60,
+      "includeFiles": "dist/index.html"
     }
   },
   "rewrites": [
+    {
+      "source": "/tests/:reference/sections/:section",
+      "destination": "/api/index"
+    },
+    {
+      "source": "/tests/:reference",
+      "destination": "/api/index"
+    },
     {
       "source": "/api/:path*",
       "destination": "/api/index"

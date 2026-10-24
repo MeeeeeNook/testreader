@@ -1,3 +1,5 @@
+import {ShareButton} from './ShareButton';
+import {testIntroductionPath} from '../services/testUrls.js';
 import {TestCover} from "./TestCover";
 import {Select} from "./Select";
 import { FolderBrowser } from "./FolderBrowser";
@@ -266,7 +268,7 @@ export const LibraryView: React.FC<Props> = ({
             <article className="reading-card" key={test.id}>
               <div className={`card-art color-${i % 4}`}>
                 <span className="card-art-lines" />
-                <TestCover id={test.id} title={test.title} image={test.coverImage} skill={test.skill}/>
+                <TestCover id={test.id} title={test.title} image={test.coverImage} skill={test.skill}/><div className="thumbnail-share"><ShareButton compact path={testIntroductionPath(test)} title={test.title}/></div>
                 <span className="card-art-label">
                   {test.passages > 1 ? "THE FULL PICTURE" : "A CLOSER LOOK"}
                 </span>

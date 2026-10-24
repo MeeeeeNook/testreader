@@ -13,7 +13,7 @@ import {renderToStaticMarkup} from 'react-dom/server';
 import {parseHTML} from 'linkedom';
 const t:any={schemaVersion:1,id:'listen',title:'A listening test',skill:'listening',source:'Cambridge',duration:30,status:'published',createdAt:1,updatedAt:1,parts:[{id:'p1',title:'Part 1',passageHtml:'<p>PRIVATE TRANSCRIPT</p>',questionHtml:'<p>QUESTION PROMPT</p>',questions:[{number:1,answer:'KEY',explanationHtml:'<p>EXPLANATION</p>'}],slots:{}}]};
 test('share links lead to test/part introductions and never carry an active attempt',()=>{
- assert.equal(introductionLink(t),'/tests/listen');assert.equal(introductionLink({...t,id:'listen_part_0',sourceTestId:'listen',sectionIds:['part 1']}),'/tests/listen/sections/part%201');assert.equal(introductionLink({...t,sourceSections:[{testId:'listen',sectionId:'p1'}]}),'/mock');
+ assert.equal(introductionLink(t),'/tests/a-listening-test');assert.equal(introductionLink({...t,id:'listen_part_0',sourceTestId:'listen',sectionIds:['part 1']}),'/tests/listen/sections/part%201');assert.equal(introductionLink({...t,sourceSections:[{testId:'listen',sectionId:'p1'}]}),'/mock');
  const html=renderToStaticMarkup(React.createElement(TestSetup,{test:{...t,parts:Array(4).fill(t.parts[0])},mode:'exam',minutes:0,section:'all',onMode(){},onMinutes(){},onSection(){},onStart(){},onClose(){}}));
  assert.match(html,/<article class="test-setup test-introduction exam"/);assert.doesNotMatch(html,/<dialog|PRIVATE TRANSCRIPT|QUESTION PROMPT|All tests, answers and downloads/);assert.match(html,/40 minutes/);assert.match(html,/Share test introduction/);
 });

@@ -1,3 +1,4 @@
+import {testIntroductionPath} from './services/testUrls.js';
 import {EditorErrorBoundary} from './components/EditorErrorBoundary';
 import {loadWithRecovery} from './services/moduleRecovery';
 import {AdminSignInView} from './components/AdminSignInView';
@@ -396,7 +397,11 @@ export default function App() {
         } else if (page.name === "test" && page.id) {
           setPageLoading(true);
           setSelectedTestFull(null);
-          const test = await firestoreAdapter.getTestComplete(page.id);
+          const resolved=await firestoreAdapter.resolveTestReference(page.id);
+          const test = await firestoreAdapter.getTestComplete(resolved.testId);
+          test.slug=resolved.slug||test.slug;
+          const canonical=testIntroductionPath(test,page.section);
+          if(!page.solution&&new URL(location,'https://studio.local').pathname!==canonical){navigate(canonical,true);return;}
           if (!alive) return;
           if(page.solution){navigate(testLink(test,page.section?{id:page.section,title:test.parts.find(p=>p.id===page.section)?.title||test.title}:null,true),true);return;}
           setSelectedTestFull(test);
@@ -476,9 +481,9 @@ export default function App() {
     };
   }, [location, authReady, profile.id, userRole, tests.length, catalogLoaded, catalogError]);
   useEffect(() => {
-    document.title = `${route === "test" ? "Test details" : getCrumb()} · IELTS Studio`;
+    document.title = `${route === "test" ? selectedTestFull?.title||"Test details" : getCrumb()} · IELTS Studio`;
     if (!["workspace","reading"].includes(route)) setGuard(false);
-  }, [location, setGuard]);
+  }, [location, selectedTestFull?.title, setGuard]);
   useEffect(() => {
     document.body.classList.toggle(
       "hub-exam",
@@ -518,6 +523,7 @@ export default function App() {
       word: word.word?.trim() || "",
       meaning: word.meaning?.trim() || "",
       example: word.example?.trim() || "",
+      exampleSource:word.exampleSource,
       partOfSpeech: word.partOfSpeech || "term",
       dictionarySource: word.dictionarySource,
       definitionLanguage: word.definitionLanguage,

@@ -1,3 +1,4 @@
+import {registerTestPageRoutes} from './testPages';
 import {registerHistoryRoutes} from './historyRoutes';
 import {markFullExam} from './fullExam';
 import {teacherAccess,registerTeacherRoutes} from './teacherRoutes';
@@ -237,7 +238,7 @@ app.post("/api/test-review", async (req, res) => {
 });
 
 app.post('/api/full-exam/submit',async(req,res)=>{
- try{const {db}=await caller(req);res.json(await markFullExam(assessmentStore(db),req.body));}catch(error){apiError(res,error)}
+ try{const {db}=await optionalCaller(req);res.json(await markFullExam(assessmentStore(db),req.body));}catch(error){apiError(res,error)}
 });
 
 app.post("/api/submit-exam", async (req, res) => {
@@ -396,6 +397,7 @@ app.post("/api/content-report",async(req,res)=>{
   }catch(error){apiError(res,error);}
 });
 
+registerTestPageRoutes(app,{caller,optionalCaller,backend,apiError});
 registerPortalRoutes(app, {caller, backend, apiError});
 
 // Unknown API requests must never be served the frontend HTML with status 200.

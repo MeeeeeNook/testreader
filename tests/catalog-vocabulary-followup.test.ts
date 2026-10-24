@@ -34,13 +34,13 @@ test('folder page shows its description, child links and only its own descendant
 });
 test('automatic vocabulary lookup saves dictionary meanings and actual parts of speech, retaining source context',async()=>{
  const original=globalThis.fetch;globalThis.fetch=async()=>new Response(JSON.stringify({exists:true,word:'handful',results:[{meanings:[{definition:'A small number.',pos:'noun'},{definition:'As much as a hand can hold.',pos:'noun'}]}]}));
- try{const entry=await lookupVocabulary('handful','A handful of families migrated.');assert.deepEqual(entry,{word:'handful',meaning:'A small number.\nAs much as a hand can hold.',partOfSpeech:'noun',example:'A handful of families migrated.',dictionarySource:'minhqnd',definitionLanguage:'',phonetic:''});}finally{globalThis.fetch=original;}
+ try{const entry=await lookupVocabulary('handful','A handful of families migrated.');assert.deepEqual(entry,{word:'handful',meaning:'A small number.\nAs much as a hand can hold.',partOfSpeech:'noun',example:'',exampleSource:'dictionary',dictionarySource:'minhqnd',definitionLanguage:'',phonetic:''});}finally{globalThis.fetch=original;}
 });
 test('notebook repairs legacy blanks automatically, skips existing definitions and retains record IDs',async()=>{
  environment();const original=globalThis.fetch,records:any[]=[];globalThis.fetch=async()=>new Response(JSON.stringify({exists:true,word:'district',results:[{meanings:[{definition:'An area of a city or country.',pos:'noun'}]}]}));
  const root=createRoot(document.getElementById('app')!),word:any={id:'legacy',word:'district',meaning:'',example:'The Guntur district.',partOfSpeech:'noun',owner:'learner',createdAt:1};
  try{await act(async()=>root.render(React.createElement(VocabularyView,{onUpdateProfile:async()=>{},profile,vocabulary:[word,{...word,id:'manual',meaning:'My own definition.'}],onSaveWord:async entry=>{records.push(entry);},onArchiveWord:async()=>{},onNotify:()=>{}})));
- assert.equal(records.length,1);assert.equal(records[0].id,'legacy');assert.equal(records[0].meaning,'An area of a city or country.');assert.equal(records[0].example,'The Guntur district.');assert.doesNotMatch(document.body.textContent!,/Needs definition|Look up definition/);
+ assert.equal(records.length,1);assert.equal(records[0].id,'legacy');assert.equal(records[0].meaning,'An area of a city or country.');assert.equal(records[0].example,'');assert.doesNotMatch(document.body.textContent!,/Needs definition|Look up definition/);
  }finally{await act(async()=>root.unmount());globalThis.fetch=original;}
 });
 test('a failed automatic lookup offers retry and never saves an empty word',async()=>{

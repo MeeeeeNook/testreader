@@ -7,7 +7,7 @@ test('named database rules attach to a fully qualified numeric project resource'
  assert.throws(()=>rulesAttachmentPoint({messagingSenderId:'project-slug'}),/PROJECT_NUMBER_MISSING/);
 });
 test('Firebase evaluation requests target the configured database and include allow and deny cases',()=>{
- const suite=securityTestSuite('named');assert.equal(suite.testCases.length,30);
+ const suite=securityTestSuite('named');assert.equal(suite.testCases.length,33);
  assert.ok(suite.testCases.every((item:any)=>item.request.path.startsWith('/databases/named/documents/')));
  assert.ok(suite.testCases.some((item:any)=>item.expectation==='ALLOW'));assert.ok(suite.testCases.some((item:any)=>item.expectation==='DENY'));
 });

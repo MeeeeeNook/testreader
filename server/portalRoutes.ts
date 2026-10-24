@@ -1,3 +1,5 @@
+import {testIntroductionPath} from '../src/services/testUrls.js';
+import {STUDENT_ORIGIN} from '../src/services/siteOrigins';
 import { answerPath } from "../src/services/portal";
 import type { Express } from 'express';
 import { createHash, randomUUID } from 'node:crypto';
@@ -66,15 +68,15 @@ export function registerPortalRoutes(app:Express,{caller,backend,apiError}:any) 
  let sitemapCache:{until:number;xml:string}|undefined;
  app.get('/sitemap.xml',async(req,res)=>{try {
   if(sitemapCache&&Date.now()<sitemapCache.until)return res.type('xml').send(sitemapCache.xml);
-  const origin=process.env.PUBLIC_SITE_URL;
+  const origin=process.env.PUBLIC_SITE_URL||STUDENT_ORIGIN;
   if(!origin||!/^https:\/\/[^/]+\/?$/.test(origin))return res.status(503).send('Set PUBLIC_SITE_URL to the deployed HTTPS origin.');
   const {db}=backend(), snap=await db.collection('tests').where('status','==','published').limit(3000).get();
   const urls=['/','/practice','/full-tests','/knowledge'];
-  for(const d of snap.docs){const t=d.data();urls.push(answerPath(d.id,"all",t.title));for(const p of t.sectionSummaries||[])urls.push(answerPath(d.id,p.id,p.title));}
+  for(const d of snap.docs){const t=d.data();if(t.deletedAt)continue;urls.push(testIntroductionPath({...t,id:d.id}));urls.push(answerPath(d.id,"all",t.title));for(const p of t.sectionSummaries||[])urls.push(answerPath(d.id,p.id,p.title));}
   const articles=await db.collection('articles').where('status','==','published').limit(1000).get();
   for(const d of articles.docs)urls.push(`/knowledge/${d.id}/${d.data().slug}`);
   const xml=`<?xml version="1.0" encoding="UTF-8"?><urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">${urls.map(path=>`<url><loc>${escapeHtml(origin.replace(/\/$/,'')+path)}</loc></url>`).join('')}</urlset>`;
   sitemapCache={until:Date.now()+3600000,xml};res.set('Cache-Control','public,max-age=3600').type('xml').send(xml);
  }catch(e){res.status(503).send('Sitemap temporarily unavailable.');}});
- app.get('/robots.txt',(_req,res)=>res.type('text').send(`User-agent: *\nDisallow: /admin\nDisallow: /history\nDisallow: /api/\n${process.env.PUBLIC_SITE_URL?'Sitemap: '+process.env.PUBLIC_SITE_URL.replace(/\/$/,'')+'/sitemap.xml':''}`));
+ app.get('/robots.txt',(_req,res)=>res.type('text').send(`User-agent: *\nDisallow: /admin\nDisallow: /history\nDisallow: /api/\nSitemap: ${(process.env.PUBLIC_SITE_URL||STUDENT_ORIGIN).replace(/\/$/,'')}/sitemap.xml`));
 }
