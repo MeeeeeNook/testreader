@@ -69,3 +69,14 @@ test('mislabelled Listening blanks retain their answer control and absent transc
  dom();const t=toEditable({parts:[{topic_content:null as any,question_content:`<p>Help with <span class="question matching_heading" question-number="1"></span> books.</p>`,questions:[1]}]},{skill:'listening'});
  assert.deepEqual(Object.values(t.parts[0].slots).map(s=>s.numbers),[[1]]);assert.equal(t.parts[0].passageHtml,'');
 });
+
+test('abbreviated Vol audio filenames retain their part numbers when a recording is missing',()=>{
+ const t=sample(),files=(names:string[])=>names.map((name,i)=>({id:String(i),name,url:'https://media/'+name}));
+ const test2=assignImportedAudio(t,files(['part-1_vol-5_test-2.mp3','p2-4_1.mp3','p3-3_1.mp3']),[]);
+ assert.deepEqual(test2.parts.map(p=>p.audioName),['part-1_vol-5_test-2.mp3','p2-4_1.mp3','p3-3_1.mp3','']);
+ const test4=assignImportedAudio(t,files(['part-1_vol-5_test-4.mp3','p3-4_2.mp3','p4-5_1.mp3']),[]);
+ assert.deepEqual(test4.parts.map(p=>p.audioName),['part-1_vol-5_test-4.mp3','','p3-4_2.mp3','p4-5_1.mp3']);
+ const ref=['https://media/p4-5_1.mp3','https://media/p3-4_2.mp3','https://media/part-1_vol-5_test-4.mp3','https://media/missing.mp3'];
+ const shuffled=assignImportedAudio(t,files(['part-1_vol-5_test-4.mp3','p3-4_2.mp3','p4-5_1.mp3']),ref);
+ assert.equal(shuffled.parts[1].audioName,'');assert.equal(shuffled.parts[2].audioName,'p3-4_2.mp3');
+});
