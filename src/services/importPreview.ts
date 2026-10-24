@@ -5,7 +5,7 @@ import type {EditableTest} from '../types';
 import {assignImportedAudio,audioReferences,isListeningSource} from './listening';
 export interface ImportCandidate {test:EditableTest;name:string;match?:{title:string;folder:string}}
 export interface ImportMedia {name:string;url:string;blob:Blob;archive?:string}
-export interface ImportPlan {skill?:'reading'|'listening';candidates:ImportCandidate[];images:ImportMedia[];recordings?:ImportMedia[];errors:string[]}
+export interface ImportPlan {skill?:'reading'|'listening';mismatchedCandidates?:ImportCandidate[];mismatchErrors?:string[];candidates:ImportCandidate[];images:ImportMedia[];recordings?:ImportMedia[];errors:string[]}
 // Parsing is entirely local: this function never writes tests or uploads media.
 export async function prepareImport(files:File[],skill?:'reading'|'listening',onProgress?:ImportProgressCallback):Promise<ImportPlan> {
  const plan:ImportPlan={...(skill?{skill}:{}),candidates:[],images:[],recordings:[],errors:[]};
@@ -37,10 +37,10 @@ export async function prepareImport(files:File[],skill?:'reading'|'listening',on
     }
    }catch(e){plan.errors.push(`${c.name}: ${e instanceof Error?e.message:String(e)}`);}
   }
-  if(skill)plan.candidates=plan.candidates.filter(candidate=>{if(candidate.test.skill===skill)return true;plan.errors.push(`${candidate.name}: this is a ${candidate.test.skill==='listening'?'Listening':'Reading'} test. Use Upload ${candidate.test.skill==='listening'?'Listening':'Reading'} instead.`);return false;});
+  if(skill)plan.candidates=plan.candidates.filter(candidate=>{if(candidate.test.skill===skill)return true;const message=`${candidate.name}: this is a ${candidate.test.skill==='listening'?'Listening':'Reading'} test. Use Upload ${candidate.test.skill==='listening'?'Listening':'Reading'} instead.`;(plan.mismatchedCandidates||=[]).push(candidate);(plan.mismatchErrors||=[]).push(message);plan.errors.push(message);return false;});
   plan.candidates.sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true}));
   const media=await mediaDigests([...plan.images,...(plan.recordings||[])],(done,total)=>onProgress?.({phase:'verify',label:'Checking media files',percent:80+15*done/Math.max(1,total)}));
-  for(const candidate of plan.candidates)candidate.test=newImportIdentity(candidate.test,await contentHash(candidate.test,media));
+  for(const candidate of [...plan.candidates,...(plan.mismatchedCandidates||[])])candidate.test=newImportIdentity(candidate.test,await contentHash(candidate.test,media));
   onProgress?.({phase:'verify',label:'Preview ready',percent:100});
   return plan;
  }catch(e){disposeImport(plan);throw e;}
@@ -55,3 +55,10 @@ export function replaceImportAssets(test:EditableTest,assets:Map<string,string>)
  }));
 }
 
+
+export function switchImportSkill(plan:ImportPlan):ImportPlan{
+ const candidates=plan.mismatchedCandidates||[];if(!candidates.length)throw new Error('No tests for the other skill were detected.');
+ const skill=candidates[0].test.skill;if(candidates.some(c=>c.test.skill!==skill))throw new Error('Choose one test skill per import batch.');
+ const warnings=new Set(plan.mismatchErrors||[]);
+ return {...plan,skill,candidates:[...candidates].sort((a,b)=>a.name.localeCompare(b.name,undefined,{numeric:true})),mismatchedCandidates:undefined,mismatchErrors:undefined,errors:plan.errors.filter(e=>!warnings.has(e))};
+}

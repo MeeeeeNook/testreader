@@ -5,7 +5,7 @@ import {listeningTracks} from '../services/listening';
 export const playbackSpeeds=[.8,.85,.9,.95,1,1.05,1.1,1.15,1.2,1.25];
 export const audioTime=(s:number)=>Math.floor(Math.max(0,s)/60)+':'+String(Math.floor(Math.max(0,s)%60)).padStart(2,'0');
 const emptySources:Record<string,string>={};
-export function ListeningAudio({parts,src,exam,stopSignal=0,disabled=false,sources=emptySources,volume=1,speedIndex,onSpeedChange,bufferedOnly=false}:{parts?:EditablePart[];src?:string;exam:boolean;stopSignal?:number;disabled?:boolean;sources?:Record<string,string>;volume?:number;speedIndex?:number;onSpeedChange?:(index:number)=>void;bufferedOnly?:boolean}){
+export function ListeningAudio({parts,src,exam,stopSignal=0,disabled=false,sources=emptySources,volume=.8,speedIndex,onSpeedChange,bufferedOnly=false}:{parts?:EditablePart[];src?:string;exam:boolean;stopSignal?:number;disabled?:boolean;sources?:Record<string,string>;volume?:number;speedIndex?:number;onSpeedChange?:(index:number)=>void;bufferedOnly?:boolean}){
  const tracks=useMemo(()=>listeningTracks(parts||[{id:'audio',title:'Recording',audio:src,passageHtml:'',questionHtml:'',slots:{},questions:[]}]),[parts,src]);
  const audio=useRef<HTMLAudioElement>(null),resume=useRef(false),pendingSeek=useRef<number|null>(null),advancing=useRef(false),generation=useRef(0);
  const [index,setIndex]=useState(0),[playing,setPlaying]=useState(false),[started,setStarted]=useState(false),[complete,setComplete]=useState(false),[error,setError]=useState(''),[current,setCurrent]=useState(0),[durations,setDurations]=useState<Record<string,number>>({}),[speed,setSpeed]=useState(4);
@@ -14,7 +14,11 @@ export function ListeningAudio({parts,src,exam,stopSignal=0,disabled=false,sourc
  const offset=lengths.slice(0,index).reduce((a,b)=>a+b,0),total=lengths.reduce((a,b)=>a+b,0),position=offset+Math.max(0,current-(track?.start||0));
  const source=(url:string)=>sources[url]||(bufferedOnly?undefined:url);
  const changeSpeed=(value:number)=>{setSpeed(value);onSpeedChange?.(value)};
- useEffect(()=>{if(audio.current)audio.current.volume=volume},[volume,index]);
+ const graph=useRef<{context:AudioContext;gain:GainNode;source:MediaElementAudioSourceNode}|null>(null);
+ const applyVolume=()=>{const el=audio.current;if(!el)return;const level=Math.max(0,Math.min(1,volume));if(graph.current){el.volume=1;graph.current.gain.gain.value=level/.8}else el.volume=Math.min(1,level/.8)};
+ useEffect(()=>{applyVolume()},[volume,index]);
+ useEffect(()=>()=>{if(graph.current){graph.current.source.disconnect();graph.current.gain.disconnect();void graph.current.context.close();graph.current=null}},[]);
+ const enableGain=async()=>{const el=audio.current;if(!el)return;const Context=window.AudioContext||(window as any).webkitAudioContext;if(!graph.current&&Context){const context=new Context();try{const input=context.createMediaElementSource(el),gain=context.createGain();input.connect(gain);gain.connect(context.destination);graph.current={context,source:input,gain}}catch{void context.close()}}applyVolume();if(graph.current?.context.state==='suspended')await graph.current.context.resume()};
  const pause=()=>{generation.current++;resume.current=false;audio.current?.pause();setPlaying(false)};
  useEffect(()=>{pause()},[stopSignal,disabled,exam]);
  useEffect(()=>{const element=audio.current;return()=>{generation.current++;resume.current=false;element?.pause();element?.removeAttribute('src');element?.load()}},[]);
@@ -24,14 +28,14 @@ export function ListeningAudio({parts,src,exam,stopSignal=0,disabled=false,sourc
   const elements=[...new Set(tracks.map(t=>t.src).filter(Boolean))].map(url=>{const el=document.createElement('audio');el.preload='metadata';el.onloadedmetadata=()=>{if(Number.isFinite(el.duration))setDurations(d=>({...d,[url]:el.duration}))};const urlSource=source(url);if(urlSource)el.src=urlSource;return el});
   return()=>elements.forEach(el=>{el.onloadedmetadata=null;el.removeAttribute('src');el.load()});
  },[tracks,sources]);
- const play=async()=>{if(disabled||!audio.current||!track?.src)return;const request=++generation.current;try{await audio.current.play();if(request===generation.current)setError('')}catch{if(request===generation.current)setError('Audio could not start. Press play to retry.')}};
+ const play=async()=>{if(disabled||!audio.current||!track?.src)return;const request=++generation.current;try{await enableGain();await audio.current.play();if(request===generation.current)setError('')}catch{if(request===generation.current)setError('Audio could not start. Press play to retry.')}};
  const jump=(nextIndex:number,time:number)=>{if(exam||disabled)return;resume.current=playing;pendingSeek.current=time;if(index===nextIndex){if(audio.current)audio.current.currentTime=time;setCurrent(time);pendingSeek.current=null}else setIndex(nextIndex)};
  const next=()=>{if(advancing.current)return;advancing.current=true;if(index+1<tracks.length){resume.current=true;pendingSeek.current=null;setIndex(i=>i+1)}else{setComplete(true);pause()}};
  const seek=(value:number)=>{let start=0;for(let i=0;i<tracks.length;i++){if(value<start+lengths[i]||i===tracks.length-1){jump(i,tracks[i].start+Math.min(lengths[i],Math.max(0,value-start)));return}start+=lengths[i]}};
  if(!track?.src)return <p role="alert">No recording is assigned to {track?.label||'this test'}. Please report this test.</p>;
  return <section className="listening-player compact-audio" aria-label="Listening audio player">
-  <audio ref={audio} src={source(track.src)} preload="auto" playsInline
-   onLoadedMetadata={()=>{const el=audio.current;if(!el)return;if(Number.isFinite(el.duration))setDurations(d=>({...d,[track.src]:el.duration}));el.playbackRate=rate;el.volume=volume;el.currentTime=pendingSeek.current??track.start;pendingSeek.current=null;setCurrent(el.currentTime)}}
+  <audio ref={audio} crossOrigin="anonymous" src={source(track.src)} preload="auto" playsInline
+   onLoadedMetadata={()=>{const el=audio.current;if(!el)return;if(Number.isFinite(el.duration))setDurations(d=>({...d,[track.src]:el.duration}));el.playbackRate=rate;applyVolume();el.currentTime=pendingSeek.current??track.start;pendingSeek.current=null;setCurrent(el.currentTime)}}
    onCanPlay={()=>{if(resume.current&&!disabled){resume.current=false;void play()}}}
    onPlay={()=>{advancing.current=false;setPlaying(true);setStarted(true);setComplete(false)}} onPause={()=>setPlaying(false)}
    onTimeUpdate={()=>{const el=audio.current;if(!el)return;setCurrent(el.currentTime);if(track.end&&el.currentTime>=track.end){el.pause();next()}}}

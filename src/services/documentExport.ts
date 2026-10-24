@@ -25,17 +25,33 @@ export function htmlBlocks(root:Element):ExportBlock[]{
 }
 function passageRoot(part:EditablePart){const root=printableHtml(part.passageHtml,part);for(const el of Array.from(root.querySelectorAll('h1,h2,h3,h4,p,div')).slice(0,8)){if(el.querySelector('p,div,table'))continue;const text=normalize(el.textContent||'');if(text===normalize(part.title)||/^(?:part|passage|reading passage)\s*\d+$/.test(text))el.remove();}root.querySelectorAll('p').forEach(p=>{const children=Array.from(p.children);if(children.length===1&&['STRONG','B'].includes(children[0].tagName)&&normalize(children[0].textContent||'')===normalize(p.textContent||''))children[0].replaceWith(...Array.from(children[0].childNodes));});return root;}
 export function readingDocument(test:EditableTest,options:ExportOptions={includeAnswers:true,includeExplanations:true}):ExportBlock[]{
+ if(test.skill==='listening')return listeningDocument(test,options);
  const blocks:ExportBlock[]=[{kind:'text',text:test.title,heading:true,center:true}];for(const [i,part]of test.parts.entries()){
   if(options.includeQuestions===false&&!options.includeTranscript&&!options.transcriptOnly)break;
   if(test.parts.length>1)blocks.push({kind:'text',text:part.title||`Passage ${i+1}`,heading:true,center:true,pageBreakBefore:i>0});
-   if(test.skill==='listening'&&options.includeTranscript)blocks.push({kind:'text',text:'Transcript',heading:true});
    if((test.skill==='reading'&&options.includeQuestions!==false)||options.transcriptOnly||options.includeTranscript)blocks.push(...htmlBlocks(passageRoot(part)));
    if(options.transcriptOnly||options.includeQuestions===false)continue;
-   if(test.skill==='listening'&&options.includeTranscript)blocks.push({kind:'text',text:'Questions',heading:true});
    const questions=htmlBlocks(printableHtml(part.questionHtml,part));if(test.skill==='reading'&&questions[0]&&questions[0].kind!=='image')questions[0].pageBreakBefore=true;blocks.push(...questions);
   for(const slot of Object.values(part.slots)){if(![part.passageHtml,part.questionHtml].some(h=>h.includes(`data-slot="${slot.id}"`)||h.includes(`data-slot='${slot.id}'`)))blocks.push(...htmlBlocks(printableHtml(`<span data-slot="${slot.id}"></span>`,part)));}
  }
  if(options.includeAnswers||options.includeExplanations) {blocks.push({kind:'text',text:options.includeExplanations?(options.includeAnswers?'Answers and explanations':'Explanations'):'Answer key',heading:true,pageBreakBefore:true});blocks.push({kind:'table',answerTable:true,rows:[options.includeExplanations?(options.includeAnswers?['Question','Answer','Explanation']:['Question','Explanation']):['Question','Answer'],...test.parts.flatMap(p=>p.questions.map(q=>{const el=document.createElement('div');el.innerHTML=cleanLayout(q.explanationHtml||'');const row=[String(q.number),q.answer?.split('||').join(' / ')||''];return options.includeExplanations?(options.includeAnswers?[...row,plain(el)]:[String(q.number),plain(el)]):row;}))]});}return blocks;
+}
+// Listening worksheets always group all questions before answer material.
+export function listeningDocument(test:EditableTest,options:ExportOptions):ExportBlock[]{
+ const blocks:ExportBlock[]=[{kind:'text',text:test.title,heading:true,center:true}];
+ const heading=(text:string)=>blocks.push({kind:'text',text,heading:true,pageBreakBefore:blocks.length>1});
+ if(options.includeQuestions!==false&&!options.transcriptOnly){
+  heading('Questions');
+  for(const [index,part]of test.parts.entries()){
+   blocks.push({kind:'text',text:'Part '+(part.position||index+1),heading:true});
+   blocks.push(...htmlBlocks(printableHtml(part.questionHtml,part)));
+   for(const slot of Object.values(part.slots))if(!part.questionHtml.includes('data-slot="'+slot.id+'"')&&!part.questionHtml.includes("data-slot='"+slot.id+"'"))blocks.push(...htmlBlocks(printableHtml('<span data-slot="'+slot.id+'"></span>',part)));
+  }
+ }
+ if(options.includeAnswers){heading('Answer key');blocks.push({kind:'table',answerTable:true,rows:[['Question','Answer'],...test.parts.flatMap(p=>p.questions.map(q=>[String(q.number),q.answer?.split('||').join(' / ')||'']))]});}
+ if(options.includeExplanations){heading('Explanations');for(const part of test.parts)for(const q of part.questions){blocks.push({kind:'text',text:'Question '+q.number,heading:true});const root=document.createElement('div');root.innerHTML=cleanLayout(q.explanationHtml||'<p>No explanation provided.</p>');blocks.push(...htmlBlocks(root));}}
+ if(options.includeTranscript||options.transcriptOnly){heading('Transcript');for(const [index,part]of test.parts.entries()){blocks.push({kind:'text',text:'Part '+(part.position||index+1),heading:true});blocks.push(...htmlBlocks(passageRoot(part)));}}
+ return blocks;
 }
 async function imageData(url:string){const response=await fetch(url,{signal:AbortSignal.timeout(20000)});if(!response.ok)throw new Error('A test diagram could not download. Please retry the export.');const blob=await response.blob(),objectUrl=URL.createObjectURL(blob);try{const img=await new Promise<HTMLImageElement>((resolve,reject)=>{const image=new Image();image.onload=()=>resolve(image);image.onerror=()=>reject(new Error('A test diagram could not be read.'));image.src=objectUrl;});const canvas=document.createElement('canvas');canvas.width=img.naturalWidth;canvas.height=img.naturalHeight;canvas.getContext('2d')!.drawImage(img,0,0);return {data:canvas.toDataURL('image/png'),width:img.naturalWidth,height:img.naturalHeight};}finally{URL.revokeObjectURL(objectUrl);}}
 function download(blob:Blob,name:string){const url=URL.createObjectURL(blob),link=document.createElement('a');link.href=url;link.download=name;link.click();setTimeout(()=>URL.revokeObjectURL(url),30000);}

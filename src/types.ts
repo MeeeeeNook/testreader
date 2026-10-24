@@ -99,7 +99,11 @@ export interface TestMeta {
   restoreStatus?: 'draft' | 'published' | 'archived';
 }
 
+export interface VocabularyFolder {id:string;name:string}
+
 export interface UserProfile {
+  vocabularyFolders?:VocabularyFolder[];
+  activeVocabularyFolder?:string;
   deletedAt?:number;
   weeklyGoal?:number;
   libraryFolders?: import("./services/folders").LibraryFolder[];
@@ -119,6 +123,7 @@ export interface UserProfile {
 }
 
 export interface AttemptRecord {
+  fullExamId?:string;
   startedAt?:number;
   completedAt?:number;
   elapsedSeconds?:number;
@@ -152,6 +157,7 @@ export interface AttemptRecord {
 }
 
 export interface VocabularyItem {
+  folderId?:string;
   dictionarySource?:'minhqnd'|'wiktionary';
   definitionLanguage?:string;
   phonetic?:string;

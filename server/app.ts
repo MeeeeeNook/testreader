@@ -1,3 +1,4 @@
+import {markFullExam} from './fullExam';
 import {teacherAccess,registerTeacherRoutes} from './teacherRoutes';
 import {registerWebsiteUIRoutes} from './websiteUIRoutes';
 import {registerTrashRoutes} from './trashRoutes';
@@ -287,6 +288,10 @@ app.post("/api/test-review", async (req, res) => {
   } catch (error) {
     apiError(res, error);
   }
+});
+
+app.post('/api/full-exam/submit',async(req,res)=>{
+ try{const {db}=await caller(req);res.json(await markFullExam(assessmentStore(db),req.body));}catch(error){apiError(res,error)}
 });
 
 app.post("/api/submit-exam", async (req, res) => {

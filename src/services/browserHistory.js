@@ -9,6 +9,7 @@ export function parseRoute(input) {
     if (p === "/sign-in") return {name:"sign-in"};
     const folder=/^\/folders\/([^/]+)$/.exec(p);
     if(folder)return {name:"folder",id:decodeURIComponent(folder[1])};
+    if (p === "/full-exam") return {name:"full-exam"};
     if (p === "/practice") return {name:"practice"};
     if (p === "/full-tests") return {name:"full"};
     if (p.startsWith("/full-tests/")) return {name:"full",category:p.split("/")[2]};

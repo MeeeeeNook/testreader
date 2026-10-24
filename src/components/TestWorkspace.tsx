@@ -41,6 +41,8 @@ import { firestoreAdapter } from "../services/firestoreAdapter";
 import { scoreTest, estimatedBand } from "../services/scoring";
 
 interface TestWorkspaceProps {
+  onStageComplete?:(submission:import('../services/fullExam').StageSubmission)=>Promise<void>;
+  stageLabel?:string;
   audioReady?:boolean;
   audioProgress?:React.ReactNode;
   audioSources?:Record<string,string>;
@@ -80,6 +82,8 @@ export const TestWorkspace: React.FC<TestWorkspaceProps> = (props) => {
  return <LoadedTestWorkspace key={props.sessionId} {...props} audioSources={sources||{}} audioReady={ready} audioProgress={loading}/>;
 };
 const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
+  onStageComplete,
+  stageLabel,
   audioSources={},
   audioReady=true,
   audioProgress,
@@ -97,7 +101,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   onSaveVocabulary,
   onNotify,
 }) => {
-  const [volume,setVolume]=useState(1),[audioSpeed,setAudioSpeed]=useState(4);
+  const [volume,setVolume]=useState(.8),[audioSpeed,setAudioSpeed]=useState(4);
   const [dictionaryWord,setDictionaryWord]=useState<string|null>(null);
   const [dictionaryContext,setDictionaryContext]=useState(''),[dictionarySaveIntent,setDictionarySaveIntent]=useState(false);
   const [showExport,setShowExport]=useState(false);
@@ -430,6 +434,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
     const submissionOwner = auth.currentUser?.uid || "guest";
     setTimerRunning(false);
     try {
+      if(onStageComplete){await onStageComplete({responses,elapsedSeconds:Math.round(elapsedSeconds),startedAt,completedAt:Date.now()});return;}
       const attemptId = createId();
       // Unsaved editor previews use their own local keys and never create an attempt.
       if (isPreview) {
@@ -696,7 +701,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
       onTouchEnd={()=>setTimeout(handleMouseUp,100)}
     >
       {timeUp&&<ConfirmActionDialog title="Practice time is up" confirmLabel="Submit now" cancelLabel="Keep practising" onCancel={()=>setTimeUp(false)} onConfirm={()=>{setTimeUp(false);void handleSubmit()}}>Submit your answers now, or continue practising without a time limit.</ConfirmActionDialog>}
-      {confirmSubmit && <ConfirmActionDialog title={false ? "Nộp bài?" : "Submit your test?"} confirmLabel={false ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
+      {confirmSubmit && <ConfirmActionDialog title={stageLabel||"Submit your test?"} confirmLabel={false ? "Xác nhận nộp bài" : "Confirm submission"} onCancel={() => setConfirmSubmit(false)} onConfirm={() => {setConfirmSubmit(false);void handleSubmit();}}>
         {false ? `Mình đã trả lời ${answeredCount}/${allQuestionNumbers.length} câu. Sau khi nộp, câu trả lời sẽ được khóa và bài sẽ được chấm điểm.` : `You have answered ${answeredCount}/${allQuestionNumbers.length} questions. Submitting locks your answers and grades the test.`}
       </ConfirmActionDialog>}
       {resetAction && (
@@ -804,7 +809,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
         {audioProgress}
         {test.skill==='listening'&&<ListeningAudio key={sessionId} parts={test.parts} sources={audioSources} stopSignal={audioStop} disabled={submitting||!audioReady} volume={volume} speedIndex={audioSpeed} onSpeedChange={setAudioSpeed} bufferedOnly exam={mode==='exam'&&!scored&&!initialSolution}/>}
 
-        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Academic Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button></div></section>}
+        {scored&&<section className="solution-score-banner"><div><small>{initialSolution&&!scoreResult?'SOLUTION GUIDE':'TEST COMPLETE'}</small><strong>{scoreResult?scoreResult.correct+' / '+scoreResult.gradable+' correct':'Answers and explanations'}</strong>{approxBand!==null&&<span>IELTS {test.skill==='listening'?'Listening':'Reading'} · Estimated band {approxBand.toFixed(1)}</span>}</div><div className="studio-actions"><button className="quiet-button" aria-pressed={showAnswers} onClick={()=>void toggleReview('answers')}>Answers {showAnswers?'on':'off'}</button><button className="quiet-button" aria-pressed={showExplanations} onClick={()=>void toggleReview('explanations')}>Explanations {showExplanations?'on':'off'}</button><button className="studio-secondary" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button></div></section>}
 
         {/* Mobile Tab Toggle for narrow viewports */}
         {(test.skill==='reading'||listeningSolution)&&<div className="mobile-tabs">
@@ -887,7 +892,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
               {qNum}{isFlagged&&<Flag className="chip-flag" size={9} fill="currentColor"/>}
             </button>;
           })}</nav>
-          <div className="reader-footer-actions"><button className="quiet-button answer-sheet-trigger" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setShowAnswerSheet(true):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':'Submit test'}</button></div>
+          <div className="reader-footer-actions"><button className="quiet-button answer-sheet-trigger" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setShowAnswerSheet(true):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':onStageComplete?(test.skill==='listening'?'Continue to Reading':'Finish full test'):'Submit test'}</button></div>
         </footer>
       </main>
 

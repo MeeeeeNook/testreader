@@ -1,3 +1,4 @@
+import {FullExamView} from './components/FullExamView';
 import {listeningImportIssues} from './services/listening';
 import {runMediaQueue,mediaQueueProgress,type QueueRow,type QueueResult} from './services/mediaQueue';
 import {TeacherAccounts,TeacherAdminView} from './components/TeacherAccess';
@@ -16,7 +17,7 @@ import {folderLocation,folderDeletion,trashFolders,restoreFolders,reconcileLibra
 import {contentHash,mediaDigests,contentMatch} from "./services/importIdentity";
 import {AdminSidebar} from './components/AdminSidebar';
 import {ImportPreview} from './components/ImportPreview';
-import {prepareImport,disposeImport,replaceImportAssets,type ImportPlan,type ImportCandidate} from './services/importPreview';
+import {switchImportSkill,prepareImport,disposeImport,replaceImportAssets,type ImportPlan,type ImportCandidate} from './services/importPreview';
 import { PortalHeader } from "./components/PortalHeader";
 import { HomeView } from "./components/HomeView";
 import { PracticeCatalog } from "./components/PracticeCatalog";
@@ -503,11 +504,12 @@ export default function App() {
     const owner=user.uid;
     if(!word.meaning?.trim())word={...word,...await lookupVocabulary(word.word||'',word.example||'')};
     if(previousUser.current!==owner)throw new Error('Your account changed. Please save the word again.');
-    const duplicate=!word.id?vocabulary.find(item=>!item.archived&&item.word.toLowerCase()===word.word?.trim().toLowerCase()&&item.meaning===word.meaning?.trim()):undefined;
+    const duplicate=!word.id?vocabulary.find(item=>!item.archived&&item.word.toLowerCase()===word.word?.trim().toLowerCase()&&item.meaning===word.meaning?.trim()&&(item.folderId||'new')===(word.folderId||profile.activeVocabularyFolder||'new')):undefined;
     const id = word.id || duplicate?.id || createId();
     const item: VocabularyItem = {
       id,
       owner: profile.id,
+      folderId:(word.folderId||profile.activeVocabularyFolder)==='new'||profile.vocabularyFolders?.some(f=>f.id===(word.folderId||profile.activeVocabularyFolder))?(word.folderId||profile.activeVocabularyFolder)!:'new',
       word: word.word?.trim() || "",
       meaning: word.meaning?.trim() || "",
       example: word.example?.trim() || "",
@@ -861,7 +863,7 @@ export default function App() {
     try {
       const plan=await prepareImport(files,skill||uploadSkillRef.current,setImportProgress);
       const seen=new Map<string,{title:string;folder:string}>();
-      for(const candidate of plan.candidates){const match=contentMatch(candidate.test.contentHash||"",tests);candidate.match=match?{title:match.title,folder:match.folderPath||"Unfiled"}:seen.get(candidate.test.contentHash||"");seen.set(candidate.test.contentHash||"",{title:candidate.test.title,folder:"this upload"});}
+      for(const candidate of [...plan.candidates,...(plan.mismatchedCandidates||[])]){const match=contentMatch(candidate.test.contentHash||"",tests);candidate.match=match?{title:match.title,folder:match.folderPath||"Unfiled"}:seen.get(candidate.test.contentHash||"");seen.set(candidate.test.contentHash||"",{title:candidate.test.title,folder:"this upload"});}
       closeImportPreview();importPlanRef.current=plan;setImportPlan(plan);
     }catch(error){setUploadReport({imported:0,duplicates:0,errors:['Preparing ZIP preview: '+importError(error)]});}
     finally{preparingImport.current=false;setUploadProgress(null);}
@@ -941,6 +943,7 @@ export default function App() {
       case "home": return false ? "Trang chủ" : "Home";
       case "practice": return "Practice Test";
       case "full": return "Full Test";
+      case "full-exam": return "Create full test";
       case "knowledge": return false ? "Chia sẻ kiến thức" : "Learning guides";
       case "forum": return "Forum";
       case "contribute": return false ? "Contributions" : "Contribute";
@@ -1126,6 +1129,7 @@ export default function App() {
             {["content-admin", "contributions-admin"].includes(route) && userRole === "admin" && <ContentAdminView key={route} contributions={route === "contributions-admin"} onUploadFiles={handleUploadFiles} />}
             {["progress", "vocabulary"].includes(route) && !user && <LoginNotice vi={false} text={false ? "Đăng nhập để lưu từ vựng, điểm và lịch sử làm bài. Mọi đề đều miễn phí, không cần đăng nhập để luyện tập." : "Sign in to save vocabulary, scores and history. All tests are free and open to guests."} />}
 
+            {route === 'full-exam'&&<FullExamView key={profile.id+':'+location} tests={visibleCatalog} profile={profile} location={location} onNavigate={navigate} onNotify={notify} onSaveVocabulary={handleSaveWord} onHistorySaved={()=>setAttempts(readAttempts(localStorage,profile.id))}/>}
             {route === "mock" && (
               <MockBuilderView
                 tests={visibleCatalog}
@@ -1153,6 +1157,7 @@ export default function App() {
             {route === "vocabulary" && user && (
               <VocabularyView
                 vocabulary={vocabulary}
+                onUpdateProfile={handleUpdateProfile}
                 profile={profile}
                 onSaveWord={handleSaveWord}
                 onArchiveWord={handleArchiveWord}
@@ -1291,7 +1296,7 @@ export default function App() {
         />
       )}
 
-      {importPlan && userRole === "admin" && <ImportPreview plan={importPlan} folders={folders} tests={tests} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
+      {importPlan && userRole === "admin" && <ImportPreview key={importPlan.skill||'mixed'} onSwitchSkill={()=>{const previous=importPlanRef.current;if(!previous)return;const next=switchImportSkill(previous);importPlanRef.current=next;uploadSkillRef.current=next.skill||'reading';setImportPlan(next);}} plan={importPlan} folders={folders} tests={tests} onSaveFolders={saveFolders} onCancel={closeImportPreview} onConfirm={items=>void confirmImport(items)} />}
       {/* Upload Progress Modal */}
       {(uploadProgress || uploadReport) && (
         <dialog
