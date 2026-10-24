@@ -1,3 +1,5 @@
+import {formatDuration} from '../services/historyAnalytics';
+import {savedReviewKeys} from '../services/attemptReview';
 import {normalizePassageHeadings} from '../services/passageFormatting';
 import {ShareButton} from './ShareButton';
 import {introductionLink} from '../services/shareTest';
@@ -42,6 +44,7 @@ import { firestoreAdapter } from "../services/firestoreAdapter";
 import { scoreTest, estimatedBand } from "../services/scoring";
 
 interface TestWorkspaceProps {
+  initialAttempt?: AttemptRecord;
   onStageComplete?:(submission:import('../services/fullExam').StageSubmission)=>Promise<void>;
   stageLabel?:string;
   audioReady?:boolean;
@@ -90,6 +93,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   audioProgress,
   test,
   initialSolution=false,
+  initialAttempt,
   onRetake,
   sessionId,
   onSessionActive,
@@ -119,7 +123,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   );
   const [currentPartIndex, setCurrentPartIndex] = useState(0);
   const sessionKey = readerSessionKey(profile.id,sessionId,mode,initialSolution,isPreview);
-  const [savedSession] = useState(()=>readReaderSession(localStorage,sessionKey,initialSolution));
+  const [savedSession] = useState(()=>initialAttempt ? {responses:initialAttempt.responses, result:initialAttempt.result, band:initialAttempt.band, elapsedSeconds:initialAttempt.elapsedSeconds, startedAt:initialAttempt.startedAt, scored:true} : readReaderSession(localStorage,sessionKey,initialSolution));
   const [flagMode,setFlagMode]=useState(false);
   const [responses, setResponses] = useState<Record<string | number, string>>(
     savedSession.responses || {},
@@ -129,8 +133,8 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   const [highlights, setHighlights] = useState<StudyHighlight[]>(
     savedSession.highlights || [],
   );
-  const [showAnswers, setShowAnswers] = useState(false);
-  const [showExplanations, setShowExplanations] = useState(false);
+  const [showAnswers, setShowAnswers] = useState(Boolean(initialAttempt));
+  const [showExplanations, setShowExplanations] = useState(Boolean(initialAttempt));
   const [timerRemaining, setTimerRemaining] = useState(
     Number.isFinite(savedSession.remaining)
       ? savedSession.remaining
@@ -219,7 +223,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
   },[highlights,currentPartIndex,showExplanations,showAnswers]);
   useEffect(()=>{
     if((!initialSolution&&!(test.skill==='listening'&&scored))||isPreview||reviewLoaded)return;let alive=true;setSolutionError('');
-    void assessmentRequest('/api/test-review',{testId:test.sourceTestId||test.id,sectionIds:test.sectionIds,sourceSections:test.sourceSections,mode:'practice'}).then(data=>{if(!alive)return;setReviewKeys(data.keys||{});setTranscripts(data.transcripts||{});setReviewLoaded(true);setScored(true);setTimerRunning(false);setShowAnswers(true);setShowExplanations(true);}).catch(e=>{if(alive)setSolutionError(e.message);});return ()=>{alive=false;};
+    void assessmentRequest('/api/test-review',{testId:test.sourceTestId||test.id,sectionIds:test.sectionIds,sourceSections:test.sourceSections,mode:'practice'}).then(data=>{if(!alive)return;setReviewKeys(savedReviewKeys(initialAttempt,data.keys||{}));setTranscripts(data.transcripts||{});setReviewLoaded(true);setScored(true);setTimerRunning(false);setShowAnswers(true);setShowExplanations(true);}).catch(e=>{if(alive)setSolutionError(e.message);});return ()=>{alive=false;};
   },[initialSolution,test.id,solutionRetry,scored,reviewLoaded,isPreview]);
   const allQuestions = test.parts.flatMap((p) => p.questions);
   const allQuestionNumbers = allQuestions
@@ -461,7 +465,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
         ...submissionPayload(),
         attemptId,
       });
-      setReviewKeys(data.keys || {});
+      setReviewKeys(savedReviewKeys(initialAttempt,data.keys || {}));
       setTranscripts(data.transcripts||{});
       setReviewLoaded(true);
       setScoreResult(data.result);
@@ -528,7 +532,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
         ...submissionPayload(),
         mode: "practice",
       });
-      setReviewKeys(data.keys || {});
+      setReviewKeys(savedReviewKeys(initialAttempt,data.keys || {}));
       setTranscripts(data.transcripts||{});
       setReviewLoaded(true);
       return true;
@@ -747,9 +751,9 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
         {/* Top Header Bar */}
         <header className="topbar reader-toolbar">
           <button className="reader-back" title="Return to tests" onClick={onReturnToLibrary}><ArrowLeft size={17}/>Back</button>
-          <div className="reader-test-heading"><small>{test.skill.toUpperCase()} · {initialSolution?'SOLUTION':scored?'REVIEW':mode==='exam'?'EXAM MODE':'PRACTICE MODE'}</small><strong title={test.title}>{test.title}</strong></div>
+          <div className="reader-test-heading"><small>{test.skill.toUpperCase()} · {initialAttempt?'ATTEMPT REVIEW':initialSolution?'SOLUTION':scored?'REVIEW':mode==='exam'?'EXAM MODE':'PRACTICE MODE'}</small><strong title={test.title}>{test.title}</strong></div>
           <div className="reader-actions" role="toolbar" aria-label="Test tools">
-            <div className={`reader-clock ${hasCountdown&&timerRemaining<300?'low':''}`} aria-label={hasCountdown?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{hasCountdown?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{hasCountdown?'remaining':'Unlimited time'}</span>{mode==='practice'&&hasCountdown&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
+            <div className={`reader-clock ${hasCountdown&&timerRemaining<300?'low':''}`} aria-label={initialAttempt?'Saved attempt duration: '+formatDuration(initialAttempt.elapsedSeconds):hasCountdown?`Time remaining ${timeFormatted}`:'Unlimited practice'}><AlarmClock size={23}/>{initialAttempt?<span>{formatDuration(initialAttempt.elapsedSeconds)}</span>:hasCountdown?<span>{timeFormatted}</span>:<InfinityIcon size={24}/>}<span className="sr-only">{initialAttempt?'recorded time':hasCountdown?'remaining':'Unlimited time'}</span>{mode==='practice'&&hasCountdown&&!scored&&!initialSolution&&<button aria-label={timerRunning?'Pause timer':'Resume timer'} title={timerRunning?'Pause timer':'Resume timer'} onClick={()=>setTimerRunning(!timerRunning)}>{timerRunning?<Pause size={15}/>:<Play size={15}/>}</button>}</div>
             <ShareButton compact path={introductionLink(test)} title={test.title}/>
             <button className="reader-icon" title="Print or download" aria-label="Print or download" disabled={mode==='exam'&&!scored&&!initialSolution} onClick={()=>setShowExport(true)}><Printer size={22}/></button>
             <button className="reader-icon" title="Report an issue" aria-label="Report an issue" onClick={()=>{setReportQuestion(currentPartNumbers[0]||1);setShowReportModal(true);}}><Bug size={22}/></button>
@@ -893,7 +897,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
               {qNum}{isFlagged&&<Flag className="chip-flag" size={9} fill="currentColor"/>}
             </button>;
           })}</nav>
-          <div className="reader-footer-actions"><button className="quiet-button answer-sheet-trigger" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button><button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button><button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setShowAnswerSheet(true):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':onStageComplete?(test.skill==='listening'?'Continue to Reading':'Finish full test'):'Submit test'}</button></div>
+          <div className="reader-footer-actions"><button className="quiet-button answer-sheet-trigger" onClick={()=>setShowAnswerSheet(true)}>Answer sheet</button>{!initialAttempt&&<button className="quiet-button reader-reset" aria-label={scored?'Retake test':'Reset responses'} title={scored?'Retake test':'Reset responses'} disabled={submitting} onClick={()=>{if(initialSolution&&onRetake){onRetake();return;}setResetAction(scored?'restart':'reset');}}><RotateCcw size={16}/></button>}<button className="studio-primary" disabled={submitting||isLegacyBroken||(initialSolution&&!reviewLoaded)} onClick={()=>scored?scoreResult?setShowResultsModal(true):setShowAnswerSheet(true):setConfirmSubmit(true)}>{scored?scoreResult?'Review score':'Answer sheet':onStageComplete?(test.skill==='listening'?'Continue to Reading':'Finish full test'):'Submit test'}</button></div>
         </footer>
       </main>
 

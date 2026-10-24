@@ -21,6 +21,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
   const keys: Record<number, QuestionKey & { missing?: boolean }> = {};
   const parts: ScoringPart[] = [];
   const transcripts:Record<string,string>={};
+  const questionMeta: Record<number, {kind: string; part: number; partTitle: string}> = {};
   const seenSections = new Set<string>();
   let next = 1;
   let skill: string | undefined;
@@ -63,6 +64,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
         mapping.set(q.number, n);
         const key = data.keyData.keys?.[q.number] || { answer: '' };
         keys[n] = { ...key, missing: Boolean(q.missing || key.missing) };
+        questionMeta[n] = {kind: q.kind || key.kind || '', part: custom ? parts.length + 1 : (section.position || data.sections.indexOf(section) + 1), partTitle: section.title || ''};
       }
       const groups = slots.filter(s => s.type === 'multi').map(s => s.numbers.map(n => mapping.get(n)!));
       if (groups.some(g => g.some(n => n === undefined))) throw new AssessmentError(409, 'A multiple-choice group is incomplete.');
@@ -71,7 +73,7 @@ export async function loadAssessment(store: AssessmentStore, request: any, admin
   }
   if (!parts.some(p => p.numbers.length)) throw new AssessmentError(409, 'This test has no questions.');
   const first = cache.values().next().value!;
-  return { parts, keys, transcripts, title: custom ? 'Custom Mock' : first.meta.title, skill };
+  return { parts, keys, transcripts, questionMeta, title: custom ? 'Custom Mock' : first.meta.title, skill };
 }
 
 export function markAssessment(assessment: Awaited<ReturnType<typeof loadAssessment>>, responses: unknown) {
@@ -84,5 +86,6 @@ export function markAssessment(assessment: Awaited<ReturnType<typeof loadAssessm
     clean[Number(number)] = value;
   }
   const result = scoreTest(assessment.parts, clean);
+  result.rows = result.rows.map(row => ({...row, ...assessment.questionMeta[row.number]}));
   return { result, band: estimatedBand(result, assessment.skill==='listening'?'listening':'reading'), responses: clean };
 }

@@ -1141,6 +1141,7 @@ export default function App() {
                 profile={profile}
                 onOpenProfileModal={() => setRoute("settings")}
                 selectedAttemptId={page.id}
+                review={new URL(location,"https://studio.local").searchParams.get("view")==="review"}
                 onSelectAttempt={(id) =>
                   navigate(`/history/${encodeURIComponent(id)}`)
                 }
@@ -1183,6 +1184,7 @@ export default function App() {
                 learners={learners.filter(p=>!p.deletedAt)}
                 studentId={page.id}
                 attemptId={page.attempt}
+                review={new URL(location,"https://studio.local").searchParams.get("view")==="review"}
                 onNavigate={navigate}
               />
             )}
