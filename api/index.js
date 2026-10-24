@@ -1,5 +1,70 @@
-// server/gradeSignature.ts
-import { createHash, createHmac, timingSafeEqual } from "node:crypto";
+// server/testPages.ts
+import { readFile } from "node:fs/promises";
+import { join } from "node:path";
+
+// src/services/testUrls.js
+function humanTestSlug(title) {
+  return String(title || "").normalize("NFD").replace(/[\u0300-\u036f]/g, "").replace(/[đĐ]/g, "d").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "").slice(0, 180).replace(/-$/, "") || "ielts-test";
+}
+function testIntroductionPath(test, sectionId) {
+  const ref = test.slug || humanTestSlug(test.title);
+  return "/tests/" + encodeURIComponent(ref) + (sectionId ? "/sections/" + encodeURIComponent(sectionId) : "");
+}
+function visibleTestSource(source) {
+  const text = String(source || "").trim();
+  return /^(?:test_|[0-9a-f]{8}-[0-9a-f-]{27,})/i.test(text) ? "" : text;
+}
+
+// server/testUrlRegistry.mjs
+import { createHash } from "node:crypto";
+async function ensureTestUrl(db, testId, title) {
+  if (!/^[\w-]{1,128}$/.test(testId) || typeof title !== "string" || !title.trim() || title.length > 250) throw Object.assign(Error("Invalid test URL request."), { status: 400 });
+  return db.runTransaction(async (tx) => {
+    const metaRef = db.doc("tests/" + testId), idRef = db.doc("test_url_ids/" + testId);
+    const [meta, saved] = await Promise.all([tx.get(metaRef), tx.get(idRef)]);
+    const preferred = saved.data()?.slug || meta.data()?.slug;
+    const base = humanTestSlug(title), suffix = createHash("sha256").update(testId).digest("hex").slice(0, 8);
+    let slug = preferred || base, routeRef, snapshot;
+    for (let i = 0; i < 10; i++) {
+      routeRef = db.doc("test_urls/" + slug);
+      snapshot = await tx.get(routeRef);
+      if (!snapshot.exists || snapshot.data()?.testId === testId) break;
+      slug = base + "-" + suffix + (i ? "-" + (i + 1) : "");
+    }
+    if (snapshot?.exists && snapshot.data()?.testId !== testId) throw Error("Could not reserve a unique test URL.");
+    if (!snapshot?.exists) tx.set(routeRef, { testId, createdAt: Date.now() });
+    if (saved.data()?.slug !== slug) tx.set(idRef, { slug });
+    if (meta.exists && meta.data()?.slug !== slug) tx.update(metaRef, { slug });
+    return slug;
+  });
+}
+async function resolvePublicTest(db, reference, allowPrivate = false) {
+  if (typeof reference !== "string" || !reference || reference.length > 220 || !/^[\w-]+$/.test(reference)) return null;
+  const route = await db.doc("test_urls/" + reference).get();
+  const id = route.data()?.testId || reference;
+  const doc = await db.doc("tests/" + id).get(), meta = doc.data();
+  if (!meta || !allowPrivate && (meta.status !== "published" || meta.deletedAt)) return null;
+  return { ...meta, id: doc.id || id };
+}
+
+// server/publicPages.ts
+var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
+function textMarkup(text) {
+  return text.split(/\n\s*\n/).map((block) => /^#{1,3}\s/.test(block) ? `<h2>${escapeHtml(block.replace(/^#{1,3}\s/, ""))}</h2>` : `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`).join("");
+}
+function publicPage(title, description, body, path, noindex = false) {
+  return `<!doctype html><html lang="vi"><head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="${noindex ? "noindex,nofollow" : "index,follow"}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(path)}"><style>
+ :root{font-family:system-ui,sans-serif;color:#14283f;background:#f7f9fa}*{box-sizing:border-box}body{margin:0}a{color:inherit}header{padding:20px 5vw;display:flex;gap:30px;align-items:center;background:#fff;border-bottom:1px solid #e1e7ea;flex-wrap:wrap}header a{text-decoration:none;font-size:14px}header b{font-size:23px;margin-right:auto}main{max-width:1280px;margin:40px auto;padding:0 24px}h1{font-size:clamp(26px,4vw,44px);letter-spacing:-1px}p{line-height:1.8}.answer-layout{display:grid;grid-template-columns:1fr 1fr;gap:28px}.reading,.solutions,article{padding:28px;background:#fff;border:1px solid #e1e7ea;border-radius:16px}.reading{font:19px/1.9 Georgia,serif}.reading h1,.reading h2{text-align:center;font-size:25px}.solution{padding:18px 0;border-bottom:1px solid #e1e7ea}.solution h3{font-size:16px}.answer{font-weight:650;color:#0c645f}.cta{display:inline-block;text-decoration:none;background:#146d69;color:white;border-radius:9px;padding:12px 20px;margin:10px 0 25px}.section-links{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.section-links a{padding:10px;background:white;border:1px solid #e1e7ea;border-radius:8px}img{max-width:100%}[data-slot]{display:inline-block;border-bottom:1px solid #8994a3;min-width:70px}footer{padding:40px;text-align:center;color:#667085}@media(max-width:760px){.answer-layout{grid-template-columns:1fr}.reading,.solutions,article{padding:20px}header{gap:16px}}
+ </style></head><body><header><b><a href="/">IELTS studio.</a></b><a href="/full-tests?skill=listening">Listening</a><a href="/full-tests?skill=reading">Reading</a><a href="/practice">Mini Test</a><a href="/full-exam">Full Test</a><a href="/history">Test history</a><a href="/vocabulary">Vocabulary</a></header><main>${body}</main><footer>IELTS Studio \xB7 Learn one step at a time.</footer></body></html>`;
+}
+function solutionBody(meta, sections) {
+  const single = sections.length === 1, title = single ? sections[0].title : meta.title;
+  const href = `/tests/${encodeURIComponent(meta.id)}${single ? "/sections/" + encodeURIComponent(sections[0].id) : ""}`;
+  return `<p><a href="/practice">Practice Test</a> / ${escapeHtml(meta.source)}</p><h1>${escapeHtml(title)} ${meta.skill === "listening" ? "Listening" : "Reading"} Answers</h1><p>L\xE0m b\xE0i v\xE0 n\u1ED9p b\xE0i \u0111\u1EC3 xem \u0111\xE1p \xE1n c\xF9ng gi\u1EA3i th\xEDch. Trang n\xE0y kh\xF4ng hi\u1EC3n th\u1ECB l\u1EDDi gi\u1EA3i tr\u01B0\u1EDBc khi m\xECnh n\u1ED9p.</p><a class="cta" href="${href}">L\xE0m b\xE0i \u0111\u1EC3 xem l\u1EDDi gi\u1EA3i / Start practice \u2192</a>`;
+}
+
+// src/services/siteOrigins.ts
+var STUDENT_ORIGIN = "https://ielts.vungocmanhcuong.id.vn";
 
 // src/services/scoring.ts
 function normalizeAnswer(value) {
@@ -201,12 +266,77 @@ function markAssessment(assessment, responses) {
   return { result, band: estimatedBand(result, assessment.skill === "listening" ? "listening" : "reading"), responses: clean };
 }
 
+// server/testPages.ts
+var shell;
+function renderTestIntroduction(template, test, reference, section) {
+  const chosen = section ? test.sectionSummaries?.find((part) => part.id === section) : void 0;
+  const title = chosen && test.skill === "reading" ? chosen.title : chosen ? test.title + " \xB7 Part " + (chosen.index + 1) : test.title;
+  const path = testIntroductionPath(test, section), canonical = STUDENT_ORIGIN + path;
+  const description = `${title}. IELTS ${test.skill === "listening" ? "Listening" : "Reading"} practice with ${chosen?.questions || test.questions} questions. Start free, choose practice or test mode, and review your answers after submitting.`;
+  const parts = (test.sectionSummaries || []).map((part) => `<li><a href="${escapeHtml(testIntroductionPath(test, part.id))}">${escapeHtml(part.title)}</a></li>`).join("");
+  const body = `<article class="test-introduction"><nav><a href="/full-tests?skill=${test.skill}">${test.skill === "listening" ? "Listening" : "Reading"}</a></nav><h1>${escapeHtml(title)}</h1><p>${escapeHtml(visibleTestSource(test.source))}</p><p>${escapeHtml(description)}</p><p>${test.duration} minutes \xB7 ${test.passages} ${test.skill === "listening" ? "parts" : "passages"}</p><ul>${parts}</ul><a href="${escapeHtml(path)}?open=1">Choose a mode and start</a></article>`;
+  const json = (value) => JSON.stringify(value).replace(/</g, "\\u003c");
+  const structured = { "@context": "https://schema.org", "@type": "LearningResource", name: title, description, url: canonical, inLanguage: "en", learningResourceType: "Practice test", isAccessibleForFree: true };
+  const head2 = `<title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><meta property="og:url" content="${escapeHtml(canonical)}"><link rel="canonical" href="${escapeHtml(canonical)}"><meta name="robots" content="index,follow"><script type="application/ld+json">${json(structured)}</script><script>window.__TEST_ROUTE__=${json({ reference, testId: test.id, slug: test.slug })}</script>`;
+  return template.replace(/<title>[\s\S]*?<\/title>/i, "").replace(/<meta\s+[^>]*(?:name="description"|property="og:(?:title|description|url)")[^>]*>/gi, "").replace("</head>", head2 + "</head>").replace('<div id="root"></div>', '<div id="root">' + body + "</div>");
+}
+function registerTestPageRoutes(app2, { caller: caller2, optionalCaller: optionalCaller2, backend: backend2, apiError: apiError2 }) {
+  app2.post("/api/admin/test-url", async (req, res) => {
+    try {
+      const c = await caller2(req);
+      if (!c.isAdmin) throw new AssessmentError(403, "Administrator access required.");
+      if (!/^[\w-]{1,128}$/.test(req.body?.id || "") || typeof req.body?.title !== "string" || !req.body.title.trim() || req.body.title.length > 250) throw new AssessmentError(400, "Enter a valid test ID and title.");
+      res.json({ slug: await ensureTestUrl(c.db, req.body.id, req.body.title) });
+    } catch (error) {
+      apiError2(res, error);
+    }
+  });
+  app2.post("/api/test-route", async (req, res) => {
+    try {
+      const db = backend2().db;
+      let meta = await resolvePublicTest(db, req.body.reference);
+      if (!meta && req.headers?.authorization) {
+        const c = await optionalCaller2(req);
+        if (c.isAdmin) meta = await resolvePublicTest(db, req.body.reference, true);
+      }
+      if (!meta) throw new AssessmentError(404, "This test is unavailable.");
+      res.json({ testId: meta.id, slug: meta.slug });
+    } catch (error) {
+      apiError2(res, error);
+    }
+  });
+  const introduction = async (req, res) => {
+    try {
+      const meta = await resolvePublicTest(backend2().db, req.params.reference);
+      if (!meta) return res.status(404).set("X-Robots-Tag", "noindex").send("Test not found.");
+      const section = req.params.section;
+      if (section && !meta.sectionSummaries?.some((part) => part.id === section)) return res.status(404).send("Part not found.");
+      const path = testIntroductionPath(meta, section);
+      if (req.path !== path) {
+        const query = req.originalUrl.includes("?") ? req.originalUrl.slice(req.originalUrl.indexOf("?")) : "";
+        return res.redirect(308, path + query);
+      }
+      shell ??= readFile(join(process.cwd(), "dist/index.html"), "utf8").catch((error) => {
+        shell = void 0;
+        throw error;
+      });
+      res.set("Cache-Control", "public, max-age=0, s-maxage=60, stale-while-revalidate=60").type("html").send(renderTestIntroduction(await shell, meta, req.params.reference, section));
+    } catch (error) {
+      console.error("Test introduction failed:", error);
+      res.status(503).set("Retry-After", "60").send("This test is temporarily unavailable. Please retry.");
+    }
+  };
+  app2.get("/tests/:reference/sections/:section", introduction);
+  app2.get("/tests/:reference", introduction);
+}
+
 // server/gradeSignature.ts
+import { createHash as createHash2, createHmac, timingSafeEqual } from "node:crypto";
 function stable(value) {
   return Array.isArray(value) ? value.map(stable) : value && typeof value === "object" ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
 }
 function gradeSigner(secret) {
-  const key = createHash("sha256").update("ielts-history-v1\0" + secret).digest();
+  const key = createHash2("sha256").update("ielts-history-v1\0" + secret).digest();
   const sign = (record) => {
     const { gradeSignature, ...data } = record;
     return createHmac("sha256", key).update(JSON.stringify(stable(data))).digest("hex");
@@ -407,7 +537,7 @@ function registerWebsiteUIRoutes(app2, authorize, backend2, fail) {
 }
 
 // server/r2Storage.ts
-import { createHash as createHash2, createHmac as createHmac2 } from "node:crypto";
+import { createHash as createHash3, createHmac as createHmac2 } from "node:crypto";
 var MediaStorageError = class extends Error {
   constructor(code, message, status = 503) {
     super(message);
@@ -426,7 +556,7 @@ function readR2Config(env = process.env) {
   return { accountId: env.R2_ACCOUNT_ID, accessKeyId: env.R2_ACCESS_KEY_ID, secretAccessKey: env.R2_SECRET_ACCESS_KEY, bucket: env.R2_BUCKET_NAME, publicUrl: publicUrl.href.replace(/\/$/, "") };
 }
 var encode = (value) => encodeURIComponent(value).replace(/[!'()*]/g, (char) => "%" + char.charCodeAt(0).toString(16).toUpperCase());
-var hash = (value) => createHash2("sha256").update(value).digest("hex");
+var hash = (value) => createHash3("sha256").update(value).digest("hex");
 var hmac = (key, value) => createHmac2("sha256", key).update(value).digest();
 function presign(url, method, credentials, headers = {}, now = /* @__PURE__ */ new Date(), expires = 600, region = "auto") {
   const result = new URL(url), timestamp = now.toISOString().replace(/[:-]|\.\d{3}/g, ""), day = timestamp.slice(0, 8), scope = day + "/" + region + "/s3/aws4_request";
@@ -700,25 +830,7 @@ var slugify = (text) => text.normalize("NFD").replace(/[\u0300-\u036f]/g, "").to
 var answerPath = (id, sectionId, title) => `/answers/${encodeURIComponent(id)}/${encodeURIComponent(sectionId)}/${slugify(title)}`;
 
 // server/portalRoutes.ts
-import { createHash as createHash3, randomUUID } from "node:crypto";
-
-// server/publicPages.ts
-var escapeHtml = (value) => String(value ?? "").replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" })[c]);
-function textMarkup(text) {
-  return text.split(/\n\s*\n/).map((block) => /^#{1,3}\s/.test(block) ? `<h2>${escapeHtml(block.replace(/^#{1,3}\s/, ""))}</h2>` : `<p>${escapeHtml(block).replace(/\n/g, "<br>")}</p>`).join("");
-}
-function publicPage(title, description, body, path, noindex = false) {
-  return `<!doctype html><html lang="vi"><head><link rel="icon" type="image/svg+xml" href="/favicon.svg"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(title)} \xB7 IELTS Studio</title><meta name="description" content="${escapeHtml(description)}"><meta name="robots" content="${noindex ? "noindex,nofollow" : "index,follow"}"><meta property="og:title" content="${escapeHtml(title)}"><meta property="og:description" content="${escapeHtml(description)}"><link rel="canonical" href="${escapeHtml(path)}"><style>
- :root{font-family:system-ui,sans-serif;color:#14283f;background:#f7f9fa}*{box-sizing:border-box}body{margin:0}a{color:inherit}header{padding:20px 5vw;display:flex;gap:30px;align-items:center;background:#fff;border-bottom:1px solid #e1e7ea;flex-wrap:wrap}header a{text-decoration:none;font-size:14px}header b{font-size:23px;margin-right:auto}main{max-width:1280px;margin:40px auto;padding:0 24px}h1{font-size:clamp(26px,4vw,44px);letter-spacing:-1px}p{line-height:1.8}.answer-layout{display:grid;grid-template-columns:1fr 1fr;gap:28px}.reading,.solutions,article{padding:28px;background:#fff;border:1px solid #e1e7ea;border-radius:16px}.reading{font:19px/1.9 Georgia,serif}.reading h1,.reading h2{text-align:center;font-size:25px}.solution{padding:18px 0;border-bottom:1px solid #e1e7ea}.solution h3{font-size:16px}.answer{font-weight:650;color:#0c645f}.cta{display:inline-block;text-decoration:none;background:#146d69;color:white;border-radius:9px;padding:12px 20px;margin:10px 0 25px}.section-links{display:flex;gap:12px;flex-wrap:wrap;margin:20px 0}.section-links a{padding:10px;background:white;border:1px solid #e1e7ea;border-radius:8px}img{max-width:100%}[data-slot]{display:inline-block;border-bottom:1px solid #8994a3;min-width:70px}footer{padding:40px;text-align:center;color:#667085}@media(max-width:760px){.answer-layout{grid-template-columns:1fr}.reading,.solutions,article{padding:20px}header{gap:16px}}
- </style></head><body><header><b><a href="/">IELTS studio.</a></b><a href="/practice">Practice Test</a><a href="/full-tests">Full Test</a><a href="/knowledge">Chia s\u1EBB ki\u1EBFn th\u1EE9c</a><a href="/forum">Forum</a><a href="/contribute">\u0110\xF3ng g\xF3p</a></header><main>${body}</main><footer>IELTS Studio \xB7 Learn one step at a time.</footer></body></html>`;
-}
-function solutionBody(meta, sections) {
-  const single = sections.length === 1, title = single ? sections[0].title : meta.title;
-  const href = `/tests/${encodeURIComponent(meta.id)}${single ? "/sections/" + encodeURIComponent(sections[0].id) : ""}`;
-  return `<p><a href="/practice">Practice Test</a> / ${escapeHtml(meta.source)}</p><h1>${escapeHtml(title)} ${meta.skill === "listening" ? "Listening" : "Reading"} Answers</h1><p>L\xE0m b\xE0i v\xE0 n\u1ED9p b\xE0i \u0111\u1EC3 xem \u0111\xE1p \xE1n c\xF9ng gi\u1EA3i th\xEDch. Trang n\xE0y kh\xF4ng hi\u1EC3n th\u1ECB l\u1EDDi gi\u1EA3i tr\u01B0\u1EDBc khi m\xECnh n\u1ED9p.</p><a class="cta" href="${href}">L\xE0m b\xE0i \u0111\u1EC3 xem l\u1EDDi gi\u1EA3i / Start practice \u2192</a>`;
-}
-
-// server/portalRoutes.ts
+import { createHash as createHash4, randomUUID } from "node:crypto";
 var idValid = (id) => typeof id === "string" && /^[\w-]{1,128}$/.test(id);
 var articleSkills = ["vocabulary", "grammar", "reading", "listening", "speaking", "writing", "resources"];
 function validateContribution(body) {
@@ -727,7 +839,7 @@ function validateContribution(body) {
   if (body.tests.some((test) => !test || !Array.isArray(test.parts) || !test.parts.length || test.parts.some((p) => !p || typeof p.passageHtml !== "string" || typeof p.questionHtml !== "string" || !Array.isArray(p.questions)))) throw new AssessmentError(400, "The uploaded test content is incomplete.");
   const content = JSON.stringify(body.tests);
   if (Buffer.byteLength(content, "utf8") > 7e5) throw new AssessmentError(400, "This contribution is too large. Upload a smaller test ZIP (under 700 KB after conversion).");
-  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash3("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
+  return { title: body.title.trim(), content, notes: String(body.notes || "").slice(0, 2e3), digest: createHash4("sha256").update(JSON.stringify(body.tests.map((t) => t.parts))).digest("hex") };
 }
 function registerPortalRoutes(app2, { caller: caller2, backend: backend2, apiError: apiError2 }) {
   const admin = async (req) => {
@@ -857,12 +969,14 @@ function registerPortalRoutes(app2, { caller: caller2, backend: backend2, apiErr
   app2.get("/sitemap.xml", async (req, res) => {
     try {
       if (sitemapCache && Date.now() < sitemapCache.until) return res.type("xml").send(sitemapCache.xml);
-      const origin = process.env.PUBLIC_SITE_URL;
+      const origin = process.env.PUBLIC_SITE_URL || STUDENT_ORIGIN;
       if (!origin || !/^https:\/\/[^/]+\/?$/.test(origin)) return res.status(503).send("Set PUBLIC_SITE_URL to the deployed HTTPS origin.");
       const { db } = backend2(), snap = await db.collection("tests").where("status", "==", "published").limit(3e3).get();
       const urls = ["/", "/practice", "/full-tests", "/knowledge"];
       for (const d of snap.docs) {
         const t = d.data();
+        if (t.deletedAt) continue;
+        urls.push(testIntroductionPath({ ...t, id: d.id }));
         urls.push(answerPath(d.id, "all", t.title));
         for (const p of t.sectionSummaries || []) urls.push(answerPath(d.id, p.id, p.title));
       }
@@ -879,7 +993,7 @@ function registerPortalRoutes(app2, { caller: caller2, backend: backend2, apiErr
 Disallow: /admin
 Disallow: /history
 Disallow: /api/
-${process.env.PUBLIC_SITE_URL ? "Sitemap: " + process.env.PUBLIC_SITE_URL.replace(/\/$/, "") + "/sitemap.xml" : ""}`));
+Sitemap: ${(process.env.PUBLIC_SITE_URL || STUDENT_ORIGIN).replace(/\/$/, "")}/sitemap.xml`));
 }
 
 // server/app.ts
@@ -1110,7 +1224,7 @@ app.post("/api/test-review", async (req, res) => {
 });
 app.post("/api/full-exam/submit", async (req, res) => {
   try {
-    const { db } = await caller(req);
+    const { db } = await optionalCaller(req);
     res.json(await markFullExam(assessmentStore(db), req.body));
   } catch (error) {
     apiError(res, error);
@@ -1251,6 +1365,7 @@ app.post("/api/content-report", async (req, res) => {
     apiError(res, error);
   }
 });
+registerTestPageRoutes(app, { caller, optionalCaller, backend, apiError });
 registerPortalRoutes(app, { caller, backend, apiError });
 app.use("/api", (_req, res) => res.status(404).json({ error: "API route not found. Check that the Express backend is deployed.", code: "API_ROUTE_NOT_FOUND" }));
 var app_default = app;

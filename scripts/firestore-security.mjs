@@ -33,6 +33,11 @@ export function securityTestSuite(database){
  for(const patch of [{role:'admin'},{name:12},{name:'x'.repeat(201)},{status:'suspended'},{email:'owner@example.test'}])add('DENY','create','/users/audit-student',student,{request:{resource:{data:{...profile,...patch}}}});
  add('DENY','update','/users/audit-student',student,{resource:{data:profile},request:{resource:{data:{...profile,role:'admin'}}}});
  add('ALLOW','update','/users/audit-student',student,{resource:{data:profile},request:{resource:{data:{...profile,name:'New name'}}}});
+ const vocabulary={id:'word-1',owner:'audit-student',word:'book',meaning:'A written work.',example:'She read a book.',exampleSource:'dictionary',partOfSpeech:'noun',createdAt:1};
+ const activeProfile=[{function:'exists',args:[{exactValue:base+'/users/audit-student'}],result:{value:false}}];
+ add('ALLOW','create','/users/audit-student/vocabulary/word-1',student,{request:{resource:{data:vocabulary}},functionMocks:activeProfile});
+ add('DENY','create','/users/audit-student/vocabulary/word-1',student,{request:{resource:{data:{...vocabulary,exampleSource:'unknown'}}},functionMocks:activeProfile});
+ add('ALLOW','update','/users/audit-student/vocabulary/word-1',student,{resource:{data:vocabulary},request:{resource:{data:{...vocabulary,exampleSource:'manual'}}},functionMocks:activeProfile});
  return {testCases:tests};
 }
 export async function runSecurityRules({env=process.env,fetcher=fetch,log=console.log}={}){

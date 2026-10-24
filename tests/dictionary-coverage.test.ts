@@ -23,5 +23,5 @@ test('cancelled dictionary lookups do not start a second request',async()=>{
 });
 test('notebook table displays numbered meanings and the requested example column',()=>{
  const html=renderToStaticMarkup(React.createElement(VocabularyView,{onUpdateProfile:async()=>{},profile:{id:'learner'} as any,vocabulary:[{id:'one',word:'handful',meaning:'A small amount.\nA troublesome person.',partOfSpeech:'noun',example:'An entire irrelevant paragraph copied from the passage.',dictionarySource:'minhqnd'} as any],onSaveWord:async()=>{},onArchiveWord:async()=>{},onNotify:()=>{}}));
- assert.match(html,/<ol class="vocab-meanings">/);assert.match(html,/A small amount/);assert.match(html,/A troublesome person/);assert.match(html,/<th>Example<\/th>/);assert.match(html,/irrelevant paragraph/);assert.doesNotMatch(html,/blockquote|Needs definition/);
+ assert.match(html,/<ol class="vocab-meanings">/);assert.match(html,/A small amount/);assert.match(html,/A troublesome person/);assert.match(html,/<th>Example<\/th>/);assert.doesNotMatch(html,/irrelevant paragraph/);assert.doesNotMatch(html,/blockquote|Needs definition/);
 });

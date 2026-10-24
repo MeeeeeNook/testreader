@@ -67,7 +67,7 @@ service cloud.firestore {
     }
     function validVocabulary(data,userId) {
       return data.keys().hasAll(['id','owner','word','meaning','example','partOfSpeech','createdAt']) &&
-        data.keys().hasOnly(['id','owner','word','meaning','example','partOfSpeech','createdAt','updatedAt','folderId','dictionarySource','definitionLanguage','phonetic','archived']) &&
+        data.keys().hasOnly(['id','owner','word','meaning','example','partOfSpeech','createdAt','updatedAt','folderId','dictionarySource','definitionLanguage','phonetic','archived','exampleSource']) &&
         data.id is string && data.id.size() <= 128 && data.owner == userId &&
         data.word is string && data.word.size() > 0 && data.word.size() <= 200 &&
         data.meaning is string && data.meaning.size() <= 40000 &&
@@ -76,7 +76,7 @@ service cloud.firestore {
         data.createdAt is number && data.createdAt >= 0 &&
         optionalNumber(data,'updatedAt',0,9999999999999) &&
         optionalString(data,'folderId',128) && optionalString(data,'dictionarySource',40) &&
-        optionalString(data,'definitionLanguage',40) && optionalString(data,'phonetic',500) &&
+        (!('exampleSource' in data)||data.exampleSource in ['dictionary','manual']) && optionalString(data,'definitionLanguage',40) && optionalString(data,'phonetic',500) &&
         (!('archived' in data) || data.archived is bool);
     }
     function publicTest(testId) {

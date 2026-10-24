@@ -1,3 +1,4 @@
+import {testIntroductionPath} from '../src/services/testUrls.js';
 import {setupLink} from "../src/services/sessionSettings";
 import {testLink} from "../src/services/testLinks";
 import {test} from 'node:test';
@@ -15,7 +16,7 @@ const profile:UserProfile={id:'guest',name:'Learner',email:'',target:7,language:
 const meta:TestMeta={id:'forecast',title:'Forecast Test 1',source:'Forecast / Q3',skill:'reading',access:'premium',status:'published',duration:60,passages:3,questions:40,updatedAt:1,sectionSummaries:[{id:'p0',index:0,title:'Airborne Dentists',questions:13,kinds:['heading']},{id:'p1',index:1,title:'Australian birds',questions:13,kinds:['true_false']},{id:'p2',index:2,title:'Living with robots',questions:14,kinds:['summary']}]};
 const render=(location:string,full=false)=>renderToStaticMarkup(React.createElement(PracticeCatalog,{tests:[meta],profile,attempts:[],full,location,onNavigate:()=>{}}));
 test('practice lists actual section names and section URLs; legacy premium labels never lock tests',()=>{
- const html=render('/practice');assert.match(html,/Airborne Dentists/);assert.match(html,/Australian birds/);assert.match(html,/Living with robots/);assert.ok(html.includes(setupLink(meta.id,meta.sectionSummaries![0].id)));assert.doesNotMatch(html,/Premium|unlock|paid/);assert.ok(html.includes(testLink(meta,meta.sectionSummaries![0],true)));
+ const html=render('/practice');assert.match(html,/Airborne Dentists/);assert.match(html,/Australian birds/);assert.match(html,/Living with robots/);assert.ok(html.includes(testIntroductionPath(meta,meta.sectionSummaries![0].id)));assert.doesNotMatch(html,/Premium|unlock|paid/);assert.ok(html.includes(testLink(meta,meta.sectionSummaries![0],true)));
 });
 test('practice URL filters compose by part, type, keyword and folder',()=>{
  const html=render('/practice?part=2&types=true_false&q=birds&source=Forecast');assert.match(html,/Australian birds/);assert.doesNotMatch(html,/Airborne Dentists|Living with robots/);

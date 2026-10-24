@@ -49,6 +49,7 @@ export interface EditablePart {
 export interface ListeningRecording { id: string; name: string; url: string; size?: number }
 
 export interface EditableTest {
+  slug?:string;
   audioFiles?: ListeningRecording[];
   coverImage?: string;
   folderId?: string|null;
@@ -72,6 +73,7 @@ export interface EditableTest {
 }
 
 export interface TestMeta {
+  slug?:string;
   audioFiles?: ListeningRecording[];
   coverImage?: string;
   contentBytes?: number;
@@ -159,6 +161,7 @@ export interface AttemptRecord {
 }
 
 export interface VocabularyItem {
+  exampleSource?:'dictionary'|'manual';
   folderId?:string;
   dictionarySource?:'minhqnd'|'wiktionary';
   definitionLanguage?:string;
