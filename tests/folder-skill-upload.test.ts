@@ -43,9 +43,9 @@ test('wrong upload mode is reported explicitly; ZIP preparation reports progress
  try{assert.equal(plan.candidates.length,0);assert.match(plan.errors.join(' '),/Use Upload Listening/);assert.equal(progress.at(-1),100);assert.ok(progress.some(p=>p>0&&p<100))}finally{disposeImport(plan)}
  assert.match(importError({code:'storage/unauthorized',message:'Denied'}),/storage\/unauthorized.*Storage rules/);
 });
-test('real MP3 encoder produces economical mono 48 kbps audio with progress',()=>{
+test('real MP3 encoder produces economical mono 64 kbps audio with progress',()=>{
  const rate=22050,seconds=2,pcm=Float32Array.from({length:rate*seconds},(_,i)=>.3*Math.sin(2*Math.PI*440*i/rate)),progress:number[]=[];
- const encoded=encodeMonoMp3(pcm,rate,p=>progress.push(p));assert.ok(encoded.length>10000&&encoded.length<14000,encoded.length+' bytes');assert.equal(encoded[0],255);assert.equal(progress.at(-1),100);assert.ok(encoded.length<pcm.byteLength/10);
+ const encoded=encodeMonoMp3(pcm,rate,p=>progress.push(p));assert.ok(encoded.length>15000&&encoded.length<18000,encoded.length+' bytes');assert.equal(encoded[0],255);assert.equal(encoded[2]>>4,8,'MPEG-2 Layer III frame declares 64 kbps');assert.equal(progress.at(-1),100);assert.ok(encoded.length<pcm.byteLength/10);
 });
 
 test('a stalled save surfaces a copyable timeout instead of waiting forever',async()=>{

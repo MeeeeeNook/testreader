@@ -1,6 +1,6 @@
 import lamejs from '../vendor/lamejs.js';
 export function encodeMonoMp3(samples:Float32Array,sampleRate:number,onProgress?:(percent:number)=>void){
- const encoder=new lamejs.Mp3Encoder(1,sampleRate,48),chunks:Uint8Array[]=[];let size=0,last=-1;
+ const encoder=new lamejs.Mp3Encoder(1,sampleRate,64),chunks:Uint8Array[]=[];let size=0,last=-1;
  for(let offset=0;offset<samples.length;offset+=1152){
   const pcm=new Int16Array(Math.min(1152,samples.length-offset));
   for(let i=0;i<pcm.length;i++){const v=Math.max(-1,Math.min(1,samples[offset+i]));pcm[i]=v<0?v*32768:v*32767}
