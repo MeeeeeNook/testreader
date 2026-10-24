@@ -25,9 +25,9 @@ test('folder page shows its description, child links and only its own descendant
  const window=environment(),paths:string[]=[],folders=changeFolder(changeFolder([],'parent','Cambridge',null),'child','Cam 16','parent').map(folder=>({...folder,description:'A curated collection of reading tests.'}));
  const root=createRoot(document.getElementById('app')!);
  try{await act(async()=>root.render(React.createElement(FolderPage,{id:'parent',folders,tests:[meta('one','child','Cambridge / Cam 16'),meta('other','elsewhere','Forecast')],profile,attempts:[],location:'/folders/parent?view=full',onNavigate:path=>paths.push(path)})));
- assert.match(document.body.textContent!,/A curated collection/);assert.ok(document.querySelector('a[href="/folders/child?view=full"]'));
+ assert.match(document.body.textContent!,/A curated collection/);assert.ok([...document.querySelectorAll('.folder-tree-name')].some(node=>node.textContent?.includes('Cam 16')));
  assert.deepEqual([...document.querySelectorAll('.practice-card h2')].map(node=>node.textContent),['Test one']);
- const switcher=[...document.querySelectorAll('button')].find(button=>button.textContent==='Passages & parts')!;
+ const switcher=[...document.querySelectorAll('button')].find(button=>button.textContent==='Individual passages / parts')!;
  await act(async()=>switcher.dispatchEvent(new window.Event('click',{bubbles:true})));assert.match(paths[0],/^\/folders\/parent\?view=practice/);
  assert.equal(document.querySelector('[aria-label="Source folder"]'),null);
  }finally{await act(async()=>root.unmount());}

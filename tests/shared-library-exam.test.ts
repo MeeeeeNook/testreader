@@ -67,7 +67,7 @@ test('batch folder picker assigns all selected tests in one action and leaves un
  try{await act(async()=>root.render(React.createElement(ImportPreview,{plan,folders,onCancel:()=>{},onConfirm:items=>confirmed.push(items)})));
  const input=document.querySelector<HTMLInputElement>('[aria-label="Import Three"]')!;await act(async()=>{input.checked=false;input.dispatchEvent(new window.Event('click',{bubbles:true}))});
  await act(async()=>document.querySelector('[aria-label="Folder for 2 selected tests"]')!.dispatchEvent(new window.Event('click',{bubbles:true})));
- await act(async()=>[...document.querySelectorAll('[role="option"]')].find(b=>b.textContent==='Cambridge')!.dispatchEvent(new window.Event('click',{bubbles:true})));
+ await act(async()=>[...document.querySelectorAll('.folder-destination .folder-tree-name')].find(b=>b.textContent==='Cambridge')!.dispatchEvent(new window.Event('click',{bubbles:true})));
  await act(async()=>[...document.querySelectorAll('button')].find(b=>b.textContent==='Confirm import 2 tests')!.dispatchEvent(new window.Event('click',{bubbles:true})));
  assert.deepEqual(confirmed[0].map((c:any)=>[c.test.title,c.test.folderId,c.test.folderPath]),[['One','cam','Cambridge'],['Two','cam','Cambridge']]);assert.equal(plan.candidates[2].test.folderId,undefined);
  }finally{await act(async()=>root.unmount())}

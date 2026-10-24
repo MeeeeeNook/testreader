@@ -1215,6 +1215,17 @@ export default function App() {
                 onRestoreTest={handleRestoreTest}
                 onSetCollection={moveTests}
                 onRenameTest={(id,title)=>handleTestMeta([id],{title})}
+                onCopyTests={async (ids,folderId,registry=folders)=>{
+                  for(const id of ids){
+                    const meta=tests.find(test=>test.id===id);
+                    try{
+                      const original=await firestoreAdapter.getTestComplete(id);
+                      const {sourceTestId,sectionIds,sourceSections,...copy}=original;
+                      await firestoreAdapter.saveTestComplete({...copy,id:`test_${createId()}`,title:`${copy.title} (copy)`.slice(0,250),folderId:folderId||null,status:"draft",access:"free",createdAt:Date.now(),updatedAt:Date.now()},registry);
+                    }catch(error){await loadData();throw new Error(`Copying "${meta?.title||id}" (${id}): ${error instanceof Error?error.message:String(error)}`);}
+                  }
+                  await loadData();
+                }}
                 onDuplicateTest={async id=>{
                   const original=await firestoreAdapter.getTestComplete(id);
                   const {sourceTestId,sectionIds,sourceSections,...copy}=original;
