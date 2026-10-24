@@ -1,3 +1,4 @@
+import {normalizePassageHeadings} from './passageFormatting';
 import type {ImportProgressCallback} from './importProgress';
 import { passageTitle } from "./passageTitle";
 import JSZip from "jszip";
@@ -883,7 +884,7 @@ export function toEditable(
         html = html.replace(token, '<span data-slot="' + id + '"></span>');
       return html;
     }
-    const passageHtml = layout(topic);
+    const passageHtml = meta.skill==='listening'?layout(topic):normalizePassageHeadings(layout(topic));
     const title = passageTitle(part.topic_content || "", "", partIndex);
     const questionHtml = layout(q);
 

@@ -1,3 +1,4 @@
+import {normalizePassageHeadings} from '../services/passageFormatting';
 import {ShareButton} from './ShareButton';
 import {introductionLink} from '../services/shareTest';
 import {AnswerSheet} from './AnswerSheet';
@@ -843,7 +844,7 @@ const LoadedTestWorkspace: React.FC<TestWorkspaceProps> = ({
             </div>
 
             <div className="reading-content">
-              {test.skill==='listening'?<><h3>Transcript</h3>{transcripts[part.id]?<QuestionLayout html={cleanLayout(transcripts[part.id])} renderSlot={renderSlot}/>:<p className="studio-callout">{reviewLoaded||isPreview?'No transcript was provided for this part.':'Loading transcript…'}</p>}</>:<QuestionLayout html={part.passageHtml} renderSlot={renderSlot} />}
+              {test.skill==='listening'?<><h3>Transcript</h3>{transcripts[part.id]?<QuestionLayout html={cleanLayout(transcripts[part.id])} renderSlot={renderSlot}/>:<p className="studio-callout">{reviewLoaded||isPreview?'No transcript was provided for this part.':'Loading transcript…'}</p>}</>:<QuestionLayout html={normalizePassageHeadings(part.passageHtml)} renderSlot={renderSlot} />}
             </div>
           </article>}
 

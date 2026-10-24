@@ -1,3 +1,4 @@
+import {normalizePassageHeadings} from './passageFormatting';
 import {listeningImportIssues} from './listening';
 import {importError} from "./importProgress";
 import {contentHash} from "./importIdentity";
@@ -266,7 +267,7 @@ export class FirestoreAdapter {
             a.id.localeCompare(b.id, undefined, { numeric: true }),
         );
 
-      parts.forEach((part, index) => { if(meta.skill!=='listening')part.title = passageTitle(part.passageHtml, part.title, index); });
+      parts.forEach((part, index) => { if(meta.skill!=='listening'){part.passageHtml=normalizePassageHeadings(part.passageHtml);part.title = passageTitle(part.passageHtml, part.title, index);} });
 
       // If user is admin, also fetch the private keys
       const role = await this.getRole();
