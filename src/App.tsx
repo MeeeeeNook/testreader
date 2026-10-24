@@ -285,26 +285,32 @@ export default function App() {
     }
   }, [user?.uid]);
 
+  const dataLoadGeneration=useRef(0);
   const loadData = useCallback(async () => {
     if (!authReady) return;
     const uid = user?.uid || null;
-    const current = () => previousUser.current === uid;
+    const generation=++dataLoadGeneration.current;
+    const current = () => previousUser.current === uid&&dataLoadGeneration.current===generation;
     setAttempts(readAttempts(localStorage, profile.id));
     try {
-      let cursor;
-      const catalog: TestMeta[] = [];
-      do {
-        const batch = await firestoreAdapter.listTests({
-          pageSize: 100,
-          lastDoc: cursor,
-        });
-        if (!current()) return;
-        catalog.push(...batch.tests);
-        cursor = batch.tests.length === 100 ? batch.lastDoc : undefined;
-      } while (cursor);
+      let catalog:TestMeta[]=[];
+      if(userRole==='admin'){
+        let cursor;
+        do{const batch=await firestoreAdapter.listTests({pageSize:100,lastDoc:cursor});if(!current())return;catalog.push(...batch.tests);cursor=batch.tests.length===100?batch.lastDoc:undefined;}while(cursor);
+      }else{
+        const response=await fetch('/api/catalog');const payload=await response.json();if(!response.ok)throw Error(payload.error||'Could not load the library.');catalog=payload.tests;
+      }
+      if(!current())return;
+      try{localStorage.setItem('ielts:public-catalog:v1',JSON.stringify(catalog.filter(test=>test.status==='published'&&!test.deletedAt)));}catch{}
       setTests(catalog);
       setCatalogError("");
+      if(userRole==='admin'){
+        const missing=catalog.filter(test=>!test.slug&&test.title?.trim());
+        try{for(let index=0;index<missing.length;index+=20){if(!current())return;const data=await requestJson<{registered:{id:string;slug:string}[]}>('/api/admin/test-urls/backfill',{items:missing.slice(index,index+20).map(({id,title})=>({id,title}))},()=>auth.currentUser);if(!current())return;const slugs=new Map(data.registered.map(item=>[item.id,item.slug]));setTests(previous=>previous.map(test=>slugs.has(test.id)?{...test,slug:slugs.get(test.id)}:test));}}
+        catch(error){if(current())notify('Readable URL registration is paused: '+(error as Error).message);}
+      }
     } catch (error) {
+      if(current()){try{const cached=JSON.parse(localStorage.getItem('ielts:public-catalog:v1')||'null');if(Array.isArray(cached))setTests(cached.filter(test=>test.status==='published'&&!test.deletedAt));}catch{}}
       if (current())
         setCatalogError(
           error instanceof Error

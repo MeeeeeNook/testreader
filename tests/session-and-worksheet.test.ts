@@ -25,7 +25,7 @@ test('direct codes are unlimited practice; explicit exam links enforce passage t
 test('catalog opens setup for the selected passage and still supplies a separate public solution link',()=>{
   const testMeta={...file,parts:undefined,passages:1,questions:1,sectionSummaries:[{id:'p1',index:0,title:'Ocean research',questions:1,kinds:[]}]};
   const html=renderToStaticMarkup(React.createElement(PracticeCatalog,{tests:[testMeta],attempts:[],profile:{id:'guest'} as any,location:'/practice',onNavigate:()=>{}}));
-  assert.match(html,/href="\/tests\/ocean-research\/sections\/p1"/);
+  assert.match(html,/href="\/tests\/test\/sections\/p1"/);
   assert.match(html,/href="\/solutions\//);
   assert.match(html,/Illustrated cover for Ocean research/);
   assert.deepEqual(parseRoute(setupLink('test','p1')),{name:'test',id:'test',section:'p1'});

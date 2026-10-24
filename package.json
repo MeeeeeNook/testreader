@@ -5,12 +5,13 @@
   "type": "module",
   "scripts": {
     "dev": "tsx server.ts",
-    "build": "node scripts/firestore-security.mjs && node scripts/test-url-migration.mjs && vite build && esbuild server.ts --bundle --platform=node --packages=external --format=esm --outfile=server.js && esbuild server/app.ts --bundle --platform=node --packages=external --format=esm --outfile=api/index.js",
+    "build": "node scripts/firestore-security.mjs && vite build && esbuild server.ts --bundle --platform=node --packages=external --format=esm --outfile=server.js && esbuild server/app.ts --bundle --platform=node --packages=external --format=esm --outfile=api/index.js",
     "start": "node server.js",
     "preview": "vite preview",
     "clean": "rm -rf dist server.js",
     "lint": "tsc --noEmit",
-    "test": "node --import tsx --test tests/*.test.ts"
+    "test": "node --import tsx --test tests/*.test.ts",
+    "migrate:test-urls": "node scripts/test-url-migration.mjs"
   },
   "dependencies": {
     "@google/genai": "^2.4.0",

@@ -22,8 +22,8 @@ export async function ensureTestUrl(db,testId,title){
 }
 export async function resolvePublicTest(db,reference,allowPrivate=false){
  if(typeof reference!=='string'||!reference||reference.length>220||!/^[\w-]+$/.test(reference))return null;
- const route=await db.doc('test_urls/'+reference).get();
- const id=route.data()?.testId||reference;
+ const route=/^test_[\w-]+$/.test(reference)?null:await db.doc('test_urls/'+reference).get();
+ const id=route?.data()?.testId||reference;
  const doc=await db.doc('tests/'+id).get(),meta=doc.data();
  if(!meta||(!allowPrivate&&(meta.status!=='published'||meta.deletedAt)))return null;
  return {...meta,id:doc.id||id};
