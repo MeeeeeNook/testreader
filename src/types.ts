@@ -1,4 +1,7 @@
 export interface ScoreRow {
+  kind?: string;
+  part?: number;
+  partTitle?: string;
   number: number;
   response: string;
   answer: string;
@@ -140,12 +143,7 @@ export interface AttemptRecord {
   createdAt: number;
   responses: Record<string | number, string>;
   result: {
-    rows: {
-      number: number;
-      response: string;
-      answer: string;
-      status: 'correct' | 'incorrect' | 'blank' | 'ungraded';
-    }[];
+    rows: ScoreRow[];
     total: number;
     correct: number;
     incorrect: number;

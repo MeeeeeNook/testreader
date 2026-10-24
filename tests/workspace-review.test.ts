@@ -23,7 +23,8 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       builder.onLoad({filter:/.*/,namespace:'offline'},args=>({contents:args.path==='auth'?'export async function loginWithGoogle(){}':args.path==='firebase'?'export const auth={get currentUser(){return globalThis.__workspaceUser||null}};':args.path==='assessment'?'export async function assessmentRequest(url,payload){return globalThis.__scoreRequest(url,payload)}':'export const firestoreAdapter={put:async()=>{}};'}));
     }}]});
     const {TestWorkspace}=createRequire(import.meta.url)(output);
-    for (const variant of ['practice','exam','solution','member','listening','listening-loading','listening-solution','practice-expiry','exam-expiry']) {
+    for (const variant of ['practice','exam','solution','member','listening','listening-loading','listening-solution','practice-expiry','exam-expiry','attempt-review']) {
+      const reviewing=variant==='attempt-review';
       const listening=variant.startsWith('listening'),expiry=variant.endsWith('-expiry');
       const mode=expiry?variant.split('-')[0]:variant==='listening'||variant==='listening-loading'?'practice':variant==='listening-solution'?'solution':variant;
       const {window}=parseHTML('<html><body><div id="root"></div></body></html>');
@@ -39,7 +40,7 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
         localStorage:{getItem:(key:string)=>storage.get(key)||null,setItem:(key:string,value:string)=>storage.set(key,value)},
         __workspaceUser:mode==='member'?{uid:owner}:null,
         __scoreRequest:async(url:string,payload:any)=>{
-          requests++; if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};}assert.equal(url,'/api/submit-exam');
+          requests++; if(reviewing){assert.equal(url,'/api/test-review');return {keys:Object.fromEntries(questions.map(q=>[q.number,{...q,answer:'edited key'}]))};} if(mode==='solution'){assert.equal(url,'/api/test-review');return {keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};}assert.equal(url,'/api/submit-exam');
           const result=scoreTest([{numbers,keys}],payload.responses);
           return {attemptId:payload.attemptId,result,band:estimatedBand(result),keys,transcripts:{p0:'<p>PRIVATE LISTENING TRANSCRIPT</p>'}};
         }});
@@ -54,7 +55,19 @@ test('practice and exam require submit confirmation, allow cancellation, and rev
       const noop=()=>{};
       let root=createRoot(document.getElementById('root')!);
       try {
-        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution',sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        await act(async()=>root.render(React.createElement(TestWorkspace,{test,mode:mode==='solution'?'practice':actualMode,initialSolution:mode==='solution'||reviewing,initialAttempt:reviewing?{id:'saved-attempt',owner:'student',responses:{1:'my saved answer'},result:scoreTest([{numbers,keys}],{1:'my saved answer'}),band:0,elapsedSeconds:123,startedAt:1}:undefined,sessionId:mode,initialDurationMinutes:60,profile:{id:owner,fontSize:18},onSessionActive:noop,onHistorySaved:noop,onReturnToLibrary:noop,onSaveVocabulary:async()=>{},onNotify:noop})));
+        if(reviewing){
+          assert.equal(requests,1,'review fetches explanations, never submits the attempt');
+          assert.match(document.querySelector('.reader-clock')!.textContent!,/2m 3s/);
+          assert.equal((document.querySelector('.fill-input') as HTMLInputElement).value,'my saved answer');
+          assert.ok((document.querySelector('.fill-input') as HTMLInputElement).disabled);
+          assert.match(document.querySelector('.slot-solution')!.textContent!,/Answer 1: yes/,'saved key wins over edited current answer');
+          assert.match(document.querySelector('.slot-solution')!.textContent!,/my saved answer/);
+          assert.equal(document.querySelector('.reader-reset'),null,'review cannot clear or overwrite a saved attempt');
+          assert.equal(readAttempts(localStorage,owner).length,0,'review does not create history');
+          assert.match(document.querySelector('.reader-test-heading')!.textContent!,/ATTEMPT REVIEW/);
+          continue;
+        }
         if(variant==='listening-loading'){
           assert.match(document.querySelector('.questions-pane')!.textContent!,/Question prompt/);
           assert.equal(document.querySelector('.audio-loading-gate'),null);

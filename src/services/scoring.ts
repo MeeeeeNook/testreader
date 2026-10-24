@@ -12,6 +12,9 @@ export interface QuestionKey {
 }
 
 export interface ScoreRow {
+  kind?: string;
+  part?: number;
+  partTitle?: string;
   number: number;
   response: string;
   answer: string;
