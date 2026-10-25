@@ -27,6 +27,7 @@ const defaults: HistoryFilters = {skill: '', mode: '', days: 0, test: '', search
 export const ProgressView: React.FC<Props> = ({attempts, readOnly = false, review = false, getAttemptPath, profile, selectedAttemptId, onSelectAttempt, onBack, onOpenProfileModal}) => {
   const [filters, setFilters] = useState<HistoryFilters>(defaults), [sort, setSort] = useState('recent');
   const [page, setPage] = useState(1);
+  const [view,setView]=useState<'sessions'|'analytics'>('sessions');
   const selected = attempts.find(a => a.id === selectedAttemptId);
   const pathFor = (id: string) => getAttemptPath?.(id) || '/history/' + encodeURIComponent(id);
   const Table = readOnly ? PaginatedTable : 'table';
@@ -64,12 +65,12 @@ export const ProgressView: React.FC<Props> = ({attempts, readOnly = false, revie
         <button className="studio-quiet" onClick={() => {setFilters(defaults); setPage(1);}}>Reset filters</button>
         <p className="studio-small history-filter-summary" role="status">{visible.length} of {attempts.length} saved sessions · all statistics below use this selection.</p>
       </section>
-      <HistoryAnalytics attempts={visible} getAttemptPath={getAttemptPath}/>
-      <div className="section-heading"><h2>Your sessions</h2><label>Sort<Select aria-label="Sort history sessions" value={sort} onChange={e => {setSort(e.target.value); setPage(1);}}><option value="recent">Most recent</option><option value="accuracy">Lowest accuracy first</option><option value="time">Longest time first</option></Select></label></div>
+      <div className="student-history-switch" aria-label="History view"><button aria-pressed={view==='sessions'} onClick={()=>setView('sessions')}>Saved sessions</button><button aria-pressed={view==='analytics'} onClick={()=>setView('analytics')}>Performance insights</button></div><section hidden={view!=='analytics'} aria-label="Performance insights"><HistoryAnalytics attempts={visible} getAttemptPath={getAttemptPath}/></section>
+      {view==='sessions'&&<><div className="section-heading"><h2>Your sessions</h2><label>Sort<Select aria-label="Sort history sessions" value={sort} onChange={e => {setSort(e.target.value); setPage(1);}}><option value="recent">Most recent</option><option value="accuracy">Lowest accuracy first</option><option value="time">Longest time first</option></Select></label></div>
       <div className="history-list">{visible.slice(0, page * 20).map(a => <a key={a.id} className="history-card" href={pathFor(a.id)} onClick={e => open(e, a.id)}><span className="history-icon"><Clock size={22}/></span><div><span className="collection-label">{sessionMode(a.mode)} · {a.skill}</span><h3>{a.testTitle}</h3><small>{date(attemptTime(a))} · {formatDuration(a.elapsedSeconds)} · {percent(summarize([a]).accuracy)} accuracy · {a.syncedAt ? 'Synced to account' : 'Saved on this device'}</small></div><div className="history-score"><strong>{a.band?.toFixed(1) ?? a.result.correct + '/' + a.result.gradable}</strong><span>{a.band == null ? 'correct' : 'estimated band'}</span></div><ArrowUpRight size={19}/></a>)}</div>
       {visible.length > page * 20 && <button className="studio-secondary" onClick={() => setPage(n => n + 1)}>Show more sessions</button>}
-      {!visible.length && <div className="studio-empty"><h3>No sessions match these filters.</h3><p>Change the selection or reset the filters to see your history.</p></div>}
+      </>}{!visible.length && <div className="studio-empty"><h3>No sessions match these filters.</h3><p>Change the selection or reset the filters to see your history.</p></div>}
     </>}
-    {!attempts.length && <div className="studio-empty"><TrendingUp size={36}/><h3>Your story starts with one session.</h3><p>Finish a test to see your answers, score, and progress here. Sign in to sync saved results.</p></div>}
+    {!attempts.length && <div className="studio-empty"><TrendingUp size={36}/><h3>Your story starts with one session.</h3><p>Finish a test to see your answers, score, and progress here. Sign in to sync saved results.</p><a className="studio-primary" href="/practice">Find your first practice</a></div>}
   </div>;
 };
